@@ -1,0 +1,44 @@
+
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: java-compiler-backend
+    ports:
+      - "8081:8080"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - JAVA_OPTS=-Xmx512m -Xms256m
+      - LOGGING_LEVEL_COM_ALTIMETRIK=DEBUG
+    volumes:
+      - /tmp:/tmp  # For temporary compilation directories
+      - "${BINDMOUNT_DIR:-C:/Users/hpande/Documents/workspace/bindmount}:/data" # Persistent H2 DB (Windows bind mount)
+    networks:
+      - java-compiler-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/compile/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: java-compiler-frontend
+    ports:
+      - "80:3000"
+
+    networks:
+      - java-compiler-network
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+networks:
+  java-compiler-network:
+    driver: bridge

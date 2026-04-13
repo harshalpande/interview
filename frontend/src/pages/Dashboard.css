@@ -1,0 +1,149 @@
+.dashboard {
+  width: min(1280px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 28px 0 42px;
+}
+
+.dashboard-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 20px;
+}
+
+.dashboard-header h2 {
+  margin: 0;
+  font-size: clamp(1.4rem, 2vw, 2rem);
+}
+
+.start-button-container {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 18px;
+}
+
+.start-interview-btn {
+  min-width: 180px;
+}
+
+.interviews-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+}
+
+.interviews-table thead th {
+  padding: 16px 18px;
+  background: #eef4f8;
+  color: var(--text);
+  font-size: 0.92rem;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.interviews-table tbody td {
+  padding: 18px;
+  border-top: 1px solid #e6edf4;
+  vertical-align: top;
+  color: var(--text);
+}
+
+.summary-cell {
+  min-width: 220px;
+  color: var(--text-soft);
+}
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 12px;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.status-created {
+  background: #e4f3f6;
+  color: #0a6474;
+}
+
+.status-waiting_join {
+  background: #fff1d6;
+  color: #925f0f;
+}
+
+.status-active {
+  background: #e2f6ec;
+  color: #1b7b4c;
+}
+
+.status-ended {
+  background: #e8edf4;
+  color: #42576f;
+}
+
+.status-expired {
+  background: #ffe7e4;
+  color: #a53831;
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-top: 22px;
+  padding: 18px 22px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+}
+
+.pagination label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-soft);
+}
+
+.pagination select {
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: #fff;
+  font: inherit;
+}
+
+.page-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.error {
+  margin-bottom: 18px;
+}
+
+@media (max-width: 900px) {
+  .dashboard {
+    width: min(100% - 20px, 100%);
+    padding: 18px 0 28px;
+  }
+
+  .dashboard-header,
+  .pagination {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .interviews-table {
+    display: block;
+    overflow-x: auto;
+  }
+}

@@ -1,0 +1,47 @@
+.disclaimer-card {
+  max-width: 860px;
+}
+
+.disclaimer-identity {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px 20px;
+  padding: 16px;
+  background: #f5f7fb;
+  border: 1px solid #d7dfea;
+  border-radius: 16px;
+  margin: 20px 0;
+}
+
+.disclaimer-identity > div {
+  white-space: nowrap;
+}
+
+.disclaimer-list {
+  margin: 0;
+  padding-left: 20px;
+  color: #284256;
+  line-height: 1.7;
+}
+
+.disclaimer-list li {
+  margin-bottom: 12px;
+}
+
+.disclaimer-actions {
+  margin-top: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.checkbox-label {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  color: #284256;
+}
+
+.accept-btn {
+  align-self: flex-start;
+}

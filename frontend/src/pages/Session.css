@@ -1,0 +1,261 @@
+.session-page {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.session-page.fullscreen {
+  padding-top: 8px;
+}
+
+.fullscreen-hud {
+  position: fixed;
+  top: 10px;
+  right: 18px;
+  z-index: 45;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(212, 223, 235, 0.9);
+  box-shadow: 0 18px 34px rgba(16, 37, 66, 0.18);
+}
+
+.fullscreen-timer {
+  font-weight: 800;
+  color: var(--text);
+}
+
+.session-banner {
+  display: grid;
+  grid-template-columns: 1.6fr auto auto;
+  gap: 18px;
+  padding: 24px;
+  background: linear-gradient(135deg, #16324f 0%, #0b7285 100%);
+  color: #fff;
+  border-radius: var(--radius-lg);
+  box-shadow: 0 18px 36px rgba(12, 52, 79, 0.22);
+}
+
+.banner-participants {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.participant-card {
+  display: grid;
+  gap: 2px;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: 18px;
+}
+
+.participant-role {
+  font-size: 0.76rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  opacity: 0.84;
+}
+
+.participant-name {
+  font-size: 1.06rem;
+  font-weight: 700;
+}
+
+.role-indicator,
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: start;
+  padding: 10px 16px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.session-status {
+  display: grid;
+  justify-items: end;
+  gap: 10px;
+}
+
+.status-meta {
+  font-size: 0.9rem;
+  opacity: 0.9;
+}
+
+.timer {
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.timer-live {
+  padding: 10px 16px;
+  border-radius: 999px;
+  background: rgba(14, 27, 42, 0.26);
+}
+
+.session-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.session-editor-btn {
+  border: none;
+  box-shadow: none;
+}
+
+.session-editor-btn-start {
+  background: var(--success);
+  color: #fff;
+}
+
+.session-editor-btn-end {
+  background: var(--danger);
+  color: #fff;
+}
+
+.session-editor-btn-start:hover:not(:disabled),
+.session-editor-btn-end:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.control-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 10px 18px;
+  border: none;
+  border-radius: 999px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.18s ease, opacity 0.18s ease;
+}
+
+.control-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.control-btn:disabled {
+  opacity: 0.66;
+  cursor: not-allowed;
+}
+
+.btn-start {
+  background: var(--success);
+  color: #fff;
+}
+
+.btn-extend {
+  background: #f2c265;
+  color: #593b06;
+}
+
+.btn-end {
+  background: var(--danger);
+  color: #fff;
+}
+
+.waiting-panel,
+.session-end-card {
+  padding: 24px 26px;
+}
+
+.waiting-panel p,
+.session-end-card p {
+  margin-bottom: 0;
+  color: var(--text-soft);
+  line-height: 1.7;
+}
+
+.feedback-section.end-screen {
+  margin-top: 18px;
+}
+
+.feedback-form {
+  display: grid;
+  gap: 16px;
+}
+
+.feedback-field {
+  display: grid;
+  gap: 8px;
+}
+
+.feedback-field label {
+  font-weight: 600;
+}
+
+.feedback-textarea {
+  min-height: 140px;
+  resize: vertical;
+}
+
+.feedback-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-start;
+  margin-top: 10px;
+}
+
+.share-url-container {
+  display: grid;
+  gap: 12px;
+}
+
+.share-url-field {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: center;
+}
+
+.share-url-input {
+  font-family: var(--mono);
+}
+
+.reconnecting {
+  position: fixed;
+  inset: 20px 20px auto auto;
+  z-index: 40;
+  padding: 12px 18px;
+  border-radius: 999px;
+  background: rgba(16, 37, 66, 0.92);
+  color: #fff;
+  box-shadow: 0 18px 34px rgba(16, 37, 66, 0.28);
+}
+
+@media (max-width: 1100px) {
+  .session-banner {
+    grid-template-columns: 1fr;
+  }
+
+  .session-status {
+    justify-items: start;
+  }
+}
+
+@media (max-width: 760px) {
+  .banner-participants {
+    grid-template-columns: 1fr;
+  }
+
+  .share-url-field {
+    grid-template-columns: 1fr;
+  }
+
+  .feedback-actions,
+  .session-controls {
+    flex-direction: column;
+  }
+}

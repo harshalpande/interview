@@ -1,0 +1,645 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Online Java Compiler</title>
+    <link href="https://cdn.jsdelivr.net/npm/monaco-editor@0.50.0/min/vs/editor.min.css" rel="stylesheet" />
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #1e1e1e;
+            color: #d4d4d4;
+            height: 100vh;
+        }
+
+        .header {
+            background: #252526;
+            border-bottom: 1px solid #3e3e42;
+            padding: 16px 24px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+        }
+
+        .header h1 {
+            font-size: 24px;
+            font-weight: 500;
+        }
+
+        .container {
+            display: flex;
+            height: calc(100vh - 64px);
+            gap: 0;
+        }
+
+        .editor-section {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            border-right: 1px solid #3e3e42;
+            min-width: 0;
+        }
+
+        .editor-toolbar {
+            background: #252526;
+            border-bottom: 1px solid #3e3e42;
+            padding: 8px 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .toolbar-title {
+            font-size: 13px;
+            font-weight: 500;
+            flex: 1;
+        }
+
+        .toolbar-buttons {
+            display: flex;
+            gap: 8px;
+        }
+
+        button {
+            padding: 6px 12px;
+            background: #3e3e42;
+            color: #cccccc;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            transition: background 0.2s;
+        }
+
+        button:hover {
+            background: #464647;
+        }
+
+        button.primary {
+            background: #0e639c;
+            color: #ffffff;
+        }
+
+        button.primary:hover {
+            background: #1177bb;
+        }
+
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        #editor {
+            flex: 1;
+            min-height: 0;
+        }
+
+        .output-section {
+            flex: 0 0 35%;
+            display: flex;
+            flex-direction: column;
+            background: #1e1e1e;
+            min-width: 300px;
+        }
+
+        .output-toolbar {
+            background: #252526;
+            border-bottom: 1px solid #3e3e42;
+            padding: 8px 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .tabs {
+            display: flex;
+            background: #252526;
+            border-bottom: 1px solid #3e3e42;
+        }
+
+        .tab {
+            flex: 1;
+            padding: 8px 16px;
+            border: none;
+            background: none;
+            color: #858585;
+            font-size: 13px;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+        }
+
+        .tab:hover {
+            color: #d4d4d4;
+        }
+
+        .tab.active {
+            color: #d4d4d4;
+            border-bottom-color: #0e639c;
+        }
+
+        .output-content {
+            flex: 1;
+            overflow: auto;
+            padding: 12px;
+        }
+
+        .output-text {
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            line-height: 1.5;
+            color: #d4d4d4;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            user-select: text;
+        }
+
+        .output-text.empty {
+            color: #858585;
+            font-style: italic;
+        }
+
+        .output-text.error {
+            color: #f48771;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border: 2px solid #3e3e42;
+            border-radius: 50%;
+            border-top-color: #0e639c;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        @media (max-width: 900px) {
+            .container {
+                flex-direction: column;
+            }
+
+            .editor-section {
+                border-right: none;
+                border-bottom: 1px solid #3e3e42;
+                flex: 1;
+            }
+
+            .output-section {
+                flex: 0 0 30%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Online Java Compiler</h1>
+    </div>
+
+    <div class="container">
+        <div class="editor-section">
+            <div class="editor-toolbar">
+                <div class="toolbar-title">Java Code Editor</div>
+                <div class="toolbar-buttons">
+                    <button onclick="resetCode()">Reset</button>
+                    <button class="primary" onclick="runCode()" id="runBtn">▶ Run</button>
+                </div>
+            </div>
+            <div id="editor" style="flex: 1;"></div>
+        </div>
+
+        <div class="output-section">
+            <div class="tabs">
+                <button class="tab active" onclick="switchTab('output')">Output</button>
+                <button class="tab" onclick="switchTab('error')">Errors</button>
+            </div>
+            <div class="output-content">
+                <div id="output-tab" class="output-tab" style="display: block;">
+                    <div class="output-text" id="stdout">
+                        <span class="empty">(no output)</span>
+                    </div>
+                </div>
+                <div id="error-tab" class="output-tab" style="display: none;">
+                    <div class="output-text error" id="stderr">
+                        <span class="empty">(no errors)</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.50.0/min/vs/loader.min.js"></script>
+    <script>
+        const API_URL = 'http://localhost:8080/api';
+        let editor;
+
+        const defaultCode = `public class Solution {
+    public static void main(String[] args) {
+        System.out.println("Hello, World!");
+    }
+}`;
+
+        // Configure and load Monaco
+        require.config({ paths: { 'vs': 'https://cdn.jsdelivr.net/npm/monaco-editor@0.50.0/min/vs' }});
+
+        require(['vs/editor/editor.main'], function() {
+            console.log('✓ Monaco loaded successfully!');
+            
+            // Register Java
+            monaco.languages.register({ id: 'java' });
+            
+            // Define Java syntax
+            monaco.languages.setMonarchTokensProvider('java', {
+                tokenizer: {
+                    root: [
+                        [/\/\/.*$/, 'comment'],
+                        [/\/\*/, 'comment', '@comment'],
+                        [/"([^"\\]|\\.)*"/, 'string'],
+                        [/'([^'\\]|\\.)*'/, 'string'],
+                        [/\b\d+\b/, 'number'],
+                        [/\b(abstract|assert|boolean|break|byte|case|catch|char|class|const|continue|default|do|double|else|enum|extends|false|final|finally|float|for|goto|if|implements|import|instanceof|int|interface|long|native|new|null|package|private|protected|public|return|short|static|strictfp|super|switch|synchronized|this|throw|throws|transient|true|try|void|volatile|while)\b/, 'keyword'],
+                        [/\b(System|String|Integer|Double|Float|Boolean|Object|ArrayList|HashMap)\b/, 'type'],
+                        [/[a-zA-Z_][a-zA-Z0-9_]*/, 'identifier'],
+                    ],
+                    comment: [
+                        [/[^*/]+/, 'comment'],
+                        [/\*\//, 'comment', '@pop'],
+                        [/[*/]/, 'comment']
+                    ]
+                }
+            });
+            
+            // Define theme
+            monaco.editor.defineTheme('java-dark', {
+                base: 'vs-dark',
+                inherit: true,
+                rules: [
+                    { token: 'comment', foreground: '6A9955' },
+                    { token: 'keyword', foreground: '569CD6' },
+                    { token: 'type', foreground: '4EC9B0' },
+                    { token: 'string', foreground: 'CE9178' },
+                    { token: 'number', foreground: 'B5CEA8' },
+                ]
+            });
+            
+            // Create editor
+            editor = monaco.editor.create(document.getElementById('editor'), {
+                value: defaultCode,
+                language: 'java',
+                theme: 'java-dark',
+                minimap: { enabled: false },
+                fontSize: 14,
+                lineNumbers: 'on',
+                scrollBeyondLastLine: false,
+                wordWrap: 'on',
+                automaticLayout: true
+            });
+            
+            console.log('✓ Editor is ready! Start typing Java code.');
+        });
+
+        async function runCode() {
+            const runBtn = document.getElementById('runBtn');
+            
+            if (!editor) {
+                alert('Editor not initialized yet. Please wait...');
+                return;
+            }
+            
+            const sourceCode = editor.getValue().trim();
+            
+            if (!sourceCode) {
+                document.getElementById('stdout').innerHTML = '<span class="empty">(no code to run)</span>';
+                switchTab('output');
+                return;
+            }
+            
+            runBtn.disabled = true;
+            runBtn.innerHTML = '<span class="spinner"></span> Running...';
+
+            try {
+                const response = await fetch(`${API_URL}/compile/run`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        sourceCode,
+                        timeoutMs: 5000,
+                        memoryLimitMb: 512
+                    })
+                });
+
+                const data = await response.json();
+                const stdoutElem = document.getElementById('stdout');
+                const stderrElem = document.getElementById('stderr');
+
+                stdoutElem.innerHTML = data.stdout || '<span class="empty">(no output)</span>';
+                
+                if (data.stderr) {
+                    stderrElem.innerHTML = data.stderr;
+                    switchTab('error');
+                } else if (data.compileErrors && data.compileErrors.length > 0) {
+                    stderrElem.innerHTML = data.compileErrors.join('\n');
+                    switchTab('error');
+                } else {
+                    stderrElem.innerHTML = '<span class="empty">(no errors)</span>';
+                    switchTab('output');
+                }
+
+            } catch (error) {
+                document.getElementById('stderr').innerHTML = `Error: ${error.message}`;
+                switchTab('error');
+            } finally {
+                runBtn.disabled = false;
+                runBtn.innerHTML = '▶ Run';
+            }
+        }
+
+        function resetCode() {
+            if (editor) {
+                editor.setValue(defaultCode);
+            }
+        }
+
+        function switchTab(tab) {
+            document.querySelectorAll('.output-tab').forEach(el => el.style.display = 'none');
+            document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
+
+            if (tab === 'output') {
+                document.getElementById('output-tab').style.display = 'block';
+                document.querySelectorAll('.tab')[0].classList.add('active');
+            } else {
+                document.getElementById('error-tab').style.display = 'block';
+                document.querySelectorAll('.tab')[1].classList.add('active');
+            }
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                e.preventDefault();
+                runCode();
+            }
+        });
+    </script>
+</body>
+</html>
+    <script>
+        const API_URL = 'http://localhost:8080/api';
+        let editor;
+
+        const defaultCode = `public class Solution {
+    public static void main(String[] args) {
+        System.out.println("Hello, World!");
+    }
+}`;
+
+        const javaKeywords = [
+            'abstract', 'assert', 'boolean', 'break', 'byte', 'case', 'catch', 'char', 'class', 'const',
+            'continue', 'default', 'do', 'double', 'else', 'enum', 'extends', 'false', 'final', 'finally',
+            'float', 'for', 'goto', 'if', 'implements', 'import', 'instanceof', 'int', 'interface', 'long',
+            'native', 'new', 'null', 'package', 'private', 'protected', 'public', 'return', 'short', 'static',
+            'strictfp', 'super', 'switch', 'synchronized', 'this', 'throw', 'throws', 'transient', 'true',
+            'try', 'void', 'volatile', 'while'
+        ];
+
+        function initializeMonaco() {
+            console.log('Starting Monaco initialization...');
+            
+            // Wait for require to be available
+            if (typeof require === 'undefined') {
+                console.log('Waiting for Monaco loader...');
+                setTimeout(initializeMonaco, 100);
+                return;
+            }
+
+            console.log('✓ Monaco loader found');
+            require.config({ paths: { 'vs': 'https://unpkg.com/monaco-editor@0.50.0/min/vs' }});
+            
+            require(['vs/editor/editor.main'], function() {
+                console.log('✓ Monaco editor main loaded');
+                initEditor();
+            });
+        }
+
+        function initEditor() {
+            try {
+                console.log('Initializing editor...');
+                
+                monaco.languages.register({ id: 'java' });
+                console.log('✓ Java language registered');
+                
+                monaco.languages.setMonarchTokensProvider('java', {
+                    tokenizer: {
+                        root: [
+                            [/\/\/.*$/, 'comment'],
+                            [/\/\*/, 'comment', '@comment'],
+                            [/"([^"\\]|\\.)*"/, 'string'],
+                            [/'([^'\\]|\\.)*'/, 'string'],
+                            [/\b\d+\b/, 'number'],
+                            [/\b(abstract|assert|boolean|break|byte|case|catch|char|class|const|continue|default|do|double|else|enum|extends|false|final|finally|float|for|goto|if|implements|import|instanceof|int|interface|long|native|new|null|package|private|protected|public|return|short|static|strictfp|super|switch|synchronized|this|throw|throws|transient|true|try|void|volatile|while)\b/, 'keyword'],
+                            [/\b(System|String|Integer|Double|Float|Boolean|Object|ArrayList|HashMap|List|Map|Set)\b/, 'type'],
+                            [/[a-zA-Z_][a-zA-Z0-9_]*/, 'identifier'],
+                            [/[{}()\[\]]/, 'delimiter'],
+                            [/[+\-*/%=<>&|^!?:]/, 'operator'],
+                        ],
+                        comment: [
+                            [/[^*/]+/, 'comment'],
+                            [/\*\//, 'comment', '@pop'],
+                            [/[*/]/, 'comment']
+                        ]
+                    }
+                });
+                console.log('✓ Java tokenizer configured');
+                
+                monaco.editor.defineTheme('java-dark', {
+                    base: 'vs-dark',
+                    inherit: true,
+                    rules: [
+                        { token: 'comment', foreground: '6A9955' },
+                        { token: 'keyword', foreground: '569CD6' },
+                        { token: 'type', foreground: '4EC9B0' },
+                        { token: 'string', foreground: 'CE9178' },
+                        { token: 'number', foreground: 'B5CEA8' },
+                        { token: 'identifier', foreground: 'D4D4D4' },
+                        { token: 'operator', foreground: 'D4D4D4' },
+                        { token: 'delimiter', foreground: 'D4D4D4' },
+                    ]
+                });
+                console.log('✓ Theme configured');
+                
+                const editorContainer = document.getElementById('editor');
+                if (!editorContainer) {
+                    console.error('✗ Editor container not found');
+                    return;
+                }
+                
+                editor = monaco.editor.create(editorContainer, {
+                    value: defaultCode,
+                    language: 'java',
+                    theme: 'java-dark',
+                    minimap: { enabled: false },
+                    fontSize: 14,
+                    lineNumbers: 'on',
+                    scrollBeyondLastLine: false,
+                    wordWrap: 'on',
+                    formatOnPaste: true,
+                    autoClosingBrackets: 'always',
+                    autoClosingQuotes: 'always',
+                    autoIndent: 'full'
+                });
+                console.log('✓ Editor created successfully - READY TO TYPE!');
+                
+                monaco.languages.registerCompletionItemProvider('java', {
+                    provideCompletionItems: (model, position) => {
+                        const suggestions = [];
+                        
+                        javaKeywords.forEach(keyword => {
+                            suggestions.push({
+                                label: keyword,
+                                kind: monaco.languages.CompletionItemKind.Keyword,
+                                insertText: keyword,
+                                detail: 'Java keyword',
+                                sortText: '1' + keyword
+                            });
+                        });
+                        
+                        ['println', 'print', 'length', 'charAt', 'substring', 'equals'].forEach(method => {
+                            suggestions.push({
+                                label: method + '()',
+                                kind: monaco.languages.CompletionItemKind.Method,
+                                insertText: method + '(',
+                                detail: 'Method',
+                                sortText: '2' + method
+                            });
+                        });
+                        
+                        return { suggestions };
+                    }
+                });
+                console.log('✓ Autocomplete registered');
+                console.log('✓✓✓ READY! Start typing Java code now!');
+                
+            } catch (err) {
+                console.error('✗ Error initializing editor:', err);
+                console.error(err.stack);
+            }
+        }
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initializeMonaco);
+        } else {
+            initializeMonaco();
+        }
+
+        async function runCode() {
+            const runBtn = document.getElementById('runBtn');
+            
+            if (!editor) {
+                console.error('Editor not initialized');
+                const stderrElem = document.getElementById('stderr');
+                stderrElem.innerHTML = 'Error: Editor not initialized. Please refresh the page.';
+                stderrElem.classList.remove('empty');
+                switchTab('error');
+                return;
+            }
+            
+            const sourceCode = editor.getValue().trim();
+            
+            if (!sourceCode) {
+                const stdoutElem = document.getElementById('stdout');
+                stdoutElem.innerHTML = '<span class="empty">(no code to run)</span>';
+                stdoutElem.classList.add('empty');
+                switchTab('output');
+                return;
+            }
+            
+            runBtn.disabled = true;
+            runBtn.innerHTML = '<span class="spinner"></span> Running...';
+
+            try {
+                const response = await fetch(`${API_URL}/compile/run`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        sourceCode,
+                        timeoutMs: 5000,
+                        memoryLimitMb: 512
+                    })
+                });
+
+                const data = await response.json();
+
+                const stdoutElem = document.getElementById('stdout');
+                const stderrElem = document.getElementById('stderr');
+
+                if (data.stdout) {
+                    stdoutElem.innerHTML = data.stdout;
+                    stdoutElem.classList.remove('empty');
+                } else {
+                    stdoutElem.innerHTML = '<span class="empty">(no output)</span>';
+                    stdoutElem.classList.add('empty');
+                }
+
+                if (data.stderr) {
+                    stderrElem.innerHTML = data.stderr;
+                    stderrElem.classList.remove('empty');
+                } else if (data.compileErrors && data.compileErrors.length > 0) {
+                    stderrElem.innerHTML = data.compileErrors.join('\n');
+                    stderrElem.classList.remove('empty');
+                    switchTab('error');
+                } else {
+                    stderrElem.innerHTML = '<span class="empty">(no errors)</span>';
+                    stderrElem.classList.add('empty');
+                }
+
+                if (data.stdout) switchTab('output');
+
+            } catch (error) {
+                console.error('Execution error:', error);
+                const stderrElem = document.getElementById('stderr');
+                stderrElem.innerHTML = `Error: ${error.message}`;
+                stderrElem.classList.remove('empty');
+                switchTab('error');
+            } finally {
+                runBtn.disabled = false;
+                runBtn.innerHTML = '▶ Run';
+            }
+        }
+
+        function resetCode() {
+            if (editor) {
+                editor.setValue(defaultCode);
+            }
+        }
+
+        function switchTab(tab) {
+            document.querySelectorAll('.output-tab').forEach(el => el.style.display = 'none');
+            document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
+
+            if (tab === 'output') {
+                document.getElementById('output-tab').style.display = 'block';
+                document.querySelectorAll('.tab')[0].classList.add('active');
+            } else {
+                document.getElementById('error-tab').style.display = 'block';
+                document.querySelectorAll('.tab')[1].classList.add('active');
+            }
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                e.preventDefault();
+                runCode();
+            }
+        });
+    </script>
+</body>
+</html>
