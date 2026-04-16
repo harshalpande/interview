@@ -24,6 +24,9 @@ public class Feedback {
     private String comments;
     
     private Boolean recommendation;
+
+    @Enumerated(EnumType.STRING)
+    private com.altimetrik.interview.enums.RecommendationDecision recommendationDecision;
     
     @CreationTimestamp
     private OffsetDateTime submittedAt;

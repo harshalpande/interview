@@ -27,4 +27,5 @@
 - Sandbox is “best effort” (process + limits), not a hardened container sandbox.
 - AuthN/AuthZ is currently open (no login / RBAC).
 - H2 is fine for dev/demo; production would typically use Postgres/MySQL with migrations.
-
+- Suspicious external drag attempts into the editor are blocked in the UI, but the corresponding activity event is still not emitted reliably in all browser drag scenarios.
+  - This needs a follow-up implementation pass before it can be treated as complete interviewer-visible monitoring.

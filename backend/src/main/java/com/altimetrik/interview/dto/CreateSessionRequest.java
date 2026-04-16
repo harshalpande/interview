@@ -2,8 +2,8 @@ package com.altimetrik.interview.dto;
 
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
 import lombok.Data;
+import com.altimetrik.interview.enums.TechnologySkill;
 
 @Data
 public class CreateSessionRequest {
@@ -21,4 +21,8 @@ public class CreateSessionRequest {
     private String intervieweeEmail;
     
     private String title;
+
+    private TechnologySkill technology;
+
+    private String interviewerTimeZone;
 }

@@ -1,6 +1,8 @@
 import axios, { AxiosInstance } from 'axios';
 import type { 
   AcceptDisclaimerRequest,
+  ActivityEvent,
+  ActivityEventRequest,
   CreateSessionRequest, 
   EndSessionRequest,
   JoinSessionRequest,
@@ -41,9 +43,22 @@ class SessionApiClient {
     }
   }
 
-  async listSessions(page: number = 0, size: number = 20): Promise<{ content: SessionResponse[]; totalPages: number; totalElements: number; number: number; size: number; }> {
+  async listSessions(
+    page: number = 0,
+    size: number = 20,
+    sortBy: 'createdAt' | 'status' | 'summary' = 'createdAt',
+    direction: 'asc' | 'desc' = 'desc',
+    search: string = ''
+  ): Promise<{ content: SessionResponse[]; totalPages: number; totalElements: number; number: number; size: number; }> {
     try {
-      const params = new URLSearchParams({ page: page.toString(), size: size.toString() });
+      const params = new URLSearchParams({
+        page: page.toString(),
+        size: size.toString(),
+        sort: `${sortBy},${direction}`,
+      });
+      if (search.trim()) {
+        params.set('search', search.trim());
+      }
       const response = await this.axiosInstance.get<any>(`/sessions?${params.toString()}`);
       return response.data;
     } catch (error) {
@@ -108,6 +123,15 @@ class SessionApiClient {
   async endSession(id: string, request: EndSessionRequest): Promise<SessionResponse> {
     try {
       const response = await this.axiosInstance.post<SessionResponse>(`/sessions/${id}/end`, request);
+      return response.data;
+    } catch (error) {
+      throw this.handleError(error);
+    }
+  }
+
+  async recordActivityEvent(id: string, request: ActivityEventRequest): Promise<ActivityEvent> {
+    try {
+      const response = await this.axiosInstance.post<ActivityEvent>(`/sessions/${id}/activity-events`, request);
       return response.data;
     } catch (error) {
       throw this.handleError(error);

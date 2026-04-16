@@ -1,6 +1,8 @@
 package com.altimetrik.interview.controller;
 
 import com.altimetrik.interview.dto.AcceptDisclaimerRequest;
+import com.altimetrik.interview.dto.ActivityEventDto;
+import com.altimetrik.interview.dto.ActivityEventRequest;
 import com.altimetrik.interview.dto.CodeUpdateRequest;
 import com.altimetrik.interview.dto.CreateSessionRequest;
 import com.altimetrik.interview.dto.AbandonSessionRequest;
@@ -43,16 +45,17 @@ public class SessionController {
     }
 
     @GetMapping
-    public ResponseEntity<?> listSessions(Pageable pageable) {
+    public ResponseEntity<?> listSessions(Pageable pageable,
+                                          @RequestParam(required = false) String search) {
         if (pageable == null || pageable.getSort().isUnsorted()) {
             Pageable defaultPageable = PageRequest.of(
                 pageable != null ? pageable.getPageNumber() : 0,
                 pageable != null && pageable.getPageSize() > 0 ? pageable.getPageSize() : 20,
                 Sort.by("createdAt").descending()
             );
-            return ResponseEntity.ok(sessionService.listSessions(defaultPageable));
+            return ResponseEntity.ok(sessionService.listSessions(defaultPageable, search));
         }
-        return ResponseEntity.ok(sessionService.listSessions(pageable));
+        return ResponseEntity.ok(sessionService.listSessions(pageable, search));
     }
 
     @PostMapping("/{id}/disclaimer")
@@ -113,6 +116,19 @@ public class SessionController {
         SessionResponse response = sessionService.abandonSession(id, finalCode);
         broadcastSession(response, "SESSION_END", "Interview marked incomplete");
         return ResponseEntity.ok(response);
+    }
+
+    @PostMapping("/{id}/activity-events")
+    public ResponseEntity<ActivityEventDto> recordActivityEvent(@PathVariable String id,
+                                                                @Valid @RequestBody ActivityEventRequest request) {
+        ActivityEventDto event = sessionService.recordActivityEvent(id, request);
+        messagingTemplate.convertAndSend("/topic/session/" + id, SessionSocketMessage.builder()
+                .type("ACTIVITY_EVENT")
+                .sessionId(id)
+                .activityEvent(event)
+                .message(event.getDetail())
+                .build());
+        return ResponseEntity.ok(event);
     }
 
     @MessageMapping("/session/{id}/code")

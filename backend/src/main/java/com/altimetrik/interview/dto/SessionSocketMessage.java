@@ -12,5 +12,6 @@ public class SessionSocketMessage {
     private String code;
     private Integer timeLeft;
     private SessionResponse session;
+    private ActivityEventDto activityEvent;
     private String message;
 }

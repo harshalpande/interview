@@ -3,14 +3,17 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import Editor from '../components/Editor';
 import ShareUrlToggle from '../components/ShareUrlToggle';
+import ToastStack, { ToastItem } from '../components/ToastStack';
 import { useSessionStore } from '../stores/sessionStore';
 import { sessionApi } from '../services/sessionApi';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useBackGuard } from '../hooks/useBackGuard';
-import type { FeedbackRating, ParticipantRole, SessionResponse, SessionSocketMessage, SessionStatus } from '../types/session';
-import { formatDateTime, getLocalTimeZoneLabel } from '../utils/dateTime';
+import type { ActivityEventType, FeedbackRating, ParticipantRole, RecommendationDecision, SessionResponse, SessionSocketMessage, SessionStatus } from '../types/session';
+import { formatDateTime, formatTimeZoneLabel } from '../utils/dateTime';
 
 import './Session.css';
+
+const FEEDBACK_COMMENT_LIMIT = 4000;
 
 const STATUS_LABELS: Record<SessionStatus, string> = {
   CREATED: 'Ready to Start',
@@ -34,11 +37,15 @@ const Session: React.FC = () => {
   const setCurrentCode = useSessionStore((state) => state.setCurrentCode);
   const [timeLeft, setTimeLeft] = React.useState<number | null>(null);
   const [isFullscreen, setIsFullscreen] = React.useState(false);
+  const [toastItems, setToastItems] = React.useState<ToastItem[]>([]);
   const [feedback, setFeedback] = React.useState({
     rating: 'GOOD' as FeedbackRating,
     comments: '',
-    recommendation: true,
+    recommendationDecision: 'YES' as RecommendationDecision,
   });
+  const lastTabHiddenAtRef = React.useRef(0);
+  const lastExternalDragAtRef = React.useRef(0);
+  const internalClipboardTextsRef = React.useRef<Map<string, number>>(new Map());
 
   const { data: session, isLoading, error } = useQuery({
     queryKey: ['session', sessionId],
@@ -53,6 +60,9 @@ const Session: React.FC = () => {
       return 1500;
     },
   });
+
+  const interviewer = session?.participants.find((participant) => participant.role === 'INTERVIEWER');
+  const interviewee = session?.participants.find((participant) => participant.role === 'INTERVIEWEE');
 
   useBackGuard({
     enabled: true,
@@ -74,11 +84,17 @@ const Session: React.FC = () => {
         setFeedback({
           rating: session.feedback.rating,
           comments: session.feedback.comments,
-          recommendation: session.feedback.recommendation,
+          recommendationDecision: session.feedback.recommendationDecision,
         });
       }
     }
   }, [session, setSession]);
+
+  React.useEffect(() => {
+    if (feedback.rating === 'BAD' && feedback.recommendationDecision !== 'NO') {
+      setFeedback((prev) => ({ ...prev, recommendationDecision: 'NO' }));
+    }
+  }, [feedback.rating, feedback.recommendationDecision]);
 
   const refreshSession = React.useCallback(
     (nextSession: SessionResponse) => {
@@ -88,6 +104,57 @@ const Session: React.FC = () => {
       setTimeLeft(nextSession.remainingSec);
     },
     [queryClient, sessionId, setSession]
+  );
+
+  const pushPersistentToast = React.useCallback((message: string, tone: ToastItem['tone'] = 'warning') => {
+    const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    setToastItems((prev) => [...prev, { id, message, tone, persistent: true, createdAt: Date.now(), autoCloseMs: 60000 }]);
+  }, []);
+
+  const dismissToast = React.useCallback((id: string) => {
+    setToastItems((prev) => prev.filter((toast) => toast.id !== id));
+  }, []);
+
+  const rememberInternalClipboardText = React.useCallback((text: string) => {
+    const normalized = normalizeClipboardText(text);
+    if (!normalized) {
+      return;
+    }
+
+    const next = new Map(internalClipboardTextsRef.current);
+    next.set(normalized, Date.now());
+
+    if (next.size > 25) {
+      const oldestKey = next.keys().next().value;
+      if (oldestKey) {
+        next.delete(oldestKey);
+      }
+    }
+
+    internalClipboardTextsRef.current = next;
+  }, []);
+
+  const toggleFullscreen = React.useCallback(() => {
+    setIsFullscreen((prev) => !prev);
+  }, []);
+
+  const recordActivityEvent = React.useCallback(
+    async (eventType: ActivityEventType, detail: string) => {
+      if (!sessionId || role !== 'interviewee' || session?.status !== 'ACTIVE') {
+        return;
+      }
+
+      try {
+        await sessionApi.recordActivityEvent(sessionId, {
+          participantRole: 'INTERVIEWEE',
+          eventType,
+          detail,
+        });
+      } catch {
+        // best-effort only
+      }
+    },
+    [role, session?.status, sessionId]
   );
 
   const handleSocketMessage = React.useCallback(
@@ -101,8 +168,11 @@ const Session: React.FC = () => {
       if (typeof message.timeLeft === 'number') {
         setTimeLeft(message.timeLeft);
       }
+      if (message.type === 'ACTIVITY_EVENT' && message.activityEvent && role === 'interviewer') {
+        pushPersistentToast(message.activityEvent.detail, 'warning');
+      }
     },
-    [refreshSession, setCurrentCode]
+    [pushPersistentToast, refreshSession, role, setCurrentCode]
   );
 
   const { isReconnecting, sendCode } = useWebSocket(sessionId || '', handleSocketMessage);
@@ -140,6 +210,23 @@ const Session: React.FC = () => {
       setIsFullscreen(false);
     }
   }, [canFullscreen, isFullscreen]);
+
+  React.useEffect(() => {
+    if (!canFullscreen || session?.status !== 'ACTIVE') {
+      return;
+    }
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'f') {
+        event.preventDefault();
+        event.stopPropagation();
+        toggleFullscreen();
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [canFullscreen, session?.status, toggleFullscreen]);
 
   React.useEffect(() => {
     if (!sessionId) return;
@@ -181,6 +268,29 @@ const Session: React.FC = () => {
     };
   }, [currentCode, session, sessionId]);
 
+  React.useEffect(() => {
+    if (role !== 'interviewee' || !sessionId || session?.status !== 'ACTIVE') {
+      return;
+    }
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState !== 'hidden') {
+        return;
+      }
+
+      const now = Date.now();
+      if (now - lastTabHiddenAtRef.current < 1200) {
+        return;
+      }
+      lastTabHiddenAtRef.current = now;
+
+      void recordActivityEvent('TAB_HIDDEN', `${interviewee?.name?.trim() || 'Interviewee'} switched away from the interview tab or window.`);
+    };
+
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+  }, [interviewee?.name, recordActivityEvent, role, session?.status, sessionId]);
+
   if (isLoading) {
     return <div className="page-shell"><div className="page-card">Loading session...</div></div>;
   }
@@ -189,8 +299,6 @@ const Session: React.FC = () => {
     return <div className="page-shell"><div className="page-card">Unable to load session.</div></div>;
   }
 
-  const interviewer = session.participants.find((participant) => participant.role === 'INTERVIEWER');
-  const interviewee = session.participants.find((participant) => participant.role === 'INTERVIEWEE');
   const isInterviewer = role === 'interviewer';
   const wsRole: ParticipantRole = isInterviewer ? 'INTERVIEWER' : 'INTERVIEWEE';
   const displayedTimeLeft = timeLeft ?? session.remainingSec;
@@ -201,11 +309,13 @@ const Session: React.FC = () => {
   const showEditor = session.status !== 'ENDED' && session.status !== 'EXPIRED';
   const showPreStartState = showEditor && session.status !== 'ACTIVE';
   const waitingForFeedback = isInterviewer && session.status === 'ENDED' && !session.feedback;
+  const waitingJoinLabel = `Waiting for ${interviewee?.name || 'Interviewee'} to join`;
 
   const timerLabel =
     session.status === 'ACTIVE'
       ? `${Math.floor(displayedTimeLeft / 60)}:${(displayedTimeLeft % 60).toString().padStart(2, '0')}`
       : null;
+  const feedbackCharsRemaining = FEEDBACK_COMMENT_LIMIT - feedback.comments.length;
 
   return (
     <div className={`session-page polished-page ${isFullscreen ? 'fullscreen' : ''}`}>
@@ -216,12 +326,12 @@ const Session: React.FC = () => {
           <div className="banner-participants">
             <div className="participant-card">
               <span className="participant-role">Interviewer</span>
-              <span className="participant-name">{interviewer?.name}</span>
+              <span className="participant-name">{interviewer?.name}{interviewer?.timeZone ? ` (${formatTimeZoneLabel(interviewer.timeZone)})` : ''}</span>
               <span>{interviewer?.email}</span>
             </div>
             <div className="participant-card">
               <span className="participant-role">Interviewee</span>
-              <span className="participant-name">{interviewee?.name}</span>
+              <span className="participant-name">{interviewee?.name}{interviewee?.timeZone ? ` (${formatTimeZoneLabel(interviewee.timeZone)})` : ''}</span>
               <span>{interviewee?.email}</span>
             </div>
           </div>
@@ -229,8 +339,9 @@ const Session: React.FC = () => {
           <div className={`role-indicator ${role}`}>Role: {role}</div>
 
           <div className="session-status">
-            <div className="status-chip">{STATUS_LABELS[session.status]}</div>
-            <div className="status-meta">Timezone: {getLocalTimeZoneLabel()}</div>
+            <div className={`status-chip status-chip-${session.status.toLowerCase()}`}>
+              {session.status === 'WAITING_JOIN' ? waitingJoinLabel : STATUS_LABELS[session.status]}
+            </div>
             <div className="status-meta">Created: {formatDateTime(session.createdAt)}</div>
             {session.status === 'ACTIVE' && timerLabel && (
               <div className="timer timer-live">Time left: {timerLabel}</div>
@@ -266,7 +377,7 @@ const Session: React.FC = () => {
 
           {showPreStartState && (
             <div className="waiting-panel">
-              <h3>{session.status === 'WAITING_JOIN' ? 'Waiting for interviewee to join' : 'Interview is ready to start'}</h3>
+              <h3>{session.status === 'WAITING_JOIN' ? waitingJoinLabel : 'Interview is ready to start'}</h3>
               <p>
                 The editor is visible in read-only mode until the interviewer starts the interview. Once started, both
                 participants can collaborate live and the 60 minute countdown begins.
@@ -277,6 +388,53 @@ const Session: React.FC = () => {
           <Editor
             readOnly={session.status !== 'ACTIVE'}
             canRun={session.status === 'ACTIVE'}
+            showResetButton={isInterviewer}
+            onCopyFromEditor={rememberInternalClipboardText}
+            onCutFromEditor={rememberInternalClipboardText}
+            onExternalDropBlocked={(text) => {
+              if (role !== 'interviewee' || session.status !== 'ACTIVE') {
+                return;
+              }
+
+              const now = Date.now();
+              if (now - lastExternalDragAtRef.current < 1200) {
+                return;
+              }
+              lastExternalDragAtRef.current = now;
+
+              void recordActivityEvent(
+                'EXTERNAL_DROP_BLOCKED',
+                `${interviewee?.name?.trim() || 'Interviewee'} tried to drag text into the editor.`
+              );
+            }}
+            onPasteInEditor={(text) => {
+              if (role !== 'interviewee' || session.status !== 'ACTIVE') {
+                return;
+              }
+
+              const normalized = normalizeClipboardText(text);
+              if (normalized && internalClipboardTextsRef.current.has(normalized)) {
+                return;
+              }
+
+              const normalizedCurrentCode = normalizeClipboardText(currentCode || session.latestCode || '');
+              const normalizedWithoutIndent = normalizeClipboardShape(text);
+              const currentCodeWithoutIndent = normalizeClipboardShape(currentCode || session.latestCode || '');
+              if (
+                normalized &&
+                normalized.includes('\n') &&
+                (normalizedCurrentCode.includes(normalized) || currentCodeWithoutIndent.includes(normalizedWithoutIndent))
+              ) {
+                return;
+              }
+
+              const lineCount = text.split(/\r?\n/).length;
+              const charCount = text.length;
+              void recordActivityEvent(
+                'PASTE_IN_EDITOR',
+                `${interviewee?.name?.trim() || 'Interviewee'} pasted ${charCount} characters across ${lineCount} line${lineCount === 1 ? '' : 's'} into the editor.`
+              );
+            }}
             emptyStateMessage={
               session.status !== 'ACTIVE'
                 ? 'Editing and code execution are disabled until the interviewer starts the interview.'
@@ -311,7 +469,7 @@ const Session: React.FC = () => {
             initialCode={currentCode || session.latestCode || ''}
             showFullscreenToggle={canFullscreen}
             isFullscreen={isFullscreen}
-            onToggleFullscreen={() => setIsFullscreen((prev) => !prev)}
+            onToggleFullscreen={toggleFullscreen}
             onCodeChange={(code) => {
               setCurrentCode(code);
               if (session.status === 'ACTIVE') {
@@ -334,7 +492,7 @@ const Session: React.FC = () => {
           <p className="page-subtitle">
             {isInterviewer
               ? 'The editor has been frozen, final code/output have been saved, and your feedback is required before returning to the dashboard.'
-              : 'The coding portion is complete. Final results are being prepared by the interviewer.'}
+              : `The coding test is now complete. ${interviewer?.name || 'The interviewer'} is submitting the feedback. You can check the results with ${interviewer?.name || 'the interviewer'} or the HR.`}
           </p>
 
           {waitingForFeedback ? (
@@ -358,19 +516,30 @@ const Session: React.FC = () => {
                   <textarea
                     id="comments"
                     className="feedback-textarea"
+                    maxLength={FEEDBACK_COMMENT_LIMIT}
                     value={feedback.comments}
-                    onChange={(event) => setFeedback((prev) => ({ ...prev, comments: event.target.value }))}
+                    onChange={(event) =>
+                      setFeedback((prev) => ({
+                        ...prev,
+                        comments: event.target.value.slice(0, FEEDBACK_COMMENT_LIMIT),
+                      }))
+                    }
                   />
+                  <div className={`feedback-counter ${feedbackCharsRemaining <= 200 ? 'near-limit' : ''}`}>
+                    {feedbackCharsRemaining} characters remaining
+                  </div>
                 </div>
                 <div className="feedback-field">
                   <label htmlFor="recommendation">Recommendation</label>
                   <select
                     id="recommendation"
-                    value={feedback.recommendation ? 'yes' : 'no'}
-                    onChange={(event) => setFeedback((prev) => ({ ...prev, recommendation: event.target.value === 'yes' }))}
+                    value={feedback.recommendationDecision}
+                    onChange={(event) => setFeedback((prev) => ({ ...prev, recommendationDecision: event.target.value as RecommendationDecision }))}
+                    disabled={feedback.rating === 'BAD'}
                   >
-                    <option value="yes">Next round yes</option>
-                    <option value="no">Next round no</option>
+                    <option value="YES">Next round yes</option>
+                    <option value="NO">Next round no</option>
+                    <option value="REEVALUATION">Reevaluation</option>
                   </select>
                 </div>
                 <div className="feedback-actions">
@@ -385,16 +554,37 @@ const Session: React.FC = () => {
               </div>
             </div>
           ) : (
-            <div className="feedback-actions">
-              <button className="control-btn btn-start" onClick={() => navigate('/java')}>
-                Back to Dashboard
-              </button>
-            </div>
+            isInterviewer ? (
+              <div className="feedback-actions">
+                <button className="control-btn btn-start" onClick={() => navigate('/java')}>
+                  Back to Dashboard
+                </button>
+              </div>
+            ) : null
           )}
         </div>
       )}
+      <ToastStack toasts={toastItems} onDismiss={dismissToast} />
     </div>
   );
 };
 
 export default Session;
+
+function normalizeClipboardText(value: string) {
+  return value
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/\u00a0/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/[ \t]+\n/g, '\n')
+    .trim();
+}
+
+function normalizeClipboardShape(value: string) {
+  return normalizeClipboardText(value)
+    .split('\n')
+    .map((line) => line.trim())
+    .join('\n')
+    .trim();
+}

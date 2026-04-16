@@ -1,11 +1,15 @@
 export type ParticipantRole = 'INTERVIEWER' | 'INTERVIEWEE';
 export type SessionStatus = 'CREATED' | 'WAITING_JOIN' | 'ACTIVE' | 'ENDED' | 'EXPIRED';
 export type FeedbackRating = 'EXCELLENT' | 'GOOD' | 'FAIR' | 'BAD';
+export type ActivityEventType = 'TAB_HIDDEN' | 'PASTE_IN_EDITOR' | 'EXTERNAL_DROP_BLOCKED';
+export type TechnologySkill = 'JAVA' | 'PYTHON' | 'ANGULAR' | 'REACT' | 'SQL';
+export type RecommendationDecision = 'YES' | 'NO' | 'REEVALUATION';
 
 export interface Participant {
   role: ParticipantRole;
   name: string;
   email: string;
+  timeZone?: string | null;
   disclaimerAcceptedAt?: string | null;
   joinedAt?: string | null;
 }
@@ -26,12 +30,21 @@ export interface RunResult {
 export interface Feedback {
   rating: FeedbackRating;
   comments: string;
-  recommendation: boolean;
+  recommendationDecision: RecommendationDecision;
   submittedAt?: string | null;
+}
+
+export interface ActivityEvent {
+  id: string;
+  participantRole: ParticipantRole;
+  eventType: ActivityEventType;
+  detail: string;
+  createdAt: string;
 }
 
 export interface SessionResponse {
   id: string;
+  technology: TechnologySkill;
   status: SessionStatus;
   createdAt: string;
   startedAt?: string | null;
@@ -45,17 +58,19 @@ export interface SessionResponse {
   codeVersion: number;
   finalRunResult?: RunResult | null;
   feedback?: Feedback | null;
+  activityEvents?: ActivityEvent[];
   joinInfo?: JoinInfo | null;
   summary?: string | null;
 }
 
 export interface SessionSocketMessage {
-  type: 'CODE_UPDATE' | 'SESSION_STATE' | 'SESSION_START' | 'SESSION_END' | 'SESSION_EXTEND' | 'USER_JOINED' | 'TIMER_TICK';
+  type: 'CODE_UPDATE' | 'SESSION_STATE' | 'SESSION_START' | 'SESSION_END' | 'SESSION_EXTEND' | 'USER_JOINED' | 'TIMER_TICK' | 'ACTIVITY_EVENT';
   sessionId: string;
   version?: number;
   code?: string;
   timeLeft?: number;
   session?: SessionResponse;
+  activityEvent?: ActivityEvent;
   message?: string;
 }
 
@@ -64,6 +79,8 @@ export interface CreateSessionRequest {
   interviewerEmail: string;
   intervieweeName: string;
   intervieweeEmail: string;
+  interviewerTimeZone?: string;
+  technology: TechnologySkill;
 }
 
 export interface AcceptDisclaimerRequest {
@@ -73,6 +90,7 @@ export interface AcceptDisclaimerRequest {
 export interface JoinSessionRequest {
   name: string;
   email: string;
+  timeZone?: string;
 }
 
 export interface ValidateTokenResponse {
@@ -86,9 +104,15 @@ export interface ValidateTokenResponse {
 export interface FeedbackRequest {
   rating: FeedbackRating;
   comments: string;
-  recommendation: boolean;
+  recommendationDecision: RecommendationDecision;
 }
 
 export interface EndSessionRequest {
   finalCode: string;
+}
+
+export interface ActivityEventRequest {
+  participantRole: ParticipantRole;
+  eventType: ActivityEventType;
+  detail: string;
 }

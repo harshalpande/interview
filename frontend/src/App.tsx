@@ -1,5 +1,5 @@
 import React from 'react';
-import { BrowserRouter as Router, Navigate, Routes, Route, useParams } from 'react-router-dom';
+import { BrowserRouter as Router, Navigate, Routes, Route, useLocation, useParams } from 'react-router-dom';
 import Dashboard from './pages/Dashboard';
 import StartInterview from './pages/StartInterview';
 import Disclaimer from './pages/Disclaimer';
@@ -33,10 +33,14 @@ function LegacyResultRedirect() {
 }
 
 function AppContent() {
+  const location = useLocation();
+  const isJavaFlow = location.pathname === '/java' || location.pathname.startsWith('/java/');
+  const headerTitle = isJavaFlow ? 'Live Coding Interview - Java' : 'Live Coding Interview';
+
   return (
     <div className="App">
       <header className="app-header">
-        <h1>Live Coding Interview</h1>
+        <h1>{headerTitle}</h1>
       </header>
       <main className="app-main">
         <Routes>

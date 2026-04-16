@@ -12,6 +12,7 @@ public class ParticipantDto {
     private ParticipantRole role;
     private String name;
     private String email;
+    private String timeZone;
     private OffsetDateTime disclaimerAcceptedAt;
     private OffsetDateTime joinedAt;
 }

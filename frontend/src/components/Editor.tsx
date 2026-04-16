@@ -24,6 +24,11 @@ interface EditorProps {
   readOnly?: boolean;
   initialCode?: string;
   onCodeChange?: (code: string) => void;
+  onPasteInEditor?: (text: string) => void;
+  onCopyFromEditor?: (text: string) => void;
+  onCutFromEditor?: (text: string) => void;
+  onExternalDropBlocked?: (text: string) => void;
+  showResetButton?: boolean;
   canRun?: boolean;
   emptyStateMessage?: string;
   showFullscreenToggle?: boolean;
@@ -36,6 +41,11 @@ const Editor: React.FC<EditorProps> = ({
   readOnly = false,
   initialCode = TEMPLATE_CODE,
   onCodeChange,
+  onPasteInEditor,
+  onCopyFromEditor,
+  onCutFromEditor,
+  onExternalDropBlocked,
+  showResetButton = true,
   canRun = true,
   emptyStateMessage,
   showFullscreenToggle = false,
@@ -44,10 +54,11 @@ const Editor: React.FC<EditorProps> = ({
   headerRightSlot,
 }) => {
   const containerRef = React.useRef<HTMLDivElement | null>(null);
+  const editorMountRef = React.useRef<HTMLDivElement | null>(null);
   const defaultOutputPct = 35;
   const minOutputPct = defaultOutputPct * 0.5;
   const defaultEditorPct = 100 - defaultOutputPct;
-  const minEditorPct = defaultEditorPct * 0.2;
+  const minEditorPct = defaultEditorPct * 0.5;
   const maxOutputPct = 100 - minEditorPct;
   const minOutputPx = 320;
 
@@ -135,6 +146,34 @@ const Editor: React.FC<EditorProps> = ({
     runLatestRef.current = handleRun;
   }, [handleRun]);
 
+  useEffect(() => {
+    const mountNode = editorMountRef.current;
+    if (!mountNode || !onExternalDropBlocked) {
+      return;
+    }
+
+    const handleBlockedDrag = (event: DragEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node) || !mountNode.contains(target)) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      onExternalDropBlocked(event.dataTransfer?.getData('text/plain') ?? '');
+    };
+
+    window.addEventListener('dragenter', handleBlockedDrag, true);
+    window.addEventListener('dragover', handleBlockedDrag, true);
+    window.addEventListener('drop', handleBlockedDrag, true);
+
+    return () => {
+      window.removeEventListener('dragenter', handleBlockedDrag, true);
+      window.removeEventListener('dragover', handleBlockedDrag, true);
+      window.removeEventListener('drop', handleBlockedDrag, true);
+    };
+  }, [onExternalDropBlocked]);
+
   const handleClear = () => {
     setState((prev) => ({
       ...prev,
@@ -194,7 +233,9 @@ const Editor: React.FC<EditorProps> = ({
       style={
         isStacked
           ? undefined
-          : { gridTemplateColumns: `minmax(0, 1fr) 8px minmax(${minOutputPct}%, ${outputPct}%)` }
+          : {
+              gridTemplateColumns: `minmax(${minEditorPct}%, ${100 - outputPct}%) 8px minmax(${minOutputPct}%, ${outputPct}%)`,
+            }
       }
     >
       <div className="editor-panel">
@@ -206,12 +247,24 @@ const Editor: React.FC<EditorProps> = ({
             <button className="btn btn-secondary" onClick={toggleTheme} title="Toggle theme">
               {theme === 'vs-dark' ? 'Light' : 'Dark'}
             </button>
-            <button className="btn btn-secondary" onClick={handleReset} title="Reset to template" disabled={readOnly}>
-              Reset
-            </button>
+            {showResetButton && (
+              <button className="btn btn-secondary" onClick={handleReset} title="Reset to template" disabled={readOnly}>
+                Reset
+              </button>
+            )}
             {showFullscreenToggle && (
-              <button className="btn btn-secondary" onClick={onToggleFullscreen} title="Toggle full screen">
-                {isFullscreen ? 'Exit' : 'Full screen'}
+              <button
+                className="btn btn-secondary fullscreen-toggle"
+                onClick={onToggleFullscreen}
+                title="Toggle full screen (Ctrl+Shift+F)"
+              >
+                <span className={`fullscreen-icon ${isFullscreen ? 'is-active' : ''}`} aria-hidden="true">
+                  <span className="fullscreen-icon-corner top-left" />
+                  <span className="fullscreen-icon-corner top-right" />
+                  <span className="fullscreen-icon-corner bottom-left" />
+                  <span className="fullscreen-icon-corner bottom-right" />
+                </span>
+                <span className="fullscreen-shortcut">Ctrl+Shift+F</span>
               </button>
             )}
             <button
@@ -232,36 +285,104 @@ const Editor: React.FC<EditorProps> = ({
               <p>{emptyStateMessage}</p>
             </div>
           )}
-          <MonacoEditor
-            height="100%"
-            language="java"
-            value={state.code}
-            onChange={handleCodeChange}
-            theme={theme}
-            options={{
-              readOnly,
-              minimap: { enabled: false },
-              fontSize: 14,
-              lineNumbers: 'on',
-              scrollBeyondLastLine: false,
-              wordWrap: 'on',
-              formatOnPaste: true,
-              formatOnType: true,
-              autoClosingBrackets: 'always',
-              autoClosingQuotes: 'always',
-              suggestOnTriggerCharacters: true,
-              quickSuggestions: {
-                other: true,
-                comments: true,
-                strings: true,
-              },
-              snippetSuggestions: 'inline',
+          <div
+            ref={editorMountRef}
+            className="editor-mount"
+            onDragEnterCapture={(event) => {
+              const draggedText = event.dataTransfer?.getData('text/plain') ?? '';
+              event.preventDefault();
+              event.stopPropagation();
+              onExternalDropBlocked?.(draggedText);
             }}
-            onMount={(editor, monaco) => {
-              editor.addCommand(monoacoSafeKey(monaco), () => runLatestRef.current?.());
-              editor.addCommand(monaco.KeyCode.Escape, () => handleClear());
+            onDropCapture={(event) => {
+              const droppedText = event.dataTransfer?.getData('text/plain') ?? '';
+              event.preventDefault();
+              event.stopPropagation();
+              onExternalDropBlocked?.(droppedText);
             }}
-          />
+            onDragOverCapture={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onExternalDropBlocked?.('');
+            }}
+            onPasteCapture={(event) => {
+              const pastedText = event.clipboardData?.getData('text') ?? '';
+              if (pastedText && !readOnly) {
+                onPasteInEditor?.(pastedText);
+              }
+            }}
+          >
+            <MonacoEditor
+              height="100%"
+              language="java"
+              value={state.code}
+              onChange={handleCodeChange}
+              theme={theme}
+              options={{
+                readOnly,
+                minimap: { enabled: false },
+                fontSize: 14,
+                lineNumbers: 'on',
+                scrollBeyondLastLine: false,
+                wordWrap: 'on',
+                formatOnPaste: true,
+                formatOnType: true,
+                autoClosingBrackets: 'always',
+                autoClosingQuotes: 'always',
+                suggestOnTriggerCharacters: true,
+                quickSuggestions: {
+                  other: true,
+                  comments: true,
+                  strings: true,
+                },
+                snippetSuggestions: 'inline',
+              }}
+              onMount={(editor, monaco) => {
+                editor.addCommand(monoacoSafeKey(monaco), () => runLatestRef.current?.());
+                editor.addCommand(monaco.KeyCode.Escape, () => handleClear());
+
+                const getSelectedEditorText = () => {
+                  const selection = editor.getSelection();
+                  const model = editor.getModel();
+                  if (!selection || !model || selection.isEmpty()) {
+                    return '';
+                  }
+                  return model.getValueInRange(selection);
+                };
+
+                const domNode = editor.getDomNode();
+                if (domNode) {
+                  domNode.addEventListener('copy', () => {
+                    const copiedText = getSelectedEditorText();
+                    if (copiedText) {
+                      onCopyFromEditor?.(copiedText);
+                    }
+                  }, true);
+                  domNode.addEventListener('cut', () => {
+                    const cutText = getSelectedEditorText();
+                    if (cutText) {
+                      onCutFromEditor?.(cutText);
+                    }
+                  }, true);
+                  domNode.addEventListener('dragover', (event: DragEvent) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    onExternalDropBlocked?.('');
+                  }, true);
+                  domNode.addEventListener('dragenter', (event: DragEvent) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    onExternalDropBlocked?.(event.dataTransfer?.getData('text/plain') ?? '');
+                  }, true);
+                  domNode.addEventListener('drop', (event: DragEvent) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    onExternalDropBlocked?.(event.dataTransfer?.getData('text/plain') ?? '');
+                  }, true);
+                }
+              }}
+            />
+          </div>
         </div>
       </div>
 
