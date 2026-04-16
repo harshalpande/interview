@@ -31,7 +31,7 @@ const StartInterview: React.FC = () => {
         const response = await sessionApi.createSession(formData);
         setSession(response);
         setRole('interviewer');
-        navigate(`/disclaimer/interviewer?sessionId=${response.id}`);
+        navigate(`/java/disclaimer/interviewer?sessionId=${response.id}`);
       } catch (error) {
         console.error('Failed to create session:', error);
         alert('Failed to start interview');
@@ -46,22 +46,22 @@ const StartInterview: React.FC = () => {
       <p className="page-subtitle">
         The interviewer creates the session for both participants. A secure join link will be generated for the interviewee after disclaimer acceptance.
       </p>
-      <form onSubmit={handleSubmit} className="stack-form">
+      <form onSubmit={handleSubmit} className="stack-form" autoComplete="off">
         <div className="form-group">
           <label htmlFor="interviewerName">Interviewer Name</label>
-          <input id="interviewerName" name="interviewerName" value={formData.interviewerName} onChange={handleChange} required />
+          <input id="interviewerName" name="interviewerName" autoComplete="off" value={formData.interviewerName} onChange={handleChange} required />
         </div>
         <div className="form-group">
           <label htmlFor="interviewerEmail">Interviewer Email</label>
-          <input id="interviewerEmail" name="interviewerEmail" type="email" value={formData.interviewerEmail} onChange={handleChange} required />
+          <input id="interviewerEmail" name="interviewerEmail" type="email" autoComplete="off" value={formData.interviewerEmail} onChange={handleChange} required />
         </div>
         <div className="form-group">
           <label htmlFor="intervieweeName">Interviewee Name</label>
-          <input id="intervieweeName" name="intervieweeName" value={formData.intervieweeName} onChange={handleChange} required />
+          <input id="intervieweeName" name="intervieweeName" autoComplete="off" value={formData.intervieweeName} onChange={handleChange} required />
         </div>
         <div className="form-group">
           <label htmlFor="intervieweeEmail">Interviewee Email</label>
-          <input id="intervieweeEmail" name="intervieweeEmail" type="email" value={formData.intervieweeEmail} onChange={handleChange} required />
+          <input id="intervieweeEmail" name="intervieweeEmail" type="email" autoComplete="off" value={formData.intervieweeEmail} onChange={handleChange} required />
         </div>
         <Button type="submit">Start</Button>
       </form>

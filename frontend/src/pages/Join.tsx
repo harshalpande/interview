@@ -20,7 +20,7 @@ const Join: React.FC = () => {
   useBackGuard({
     enabled: true,
     message: 'Leave this step? You will be returned to the dashboard.',
-    redirectTo: '/',
+    redirectTo: '/java',
   });
 
   const validateToken = useCallback(async () => {
@@ -57,7 +57,7 @@ const Join: React.FC = () => {
       setRole('interviewee');
       const session = await sessionApi.joinSession(token, { name, email });
       setSession(session);
-      navigate(`/disclaimer/interviewee?sessionId=${session.id}`);
+      navigate(`/java/disclaimer/interviewee?sessionId=${session.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Validation failed');
     }
@@ -78,11 +78,13 @@ const Join: React.FC = () => {
 
         {error && <div className="error-banner">{error}</div>}
 
-        <form onSubmit={handleSubmit} className="stack-form">
+        <form onSubmit={handleSubmit} className="stack-form" autoComplete="off">
           <div className="form-group">
             <label htmlFor="join-name">Name</label>
             <input
               id="join-name"
+              name="joinName"
+              autoComplete="off"
               value={name}
               onChange={(event) => setName(event.target.value)}
               required
@@ -92,7 +94,9 @@ const Join: React.FC = () => {
             <label htmlFor="join-email">Email</label>
             <input
               id="join-email"
+              name="joinEmail"
               type="email"
+              autoComplete="off"
               value={email}
               onChange={(event) => setEmail(event.target.value)}
               required
