@@ -23,9 +23,17 @@ const InterviewRow: React.FC<InterviewRowProps> = ({ session, searchTerm = '' })
   return (
     <tr>
       <td className="date-cell">{formatDateTimeCompact(session.createdAt)}</td>
-      <td>{formatTechnology(session.technology)}</td>
-      <td>{interviewer ? highlightText(`${interviewer.name} (${interviewer.email})`, searchTerm) : 'N/A'}</td>
-      <td>{interviewee ? highlightText(`${interviewee.name} (${interviewee.email})`, searchTerm) : 'N/A'}</td>
+      <td>
+        {session.technology ? (
+          <span className={`technology-pill technology-pill-${session.technology.toLowerCase()}`}>
+            {formatTechnology(session.technology)}
+          </span>
+        ) : (
+          'N/A'
+        )}
+      </td>
+      <td>{renderParticipant(interviewer?.name, interviewer?.email, searchTerm)}</td>
+      <td>{renderParticipant(interviewee?.name, interviewee?.email, searchTerm)}</td>
       <td>
         <span className={`status status-${session.status.toLowerCase()}`}>
           {STATUS_LABELS[session.status] || session.status}
@@ -46,6 +54,19 @@ const InterviewRow: React.FC<InterviewRowProps> = ({ session, searchTerm = '' })
 };
 
 export { InterviewRow };
+
+function renderParticipant(name?: string, email?: string, searchTerm = '') {
+  if (!name && !email) {
+    return 'N/A';
+  }
+
+  return (
+    <div className="participant-cell">
+      {name ? <div className="participant-name">{highlightText(name, searchTerm)}</div> : null}
+      {email ? <div className="participant-email">{highlightText(email, searchTerm)}</div> : null}
+    </div>
+  );
+}
 
 function highlightText(value: string, searchTerm: string) {
   const normalized = searchTerm.trim();
