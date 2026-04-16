@@ -5,6 +5,7 @@ import type {
   ActivityEventRequest,
   CreateSessionRequest, 
   EndSessionRequest,
+  IdentityCaptureRequest,
   JoinSessionRequest,
   SessionResponse, 
   FeedbackRequest,
@@ -136,6 +137,33 @@ class SessionApiClient {
     } catch (error) {
       throw this.handleError(error);
     }
+  }
+
+  async submitIdentityCapture(id: string, request: IdentityCaptureRequest): Promise<SessionResponse> {
+    try {
+      const formData = new FormData();
+      formData.append('role', request.role);
+      formData.append('status', request.status);
+      if (request.failureReason) {
+        formData.append('failureReason', request.failureReason);
+      }
+      if (request.image) {
+        formData.append('image', request.image, request.filename || 'identity-snapshot.jpg');
+      }
+
+      const response = await this.axiosInstance.post<SessionResponse>(`/sessions/${id}/identity-capture`, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+      return response.data;
+    } catch (error) {
+      throw this.handleError(error);
+    }
+  }
+
+  getIdentityCaptureImageUrl(id: string, role: 'INTERVIEWER' | 'INTERVIEWEE') {
+    return `${resolveApiBaseUrl()}/sessions/${id}/identity-capture/${role}`;
   }
 
   private handleError(error: any): Error {

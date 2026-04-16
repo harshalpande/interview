@@ -18,10 +18,13 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.messaging.handler.annotation.DestinationVariable;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
@@ -129,6 +132,30 @@ public class SessionController {
                 .message(event.getDetail())
                 .build());
         return ResponseEntity.ok(event);
+    }
+
+    @PostMapping(path = "/{id}/identity-capture", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<SessionResponse> updateIdentityCapture(@PathVariable String id,
+                                                                 @RequestParam com.altimetrik.interview.enums.ParticipantRole role,
+                                                                 @RequestParam com.altimetrik.interview.enums.IdentityCaptureStatus status,
+                                                                 @RequestParam(required = false) com.altimetrik.interview.enums.IdentityCaptureFailureReason failureReason,
+                                                                 @RequestPart(required = false) MultipartFile image) {
+        SessionResponse response = sessionService.updateIdentityCapture(id, role, status, failureReason, image);
+        broadcastSession(response, "SESSION_STATE", "Identity capture updated");
+        return ResponseEntity.ok(response);
+    }
+
+    @GetMapping("/{id}/identity-capture/{role}")
+    public ResponseEntity<org.springframework.core.io.Resource> getIdentityCapture(@PathVariable String id,
+                                                                                    @PathVariable com.altimetrik.interview.enums.ParticipantRole role) {
+        SessionService.ResourceWithMetadata resource = sessionService.getIdentityCaptureResource(id, role);
+        MediaType contentType = resource.contentType() == null || resource.contentType().isBlank()
+                ? MediaType.IMAGE_JPEG
+                : MediaType.parseMediaType(resource.contentType());
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CACHE_CONTROL, "no-store")
+                .contentType(contentType)
+                .body(resource.resource());
     }
 
     @MessageMapping("/session/{id}/code")

@@ -42,6 +42,10 @@ logging:
     root: INFO
     com.altimetrik: INFO
 
+app:
+  storage:
+    root: ${APP_STORAGE_PATH:C:/Users/hpande/Documents/workspace/bindmount}
+
 springdoc:
   api-docs:
     path: /v3/api-docs

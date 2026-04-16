@@ -24,6 +24,34 @@ export function formatDateTime(value?: string | null) {
   }
 }
 
+export function formatDateTimeCompact(value?: string | null) {
+  if (!value) {
+    return 'N/A';
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return 'Invalid date';
+  }
+
+  try {
+    const datePart = new Intl.DateTimeFormat(undefined, {
+      year: 'numeric',
+      month: 'short',
+      day: '2-digit',
+    }).format(date);
+
+    const timePart = new Intl.DateTimeFormat(undefined, {
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(date);
+
+    return `${datePart}, ${timePart} ${getLocalTimeZoneLabel()}`;
+  } catch {
+    return `${date.toLocaleDateString()} ${date.toLocaleTimeString()}`;
+  }
+}
+
 export function getBrowserTimeZone() {
   try {
     return Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -44,11 +72,16 @@ export function formatTimeZoneLabel(timeZone?: string | null) {
       hour: '2-digit',
     });
     const zonePart = formatter.formatToParts(new Date()).find((part) => part.type === 'timeZoneName')?.value;
-    if (zonePart) {
+    if (zonePart && !/^GMT[+-]/i.test(zonePart)) {
       return zonePart;
     }
   } catch {
     // fall through
+  }
+
+  const mappedLabel = COMMON_TIME_ZONE_LABELS[timeZone];
+  if (mappedLabel) {
+    return mappedLabel;
   }
 
   return timeZone;
@@ -57,3 +90,21 @@ export function formatTimeZoneLabel(timeZone?: string | null) {
 export function getLocalTimeZoneLabel() {
   return formatTimeZoneLabel(getBrowserTimeZone());
 }
+
+const COMMON_TIME_ZONE_LABELS: Record<string, string> = {
+  'Asia/Calcutta': 'IST',
+  'Asia/Kolkata': 'IST',
+  'Asia/Dubai': 'GST',
+  'Asia/Singapore': 'SGT',
+  'Asia/Tokyo': 'JST',
+  'Europe/London': 'GMT',
+  'Europe/Berlin': 'CET',
+  'Europe/Paris': 'CET',
+  'Europe/Amsterdam': 'CET',
+  'UTC': 'UTC',
+  'Etc/UTC': 'UTC',
+  'America/New_York': 'ET',
+  'America/Chicago': 'CT',
+  'America/Denver': 'MT',
+  'America/Los_Angeles': 'PT',
+};
