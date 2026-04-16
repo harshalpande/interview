@@ -68,6 +68,11 @@
   font-weight: 700;
 }
 
+.participant-meta {
+  font-size: 0.82rem;
+  opacity: 0.9;
+}
+
 .role-indicator,
 .status-chip {
   display: inline-flex;

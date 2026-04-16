@@ -333,6 +333,11 @@ const Session: React.FC = () => {
               <span className="participant-role">Interviewee</span>
               <span className="participant-name">{interviewee?.name}{interviewee?.timeZone ? ` (${formatTimeZoneLabel(interviewee.timeZone)})` : ''}</span>
               <span>{interviewee?.email}</span>
+              {interviewee?.identityCaptureStatus && (
+                <span className="participant-meta">
+                  Identity snapshot: {formatIdentityCaptureStatus(interviewee.identityCaptureStatus, interviewee.identityCaptureFailureReason)}
+                </span>
+              )}
             </div>
           </div>
 
@@ -587,4 +592,25 @@ function normalizeClipboardShape(value: string) {
     .map((line) => line.trim())
     .join('\n')
     .trim();
+}
+
+function formatIdentityCaptureStatus(status?: string | null, reason?: string | null) {
+  if (status === 'SUCCESS') {
+    return 'Captured';
+  }
+  if (status === 'FAILED') {
+    return reason ? `Issue recorded (${formatCaptureReason(reason)})` : 'Issue recorded';
+  }
+  if (status === 'SKIPPED') {
+    return 'Skipped';
+  }
+  return 'Pending';
+}
+
+function formatCaptureReason(reason: string) {
+  return reason
+    .toLowerCase()
+    .split('_')
+    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+    .join(' ');
 }

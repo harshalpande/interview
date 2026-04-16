@@ -47,6 +47,9 @@ const Result: React.FC = () => {
   const pasteEvents = activityEvents.filter((event) => event.eventType === 'PASTE_IN_EDITOR');
   const blockedDropEvents = activityEvents.filter((event) => event.eventType === 'EXTERNAL_DROP_BLOCKED');
   const latestActivity = activityEvents.length ? activityEvents[activityEvents.length - 1] : null;
+  const snapshotUrl = interviewee?.identityCaptureStatus === 'SUCCESS'
+    ? sessionApi.getIdentityCaptureImageUrl(session.id, 'INTERVIEWEE')
+    : null;
 
   return (
     <div className="result-page polished-page">
@@ -75,19 +78,33 @@ const Result: React.FC = () => {
         <Button onClick={() => navigate('/java')}>Close (Esc)</Button>
       </div>
 
-      <div className="result-summary-card">
-        <p><strong>Created:</strong> {formatDateTime(session.createdAt)}</p>
-        {session.startedAt && <p><strong>Started:</strong> {formatDateTime(session.startedAt)}</p>}
-        {session.endedAt && <p><strong>Ended:</strong> {formatDateTime(session.endedAt)}</p>}
-        <p><strong>Allocated duration:</strong> {Math.round(session.durationSec / 60)} minutes</p>
-        {session.feedback && (
-          <>
-            <p><strong>Rating:</strong> {session.feedback.rating}</p>
-            <p><strong>Recommendation:</strong> {formatRecommendation(session.feedback.recommendationDecision)}</p>
-            <p><strong>Comments:</strong> {session.feedback.comments}</p>
-          </>
-        )}
-        {isTokenExpired && <p><strong>Reason:</strong> Token Expired</p>}
+      <div className="result-summary-card result-summary-layout">
+        <div className="result-summary-details">
+          <p><strong>Created:</strong> {formatDateTime(session.createdAt)}</p>
+          {session.startedAt && <p><strong>Started:</strong> {formatDateTime(session.startedAt)}</p>}
+          {session.endedAt && <p><strong>Ended:</strong> {formatDateTime(session.endedAt)}</p>}
+          <p><strong>Allocated duration:</strong> {Math.round(session.durationSec / 60)} minutes</p>
+          {session.feedback && (
+            <>
+              <p><strong>Rating:</strong> {session.feedback.rating}</p>
+              <p><strong>Recommendation:</strong> {formatRecommendation(session.feedback.recommendationDecision)}</p>
+              <p><strong>Comments:</strong> {session.feedback.comments}</p>
+            </>
+          )}
+          <p><strong>Identity snapshot:</strong> {formatIdentityCaptureStatus(interviewee?.identityCaptureStatus, interviewee?.identityCaptureFailureReason)}</p>
+          {isTokenExpired && <p><strong>Reason:</strong> Token Expired</p>}
+        </div>
+
+        <div className="result-summary-identity">
+          <h3>Identity Verification</h3>
+          {snapshotUrl ? (
+            <div className="identity-result-card">
+              <img src={snapshotUrl} alt="Interviewee identity snapshot" className="identity-result-image" />
+            </div>
+          ) : (
+            <p className="activity-empty">{formatIdentityCaptureStatus(interviewee?.identityCaptureStatus, interviewee?.identityCaptureFailureReason)}</p>
+          )}
+        </div>
       </div>
 
       {!isTokenExpired && (
@@ -156,4 +173,25 @@ function formatRecommendation(value: string) {
   return value === 'REEVALUATION'
     ? 'Reevaluation'
     : value.charAt(0) + value.slice(1).toLowerCase();
+}
+
+function formatIdentityCaptureStatus(status?: string | null, reason?: string | null) {
+  if (status === 'SUCCESS') {
+    return 'Captured successfully';
+  }
+  if (status === 'FAILED') {
+    return `Camera capture could not be completed${reason ? ` (${formatFailureReason(reason)})` : ''}.`;
+  }
+  if (status === 'SKIPPED') {
+    return 'Candidate continued without a photo capture.';
+  }
+  return 'Identity capture is still pending.';
+}
+
+function formatFailureReason(reason: string) {
+  return reason
+    .toLowerCase()
+    .split('_')
+    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+    .join(' ');
 }

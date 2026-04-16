@@ -70,7 +70,7 @@
 }
 
 .interviews-table thead th {
-  padding: 16px 18px;
+  padding: 14px 16px;
   background: #eef4f8;
   color: var(--text);
   font-size: 0.92rem;
@@ -89,15 +89,20 @@
 }
 
 .interviews-table tbody td {
-  padding: 18px;
+  padding: 14px 16px;
   border-top: 1px solid #e6edf4;
   vertical-align: top;
   color: var(--text);
+  line-height: 1.45;
 }
 
 .summary-cell {
   min-width: 220px;
   color: var(--text-soft);
+}
+
+.date-cell {
+  white-space: nowrap;
 }
 
 .interviews-table mark {

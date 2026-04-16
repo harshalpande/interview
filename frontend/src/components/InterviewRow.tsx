@@ -1,7 +1,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import type { SessionResponse } from '../types/session';
-import { formatDateTime } from '../utils/dateTime';
+import { formatDateTimeCompact } from '../utils/dateTime';
 
 const STATUS_LABELS: Record<string, string> = {
   CREATED: 'Ready to Start',
@@ -22,7 +22,7 @@ const InterviewRow: React.FC<InterviewRowProps> = ({ session, searchTerm = '' })
 
   return (
     <tr>
-      <td>{formatDateTime(session.createdAt)}</td>
+      <td className="date-cell">{formatDateTimeCompact(session.createdAt)}</td>
       <td>{formatTechnology(session.technology)}</td>
       <td>{interviewer ? highlightText(`${interviewer.name} (${interviewer.email})`, searchTerm) : 'N/A'}</td>
       <td>{interviewee ? highlightText(`${interviewee.name} (${interviewee.email})`, searchTerm) : 'N/A'}</td>

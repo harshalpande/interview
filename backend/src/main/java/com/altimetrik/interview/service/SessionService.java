@@ -22,6 +22,8 @@ import com.altimetrik.interview.entity.RunResult;
 import com.altimetrik.interview.entity.SessionActivityEvent;
 import com.altimetrik.interview.entity.SessionToken;
 import com.altimetrik.interview.enums.ActivityEventType;
+import com.altimetrik.interview.enums.IdentityCaptureFailureReason;
+import com.altimetrik.interview.enums.IdentityCaptureStatus;
 import com.altimetrik.interview.enums.ParticipantRole;
 import com.altimetrik.interview.enums.RecommendationDecision;
 import com.altimetrik.interview.enums.SessionStatus;
@@ -42,8 +44,12 @@ import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -78,6 +84,7 @@ public class SessionService {
     private final SessionActivityEventRepository sessionActivityEventRepository;
     private final JavaCompilerService javaCompilerService;
     private final ActiveSessionTracker activeSessionTracker;
+    private final IdentitySnapshotStorageService identitySnapshotStorageService;
 
     @Transactional
     public SessionResponse createSession(CreateSessionRequest request) {
@@ -377,7 +384,73 @@ public class SessionService {
         participant.setName(name.trim());
         participant.setEmail(email.trim().toLowerCase(Locale.ROOT));
         participant.setTimeZone(normalizeTimeZone(timeZone));
+        if (role == ParticipantRole.INTERVIEWEE) {
+            participant.setIdentityCaptureStatus(IdentityCaptureStatus.PENDING);
+        }
         return participant;
+    }
+
+    @Transactional
+    public SessionResponse updateIdentityCapture(String sessionId,
+                                                 ParticipantRole role,
+                                                 IdentityCaptureStatus status,
+                                                 IdentityCaptureFailureReason failureReason,
+                                                 MultipartFile image) {
+        InterviewSession session = getRequiredSession(sessionId);
+        Participant participant = participantRepository.findBySessionIdAndRole(sessionId, role)
+                .orElseThrow(() -> new IllegalArgumentException("Participant not found"));
+
+        if (role != ParticipantRole.INTERVIEWEE) {
+            throw new IllegalArgumentException("Identity capture is only supported for the interviewee");
+        }
+
+        if (status == IdentityCaptureStatus.SUCCESS && (image == null || image.isEmpty())) {
+            throw new IllegalArgumentException("Snapshot image is required for a successful capture");
+        }
+
+        try {
+            if (status == IdentityCaptureStatus.SUCCESS) {
+                Path tempFile = Files.createTempFile("identity-capture-", ".upload");
+                try {
+                    image.transferTo(tempFile);
+                    identitySnapshotStorageService.deleteIfExists(participant.getIdentitySnapshotPath());
+                    String storedPath = identitySnapshotStorageService.storeSnapshot(sessionId, role, image.getOriginalFilename(), tempFile);
+
+                    participant.setIdentityCaptureStatus(IdentityCaptureStatus.SUCCESS);
+                    participant.setIdentityCaptureFailureReason(null);
+                    participant.setIdentitySnapshotPath(storedPath);
+                    participant.setIdentitySnapshotMimeType(image.getContentType());
+                    participant.setIdentitySnapshotCapturedAt(nowUtc());
+                } finally {
+                    Files.deleteIfExists(tempFile);
+                }
+            } else {
+                identitySnapshotStorageService.deleteIfExists(participant.getIdentitySnapshotPath());
+                participant.setIdentityCaptureStatus(status);
+                participant.setIdentityCaptureFailureReason(resolveCaptureFailureReason(status, failureReason));
+                participant.setIdentitySnapshotPath(null);
+                participant.setIdentitySnapshotMimeType(null);
+                participant.setIdentitySnapshotCapturedAt(null);
+            }
+        } catch (IOException ex) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Unable to store identity snapshot", ex);
+        }
+
+        participantRepository.save(participant);
+        return toSessionResponse(session, true, getActiveJoinInfo(sessionId));
+    }
+
+    @Transactional(readOnly = true)
+    public ResourceWithMetadata getIdentityCaptureResource(String sessionId, ParticipantRole role) {
+        Participant participant = participantRepository.findBySessionIdAndRole(sessionId, role)
+                .orElseThrow(() -> new IllegalArgumentException("Participant not found"));
+
+        var resource = identitySnapshotStorageService.loadAsResource(participant.getIdentitySnapshotPath());
+        if (resource == null || !resource.exists()) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Identity snapshot not found");
+        }
+
+        return new ResourceWithMetadata(resource, participant.getIdentitySnapshotMimeType());
     }
 
     private JoinTokenResponse createJoinToken(String sessionId) {
@@ -525,6 +598,10 @@ public class SessionService {
                 .name(participant.getName())
                 .email(participant.getEmail())
                 .timeZone(participant.getTimeZone())
+                .identityCaptureStatus(participant.getIdentityCaptureStatus())
+                .identityCaptureFailureReason(participant.getIdentityCaptureFailureReason())
+                .identitySnapshotPath(participant.getIdentitySnapshotPath())
+                .identitySnapshotCapturedAt(participant.getIdentitySnapshotCapturedAt())
                 .disclaimerAcceptedAt(participant.getDisclaimerAcceptedAt())
                 .joinedAt(participant.getJoinedAt())
                 .build();
@@ -621,5 +698,19 @@ public class SessionService {
         }
 
         return comparator;
+    }
+
+    private IdentityCaptureFailureReason resolveCaptureFailureReason(IdentityCaptureStatus status,
+                                                                    IdentityCaptureFailureReason failureReason) {
+        if (status == IdentityCaptureStatus.SKIPPED) {
+            return failureReason == null ? IdentityCaptureFailureReason.USER_SKIPPED : failureReason;
+        }
+        if (status == IdentityCaptureStatus.FAILED) {
+            return failureReason == null ? IdentityCaptureFailureReason.UNKNOWN : failureReason;
+        }
+        return null;
+    }
+
+    public record ResourceWithMetadata(org.springframework.core.io.Resource resource, String contentType) {
     }
 }

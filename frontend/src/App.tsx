@@ -7,6 +7,7 @@ import Session from './pages/Session';
 import Join from './pages/Join';
 import Result from './pages/Result';
 import TechnologySelection from './pages/TechnologySelection';
+import IdentityCapture from './pages/IdentityCapture';
 import { QueryProvider } from './providers/QueryProvider';
 import { SessionProvider } from './providers/SessionProvider';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -48,6 +49,7 @@ function AppContent() {
           <Route path="/java" element={<Dashboard />} />
           <Route path="/start" element={<TechnologySelection />} />
           <Route path="/java/start" element={<StartInterview />} />
+          <Route path="/java/identity-capture/:sessionId" element={<IdentityCapture />} />
           <Route path="/java/disclaimer/:role" element={<Disclaimer />} />
           <Route path="/java/session/:sessionId" element={<Session />} />
           <Route path="/java/join/:token" element={<Join />} />

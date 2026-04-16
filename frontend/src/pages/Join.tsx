@@ -58,7 +58,7 @@ const Join: React.FC = () => {
       setRole('interviewee');
       const session = await sessionApi.joinSession(token, { name, email, timeZone: getBrowserTimeZone() });
       setSession(session);
-      navigate(`/java/disclaimer/interviewee?sessionId=${session.id}`);
+      navigate(`/java/identity-capture/${session.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Validation failed');
     }

@@ -4,12 +4,18 @@ export type FeedbackRating = 'EXCELLENT' | 'GOOD' | 'FAIR' | 'BAD';
 export type ActivityEventType = 'TAB_HIDDEN' | 'PASTE_IN_EDITOR' | 'EXTERNAL_DROP_BLOCKED';
 export type TechnologySkill = 'JAVA' | 'PYTHON' | 'ANGULAR' | 'REACT' | 'SQL';
 export type RecommendationDecision = 'YES' | 'NO' | 'REEVALUATION';
+export type IdentityCaptureStatus = 'PENDING' | 'SUCCESS' | 'FAILED' | 'SKIPPED';
+export type IdentityCaptureFailureReason = 'NO_CAMERA' | 'PERMISSION_DENIED' | 'CAMERA_IN_USE' | 'UNSUPPORTED' | 'DEVICE_ERROR' | 'USER_SKIPPED' | 'UNKNOWN';
 
 export interface Participant {
   role: ParticipantRole;
   name: string;
   email: string;
   timeZone?: string | null;
+  identityCaptureStatus?: IdentityCaptureStatus | null;
+  identityCaptureFailureReason?: IdentityCaptureFailureReason | null;
+  identitySnapshotPath?: string | null;
+  identitySnapshotCapturedAt?: string | null;
   disclaimerAcceptedAt?: string | null;
   joinedAt?: string | null;
 }
@@ -115,4 +121,12 @@ export interface ActivityEventRequest {
   participantRole: ParticipantRole;
   eventType: ActivityEventType;
   detail: string;
+}
+
+export interface IdentityCaptureRequest {
+  role: ParticipantRole;
+  status: IdentityCaptureStatus;
+  failureReason?: IdentityCaptureFailureReason;
+  image?: Blob;
+  filename?: string;
 }

@@ -1,5 +1,7 @@
 package com.altimetrik.interview.entity;
 
+import com.altimetrik.interview.enums.IdentityCaptureFailureReason;
+import com.altimetrik.interview.enums.IdentityCaptureStatus;
 import jakarta.persistence.*;
 import lombok.Data;
 import org.hibernate.annotations.CreationTimestamp;
@@ -25,6 +27,18 @@ public class Participant {
     private String email;
 
     private String timeZone;
+
+    @Enumerated(EnumType.STRING)
+    private IdentityCaptureStatus identityCaptureStatus;
+
+    @Enumerated(EnumType.STRING)
+    private IdentityCaptureFailureReason identityCaptureFailureReason;
+
+    private String identitySnapshotPath;
+
+    private String identitySnapshotMimeType;
+
+    private OffsetDateTime identitySnapshotCapturedAt;
     
     private OffsetDateTime disclaimerAcceptedAt;
     
