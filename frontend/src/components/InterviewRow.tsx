@@ -13,17 +13,19 @@ const STATUS_LABELS: Record<string, string> = {
 
 interface InterviewRowProps {
   session: SessionResponse;
+  searchTerm?: string;
 }
 
-const InterviewRow: React.FC<InterviewRowProps> = ({ session }) => {
+const InterviewRow: React.FC<InterviewRowProps> = ({ session, searchTerm = '' }) => {
   const interviewer = session.participants?.find((p) => p.role === 'INTERVIEWER');
   const interviewee = session.participants?.find((p) => p.role === 'INTERVIEWEE');
 
   return (
     <tr>
       <td>{formatDateTime(session.createdAt)}</td>
-      <td>{interviewer ? `${interviewer.name} (${interviewer.email})` : 'N/A'}</td>
-      <td>{interviewee ? `${interviewee.name} (${interviewee.email})` : 'N/A'}</td>
+      <td>{formatTechnology(session.technology)}</td>
+      <td>{interviewer ? highlightText(`${interviewer.name} (${interviewer.email})`, searchTerm) : 'N/A'}</td>
+      <td>{interviewee ? highlightText(`${interviewee.name} (${interviewee.email})`, searchTerm) : 'N/A'}</td>
       <td>
         <span className={`status status-${session.status.toLowerCase()}`}>
           {STATUS_LABELS[session.status] || session.status}
@@ -44,5 +46,26 @@ const InterviewRow: React.FC<InterviewRowProps> = ({ session }) => {
 };
 
 export { InterviewRow };
+
+function highlightText(value: string, searchTerm: string) {
+  const normalized = searchTerm.trim();
+  if (normalized.length < 3) {
+    return value;
+  }
+
+  const escaped = normalized.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const parts = value.split(new RegExp(`(${escaped})`, 'ig'));
+
+  return parts.map((part, index) =>
+    part.toLowerCase() === normalized.toLowerCase() ? <mark key={`${part}-${index}`}>{part}</mark> : part
+  );
+}
+
+function formatTechnology(value?: SessionResponse['technology']) {
+  if (!value) {
+    return 'N/A';
+  }
+  return value.charAt(0) + value.slice(1).toLowerCase();
+}
 
 

@@ -5,6 +5,7 @@ import { sessionApi } from '../services/sessionApi';
 import type { ValidateTokenResponse } from '../types/session';
 import { useSessionStore } from '../stores/sessionStore';
 import { useBackGuard } from '../hooks/useBackGuard';
+import { getBrowserTimeZone } from '../utils/dateTime';
 
 const Join: React.FC = () => {
   const { token } = useParams<{ token: string }>();
@@ -55,7 +56,7 @@ const Join: React.FC = () => {
     }
     try {
       setRole('interviewee');
-      const session = await sessionApi.joinSession(token, { name, email });
+      const session = await sessionApi.joinSession(token, { name, email, timeZone: getBrowserTimeZone() });
       setSession(session);
       navigate(`/java/disclaimer/interviewee?sessionId=${session.id}`);
     } catch (err) {

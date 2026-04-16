@@ -1,6 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/Button';
+import type { TechnologySkill } from '../types/session';
 import './TechnologySelection.css';
 
 type TechnologyKey = 'java' | 'python' | 'angular' | 'react' | 'sql';
@@ -8,6 +9,7 @@ type TechnologyKey = 'java' | 'python' | 'angular' | 'react' | 'sql';
 type TechnologyOption = {
   id: TechnologyKey;
   label: string;
+  value: TechnologySkill;
   caption: string;
   status: 'available' | 'coming-soon';
   icon: React.ReactNode;
@@ -17,6 +19,7 @@ const technologyOptions: TechnologyOption[] = [
   {
     id: 'java',
     label: 'Java',
+    value: 'JAVA',
     caption: 'Live coding interviews',
     status: 'available',
     icon: (
@@ -32,6 +35,7 @@ const technologyOptions: TechnologyOption[] = [
   {
     id: 'python',
     label: 'Python',
+    value: 'PYTHON',
     caption: 'Coming soon',
     status: 'coming-soon',
     icon: (
@@ -46,6 +50,7 @@ const technologyOptions: TechnologyOption[] = [
   {
     id: 'angular',
     label: 'Angular',
+    value: 'ANGULAR',
     caption: 'Coming soon',
     status: 'coming-soon',
     icon: (
@@ -59,6 +64,7 @@ const technologyOptions: TechnologyOption[] = [
   {
     id: 'react',
     label: 'React',
+    value: 'REACT',
     caption: 'Coming soon',
     status: 'coming-soon',
     icon: (
@@ -73,6 +79,7 @@ const technologyOptions: TechnologyOption[] = [
   {
     id: 'sql',
     label: 'SQL',
+    value: 'SQL',
     caption: 'Coming soon',
     status: 'coming-soon',
     icon: (
@@ -137,7 +144,10 @@ const TechnologySelection: React.FC = () => {
             </p>
           </div>
           <div className="tech-selection-actions">
-            <Button disabled={!canProceed} onClick={() => navigate('/java/start')}>
+            <Button
+              disabled={!canProceed}
+              onClick={() => navigate(`/java/start?technology=${selectedOption?.value ?? 'JAVA'}`)}
+            >
               Next
             </Button>
           </div>

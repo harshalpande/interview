@@ -1,6 +1,7 @@
 package com.altimetrik.interview.dto;
 
 import com.altimetrik.interview.enums.SessionStatus;
+import com.altimetrik.interview.enums.TechnologySkill;
 import lombok.Builder;
 import lombok.Data;
 
@@ -11,6 +12,7 @@ import java.util.List;
 @Builder
 public class SessionResponse {
     private String id;
+    private TechnologySkill technology;
     private SessionStatus status;
     private OffsetDateTime createdAt;
     private OffsetDateTime startedAt;
@@ -24,6 +26,7 @@ public class SessionResponse {
     private Long codeVersion;
     private RunResultDto finalRunResult;
     private FeedbackDto feedback;
+    private List<ActivityEventDto> activityEvents;
     private JoinTokenResponse joinInfo;
     private String summary;
 }

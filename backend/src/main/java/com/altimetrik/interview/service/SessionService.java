@@ -1,6 +1,8 @@
 package com.altimetrik.interview.service;
 
 import com.altimetrik.interview.dto.AcceptDisclaimerRequest;
+import com.altimetrik.interview.dto.ActivityEventDto;
+import com.altimetrik.interview.dto.ActivityEventRequest;
 import com.altimetrik.interview.dto.CreateSessionRequest;
 import com.altimetrik.interview.dto.CodeUpdateRequest;
 import com.altimetrik.interview.dto.EndSessionRequest;
@@ -17,19 +19,26 @@ import com.altimetrik.interview.entity.Feedback;
 import com.altimetrik.interview.entity.InterviewSession;
 import com.altimetrik.interview.entity.Participant;
 import com.altimetrik.interview.entity.RunResult;
+import com.altimetrik.interview.entity.SessionActivityEvent;
 import com.altimetrik.interview.entity.SessionToken;
+import com.altimetrik.interview.enums.ActivityEventType;
 import com.altimetrik.interview.enums.ParticipantRole;
+import com.altimetrik.interview.enums.RecommendationDecision;
 import com.altimetrik.interview.enums.SessionStatus;
+import com.altimetrik.interview.enums.TechnologySkill;
 import com.altimetrik.interview.repository.CodeStateRepository;
 import com.altimetrik.interview.repository.FeedbackRepository;
 import com.altimetrik.interview.repository.ParticipantRepository;
 import com.altimetrik.interview.repository.RunResultRepository;
+import com.altimetrik.interview.repository.SessionActivityEventRepository;
 import com.altimetrik.interview.repository.SessionRepository;
 import com.altimetrik.interview.repository.SessionTokenRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -66,6 +75,7 @@ public class SessionService {
     private final CodeStateRepository codeStateRepository;
     private final RunResultRepository runResultRepository;
     private final FeedbackRepository feedbackRepository;
+    private final SessionActivityEventRepository sessionActivityEventRepository;
     private final JavaCompilerService javaCompilerService;
     private final ActiveSessionTracker activeSessionTracker;
 
@@ -75,12 +85,13 @@ public class SessionService {
         session.setStatus(SessionStatus.WAITING_JOIN);
         session.setDurationSec(DEFAULT_DURATION_SEC);
         session.setExtensionUsed(false);
+        session.setTechnology(request.getTechnology() == null ? TechnologySkill.JAVA : request.getTechnology());
         session = sessionRepository.save(session);
 
         participantRepository.save(createParticipant(session.getId(), ParticipantRole.INTERVIEWER,
-                request.getInterviewerName(), request.getInterviewerEmail()));
+                request.getInterviewerName(), request.getInterviewerEmail(), request.getInterviewerTimeZone()));
         participantRepository.save(createParticipant(session.getId(), ParticipantRole.INTERVIEWEE,
-                request.getIntervieweeName(), request.getIntervieweeEmail()));
+                request.getIntervieweeName(), request.getIntervieweeEmail(), null));
 
         CodeState codeState = new CodeState();
         codeState.setSessionId(session.getId());
@@ -105,8 +116,18 @@ public class SessionService {
     }
 
     @Transactional(readOnly = true)
-    public Page<SessionResponse> listSessions(Pageable pageable) {
-        return sessionRepository.findAll(pageable).map(session -> toSessionResponse(session, false, null));
+    public Page<SessionResponse> listSessions(Pageable pageable, String search) {
+        List<SessionResponse> sessions = sessionRepository.findAll().stream()
+                .map(session -> toSessionResponse(session, false, null))
+                .filter(session -> matchesSearch(session, search))
+                .sorted(buildSessionComparator(pageable))
+                .toList();
+
+        int pageNumber = pageable == null ? 0 : Math.max(0, pageable.getPageNumber());
+        int pageSize = pageable == null || pageable.getPageSize() <= 0 ? 20 : pageable.getPageSize();
+        int start = Math.min(pageNumber * pageSize, sessions.size());
+        int end = Math.min(start + pageSize, sessions.size());
+        return new PageImpl<>(sessions.subList(start, end), pageable, sessions.size());
     }
 
     @Transactional(readOnly = true)
@@ -166,6 +187,7 @@ public class SessionService {
         }
 
         participant.setJoinedAt(nowUtc());
+        participant.setTimeZone(normalizeTimeZone(request.getTimeZone()));
         participantRepository.save(participant);
 
         sessionToken.setIsUsed(true);
@@ -229,7 +251,11 @@ public class SessionService {
         feedback.setSessionId(sessionId);
         feedback.setRating(request.getRating());
         feedback.setComments(request.getComments());
-        feedback.setRecommendation(request.getRecommendation());
+        RecommendationDecision recommendationDecision = request.getRating() == com.altimetrik.interview.enums.FeedbackRating.BAD
+                ? RecommendationDecision.NO
+                : request.getRecommendationDecision();
+        feedback.setRecommendationDecision(recommendationDecision);
+        feedback.setRecommendation(recommendationDecision == RecommendationDecision.YES);
         feedbackRepository.save(feedback);
         return toSessionResponse(session, true, null);
     }
@@ -315,6 +341,25 @@ public class SessionService {
         return toSessionResponse(session, true, getActiveJoinInfo(sessionId));
     }
 
+    @Transactional
+    public ActivityEventDto recordActivityEvent(String sessionId, ActivityEventRequest request) {
+        InterviewSession session = getRequiredSession(sessionId);
+        if (session.getStatus() != SessionStatus.ACTIVE) {
+            throw new IllegalArgumentException("Activity events can only be recorded for active sessions");
+        }
+        if (request.getParticipantRole() != ParticipantRole.INTERVIEWEE) {
+            throw new IllegalArgumentException("Only interviewee activity is tracked");
+        }
+
+        SessionActivityEvent event = new SessionActivityEvent();
+        event.setSessionId(sessionId);
+        event.setParticipantRole(request.getParticipantRole());
+        event.setEventType(request.getEventType());
+        event.setDetail(buildActivityDetail(request));
+        event = sessionActivityEventRepository.save(event);
+        return toActivityEventDto(event);
+    }
+
     private void acceptDisclaimerInternal(String sessionId, ParticipantRole role) {
         Participant participant = participantRepository.findBySessionIdAndRole(sessionId, role)
                 .orElseThrow(() -> new IllegalArgumentException("Participant not found"));
@@ -325,12 +370,13 @@ public class SessionService {
         participantRepository.save(participant);
     }
 
-    private Participant createParticipant(String sessionId, ParticipantRole role, String name, String email) {
+    private Participant createParticipant(String sessionId, ParticipantRole role, String name, String email, String timeZone) {
         Participant participant = new Participant();
         participant.setSessionId(sessionId);
         participant.setRole(role);
         participant.setName(name.trim());
         participant.setEmail(email.trim().toLowerCase(Locale.ROOT));
+        participant.setTimeZone(normalizeTimeZone(timeZone));
         return participant;
     }
 
@@ -423,9 +469,15 @@ public class SessionService {
         CodeState codeState = codeStateRepository.findBySessionId(session.getId()).orElse(null);
         RunResult runResult = runResultRepository.findTopBySessionIdOrderByCompiledAtDesc(session.getId()).orElse(null);
         Feedback feedback = feedbackRepository.findBySessionId(session.getId()).orElse(null);
+        List<ActivityEventDto> activityEvents = includeDetails
+                ? sessionActivityEventRepository.findBySessionIdOrderByCreatedAtAsc(session.getId()).stream()
+                        .map(this::toActivityEventDto)
+                        .toList()
+                : List.of();
 
         return SessionResponse.builder()
                 .id(session.getId())
+                .technology(session.getTechnology())
                 .status(session.getStatus())
                 .createdAt(session.getCreatedAt())
                 .startedAt(session.getStartedAt())
@@ -446,9 +498,10 @@ public class SessionService {
                 .feedback(feedback == null ? null : FeedbackDto.builder()
                         .rating(feedback.getRating())
                         .comments(feedback.getComments())
-                        .recommendation(feedback.getRecommendation())
+                        .recommendationDecision(resolveRecommendationDecision(feedback))
                         .submittedAt(feedback.getSubmittedAt())
                         .build())
+                .activityEvents(activityEvents)
                 .joinInfo(joinInfo)
                 .summary(buildSummary(session, feedback))
                 .build();
@@ -471,6 +524,7 @@ public class SessionService {
                 .role(participant.getRole())
                 .name(participant.getName())
                 .email(participant.getEmail())
+                .timeZone(participant.getTimeZone())
                 .disclaimerAcceptedAt(participant.getDisclaimerAcceptedAt())
                 .joinedAt(participant.getJoinedAt())
                 .build();
@@ -488,8 +542,84 @@ public class SessionService {
             return "Token Expired";
         }
         if (feedback != null) {
-            return feedback.getRating() + " / " + (Boolean.TRUE.equals(feedback.getRecommendation()) ? "Recommended" : "Not recommended");
+            return feedback.getRating() + " / " + formatRecommendationDecision(resolveRecommendationDecision(feedback));
         }
         return session.getStatus().name();
+    }
+
+    private String buildActivityDetail(ActivityEventRequest request) {
+        if (request.getDetail() != null && !request.getDetail().isBlank()) {
+            return request.getDetail().trim();
+        }
+
+        if (request.getEventType() == ActivityEventType.TAB_HIDDEN) {
+            return "Interviewee switched away from the interview tab or window.";
+        }
+        return "Interviewee pasted content into the editor.";
+    }
+
+    private ActivityEventDto toActivityEventDto(SessionActivityEvent event) {
+        return ActivityEventDto.builder()
+                .id(event.getId())
+                .participantRole(event.getParticipantRole())
+                .eventType(event.getEventType())
+                .detail(event.getDetail())
+                .createdAt(event.getCreatedAt())
+                .build();
+    }
+
+    private String normalizeTimeZone(String timeZone) {
+        return timeZone == null || timeZone.isBlank() ? null : timeZone.trim();
+    }
+
+    private RecommendationDecision resolveRecommendationDecision(Feedback feedback) {
+        if (feedback.getRecommendationDecision() != null) {
+            return feedback.getRecommendationDecision();
+        }
+        return Boolean.TRUE.equals(feedback.getRecommendation()) ? RecommendationDecision.YES : RecommendationDecision.NO;
+    }
+
+    private String formatRecommendationDecision(RecommendationDecision decision) {
+        if (decision == null) {
+            return "No";
+        }
+        return switch (decision) {
+            case YES -> "Yes";
+            case NO -> "No";
+            case REEVALUATION -> "Reevaluation";
+        };
+    }
+
+    private boolean matchesSearch(SessionResponse session, String search) {
+        if (search == null || search.isBlank()) {
+            return true;
+        }
+
+        String normalizedSearch = search.trim().toLowerCase(Locale.ROOT);
+        if (normalizedSearch.length() < 3) {
+            return true;
+        }
+
+        return session.getParticipants().stream()
+                .map(participant -> (participant.getName() + " " + participant.getEmail()).toLowerCase(Locale.ROOT))
+                .anyMatch(value -> value.contains(normalizedSearch));
+    }
+
+    private Comparator<SessionResponse> buildSessionComparator(Pageable pageable) {
+        Sort.Order order = pageable != null && pageable.getSort().isSorted()
+                ? pageable.getSort().iterator().next()
+                : Sort.Order.desc("createdAt");
+
+        Comparator<SessionResponse> comparator = switch (order.getProperty()) {
+            case "status" -> Comparator.comparing(session -> session.getStatus().name(), String.CASE_INSENSITIVE_ORDER);
+            case "summary" -> Comparator.comparing(session -> session.getSummary() == null ? "" : session.getSummary(), String.CASE_INSENSITIVE_ORDER);
+            default -> Comparator.comparing(SessionResponse::getCreatedAt, Comparator.nullsLast(Comparator.naturalOrder()));
+        };
+
+        if (order.getDirection() == Sort.Direction.DESC) {
+            comparator = comparator.reversed();
+        }
+
+        return comparator;
     }
 }

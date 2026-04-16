@@ -31,8 +31,9 @@
 .session-banner {
   display: grid;
   grid-template-columns: 1.6fr auto auto;
-  gap: 18px;
-  padding: 24px;
+  grid-template-areas: "participants role status";
+  gap: 14px;
+  padding: 20px 22px;
   background: linear-gradient(135deg, #16324f 0%, #0b7285 100%);
   color: #fff;
   border-radius: var(--radius-lg);
@@ -40,6 +41,7 @@
 }
 
 .banner-participants {
+  grid-area: participants;
   display: grid;
   grid-template-columns: repeat(2, minmax(220px, 1fr));
   gap: 14px;
@@ -47,8 +49,8 @@
 
 .participant-card {
   display: grid;
-  gap: 2px;
-  padding: 12px 14px;
+  gap: 1px;
+  padding: 10px 12px;
   background: rgba(255, 255, 255, 0.14);
   border-radius: 18px;
 }
@@ -80,10 +82,25 @@
   font-weight: 700;
 }
 
+.role-indicator {
+  grid-area: role;
+}
+
+.status-chip-waiting_join {
+  background: rgba(255, 241, 214, 0.24);
+  border-color: rgba(255, 234, 176, 0.5);
+  color: #fff3cf;
+}
+
+.status-chip-active {
+  background: rgba(31, 143, 95, 0.2);
+}
+
 .session-status {
+  grid-area: status;
   display: grid;
   justify-items: end;
-  gap: 10px;
+  gap: 8px;
 }
 
 .status-meta {
@@ -199,6 +216,16 @@
 .feedback-textarea {
   min-height: 140px;
   resize: vertical;
+}
+
+.feedback-counter {
+  font-size: 0.86rem;
+  color: var(--text-soft);
+}
+
+.feedback-counter.near-limit {
+  color: var(--warning);
+  font-weight: 700;
 }
 
 .feedback-actions {

@@ -1,5 +1,5 @@
 import React from 'react';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { sessionApi } from '../services/sessionApi';
 import { Button } from '../components/Button';
@@ -17,6 +17,7 @@ const STATUS_LABELS: Record<string, string> = {
 
 const Result: React.FC = () => {
   const { sessionId } = useParams<{ sessionId: string }>();
+  const navigate = useNavigate();
 
   const { data: session, isLoading } = useQuery({
     queryKey: ['session', sessionId],
@@ -24,12 +25,28 @@ const Result: React.FC = () => {
     enabled: !!sessionId,
   });
 
+  React.useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        navigate('/java');
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [navigate]);
+
   if (isLoading) return <div className="page-shell"><div className="page-card">Loading result...</div></div>;
   if (!session) return <div className="page-shell"><div className="page-card">Session not found</div></div>;
 
   const interviewer = session.participants.find((participant) => participant.role === 'INTERVIEWER');
   const interviewee = session.participants.find((participant) => participant.role === 'INTERVIEWEE');
   const isTokenExpired = session.status === 'EXPIRED';
+  const activityEvents = session.activityEvents || [];
+  const tabSwitchEvents = activityEvents.filter((event) => event.eventType === 'TAB_HIDDEN');
+  const pasteEvents = activityEvents.filter((event) => event.eventType === 'PASTE_IN_EDITOR');
+  const blockedDropEvents = activityEvents.filter((event) => event.eventType === 'EXTERNAL_DROP_BLOCKED');
+  const latestActivity = activityEvents.length ? activityEvents[activityEvents.length - 1] : null;
 
   return (
     <div className="result-page polished-page">
@@ -55,7 +72,7 @@ const Result: React.FC = () => {
             </div>
           </div>
         </div>
-        <Button onClick={() => window.history.back()}>Close</Button>
+        <Button onClick={() => navigate('/java')}>Close (Esc)</Button>
       </div>
 
       <div className="result-summary-card">
@@ -66,7 +83,7 @@ const Result: React.FC = () => {
         {session.feedback && (
           <>
             <p><strong>Rating:</strong> {session.feedback.rating}</p>
-            <p><strong>Recommendation:</strong> {session.feedback.recommendation ? 'Yes' : 'No'}</p>
+            <p><strong>Recommendation:</strong> {formatRecommendation(session.feedback.recommendationDecision)}</p>
             <p><strong>Comments:</strong> {session.feedback.comments}</p>
           </>
         )}
@@ -75,6 +92,44 @@ const Result: React.FC = () => {
 
       {!isTokenExpired && (
         <div className="result-panels">
+          <section className="result-panel">
+            <h3>Suspicious Activity</h3>
+            {activityEvents.length ? (
+              <div className="activity-summary">
+                <div className="activity-summary-grid">
+                  <div className="activity-metric">
+                    <span className="activity-metric-label">Total events</span>
+                    <strong>{activityEvents.length}</strong>
+                  </div>
+                  <div className="activity-metric">
+                    <span className="activity-metric-label">Tab switches</span>
+                    <strong>{tabSwitchEvents.length}</strong>
+                  </div>
+                  <div className="activity-metric">
+                    <span className="activity-metric-label">Paste events</span>
+                    <strong>{pasteEvents.length}</strong>
+                  </div>
+                  <div className="activity-metric">
+                    <span className="activity-metric-label">Blocked drops</span>
+                    <strong>{blockedDropEvents.length}</strong>
+                  </div>
+                </div>
+                <div className="activity-summary-note">
+                  <p>
+                    <strong>Summary:</strong> {tabSwitchEvents.length} tab switch event{tabSwitchEvents.length === 1 ? '' : 's'}, {pasteEvents.length} paste event{pasteEvents.length === 1 ? '' : 's'}, and {blockedDropEvents.length} blocked drag-and-drop attempt{blockedDropEvents.length === 1 ? '' : 's'} were recorded during the session.
+                  </p>
+                  {latestActivity ? (
+                    <p>
+                      <strong>Most recent:</strong> {latestActivity.detail} at {formatDateTime(latestActivity.createdAt)}.
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+            ) : (
+              <p className="activity-empty">No suspicious activities were observed. The candidate attempted the interview honestly.</p>
+            )}
+          </section>
+
           <section className="result-panel">
             <h3>Final Code</h3>
             <pre className="result-pre code-pre">{session.latestCode || '(no code captured)'}</pre>
@@ -96,3 +151,9 @@ const Result: React.FC = () => {
 };
 
 export default Result;
+
+function formatRecommendation(value: string) {
+  return value === 'REEVALUATION'
+    ? 'Reevaluation'
+    : value.charAt(0) + value.slice(1).toLowerCase();
+}

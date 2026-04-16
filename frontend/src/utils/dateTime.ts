@@ -24,10 +24,36 @@ export function formatDateTime(value?: string | null) {
   }
 }
 
-export function getLocalTimeZoneLabel() {
+export function getBrowserTimeZone() {
   try {
     return Intl.DateTimeFormat().resolvedOptions().timeZone;
   } catch {
+    return 'UTC';
+  }
+}
+
+export function formatTimeZoneLabel(timeZone?: string | null) {
+  if (!timeZone) {
     return 'Local time';
   }
+
+  try {
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      timeZoneName: 'short',
+      hour: '2-digit',
+    });
+    const zonePart = formatter.formatToParts(new Date()).find((part) => part.type === 'timeZoneName')?.value;
+    if (zonePart) {
+      return zonePart;
+    }
+  } catch {
+    // fall through
+  }
+
+  return timeZone;
+}
+
+export function getLocalTimeZoneLabel() {
+  return formatTimeZoneLabel(getBrowserTimeZone());
 }

@@ -41,11 +41,81 @@
   align-items: center;
 }
 
+.fullscreen-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fullscreen-icon {
+  position: relative;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+}
+
+.fullscreen-icon-corner {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  border-color: currentColor;
+  border-style: solid;
+  transition: transform 0.18s ease;
+}
+
+.fullscreen-icon-corner.top-left {
+  top: 0;
+  left: 0;
+  border-width: 2px 0 0 2px;
+}
+
+.fullscreen-icon-corner.top-right {
+  top: 0;
+  right: 0;
+  border-width: 2px 2px 0 0;
+}
+
+.fullscreen-icon-corner.bottom-left {
+  bottom: 0;
+  left: 0;
+  border-width: 0 0 2px 2px;
+}
+
+.fullscreen-icon-corner.bottom-right {
+  right: 0;
+  bottom: 0;
+  border-width: 0 2px 2px 0;
+}
+
+.fullscreen-icon.is-active .top-left,
+.fullscreen-icon.is-active .bottom-right {
+  transform: translate(1px, 1px);
+}
+
+.fullscreen-icon.is-active .top-right,
+.fullscreen-icon.is-active .bottom-left {
+  transform: translate(-1px, 1px);
+}
+
+.fullscreen-shortcut {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(140, 164, 187, 0.18);
+  color: var(--text-soft);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
 .editor-wrapper {
   position: relative;
   flex: 1;
   min-height: 0;
   background: #0f2238;
+}
+
+.editor-mount {
+  height: 100%;
 }
 
 .editor-empty-state {

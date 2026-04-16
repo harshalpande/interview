@@ -1,6 +1,7 @@
 package com.altimetrik.interview.entity;
 
 import com.altimetrik.interview.enums.SessionStatus;
+import com.altimetrik.interview.enums.TechnologySkill;
 import jakarta.persistence.*;
 import lombok.Data;
 import org.hibernate.annotations.CreationTimestamp;
@@ -28,6 +29,9 @@ public class InterviewSession {
     private Boolean extensionUsed = false;
 
     private Boolean incomplete = false;
+
+    @Enumerated(EnumType.STRING)
+    private TechnologySkill technology = TechnologySkill.JAVA;
     
     @Enumerated(EnumType.STRING)
     private SessionStatus status = SessionStatus.CREATED;

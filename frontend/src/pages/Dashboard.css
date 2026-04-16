@@ -17,14 +17,45 @@
   font-size: clamp(1.4rem, 2vw, 2rem);
 }
 
-.start-button-container {
+.dashboard-toolbar {
   display: flex;
-  justify-content: flex-end;
+  align-items: stretch;
   margin-bottom: 18px;
+}
+
+.dashboard-search {
+  display: grid;
+  gap: 8px;
+  flex: 1;
+}
+
+.dashboard-search-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.dashboard-search label {
+  font-weight: 600;
+}
+
+.dashboard-search input {
+  flex: 1;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: #fff;
+  font: inherit;
+}
+
+.search-hint {
+  color: var(--text-soft);
+  font-size: 0.88rem;
 }
 
 .start-interview-btn {
   min-width: 180px;
+  justify-content: center;
 }
 
 .interviews-table {
@@ -47,6 +78,16 @@
   white-space: nowrap;
 }
 
+.sort-button {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
 .interviews-table tbody td {
   padding: 18px;
   border-top: 1px solid #e6edf4;
@@ -57,6 +98,13 @@
 .summary-cell {
   min-width: 220px;
   color: var(--text-soft);
+}
+
+.interviews-table mark {
+  padding: 0 2px;
+  background: #fff1d6;
+  color: inherit;
+  border-radius: 4px;
 }
 
 .status {
@@ -138,6 +186,15 @@
 
   .dashboard-header,
   .pagination {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .dashboard-toolbar {
+    align-items: stretch;
+  }
+
+  .dashboard-search-row {
     flex-direction: column;
     align-items: stretch;
   }
