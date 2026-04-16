@@ -12,7 +12,7 @@ const ShareUrlToggle: React.FC<ShareUrlToggleProps> = ({ token }) => {
   const copyTimeoutRef = useRef<number | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const publicOrigin = (process.env.REACT_APP_PUBLIC_ORIGIN || window.location.origin).replace(/\/$/, '');
-  const shareUrl = `${publicOrigin}/join/${token}`;
+  const shareUrl = `${publicOrigin}/java/join/${token}`;
 
   useEffect(() => {
     setCopied(false);

@@ -46,7 +46,7 @@ const Disclaimer: React.FC = () => {
   useBackGuard({
     enabled: true,
     message: 'Leave this step? You will be returned to the dashboard.',
-    redirectTo: '/',
+    redirectTo: '/java',
   });
 
   const { data: fetchedSession, isLoading, error } = useQuery({
@@ -86,7 +86,7 @@ const Disclaimer: React.FC = () => {
         role: participantRole,
       });
       setSession(nextSession);
-      navigate(`/session/${activeSessionId}?role=${role}`);
+      navigate(`/java/session/${activeSessionId}?role=${role}`);
     } catch (acceptError) {
       const message = acceptError instanceof Error ? acceptError.message : 'Failed to save disclaimer';
       alert(message);

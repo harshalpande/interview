@@ -57,7 +57,7 @@ const Session: React.FC = () => {
   useBackGuard({
     enabled: true,
     message: 'Leave the interview session? You will be returned to the dashboard.',
-    redirectTo: '/',
+    redirectTo: '/java',
   });
 
   React.useEffect(() => {
@@ -129,7 +129,7 @@ const Session: React.FC = () => {
     mutationFn: () => sessionApi.submitFeedback(sessionId!, feedback),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
-      navigate('/');
+      navigate('/java');
     },
   });
 
@@ -386,7 +386,7 @@ const Session: React.FC = () => {
             </div>
           ) : (
             <div className="feedback-actions">
-              <button className="control-btn btn-start" onClick={() => navigate('/')}>
+              <button className="control-btn btn-start" onClick={() => navigate('/java')}>
                 Back to Dashboard
               </button>
             </div>

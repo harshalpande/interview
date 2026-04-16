@@ -34,7 +34,7 @@ const InterviewRow: React.FC<InterviewRowProps> = ({ session }) => {
       </td>
       <td>
         {session.status !== 'EXPIRED' ? (
-          <Link to={`/result/${session.id}`} className="btn btn-small btn-secondary">
+          <Link to={`/java/result/${session.id}`} className="btn btn-small btn-secondary">
             Result
           </Link>
         ) : null}
