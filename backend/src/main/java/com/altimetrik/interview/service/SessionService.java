@@ -22,6 +22,7 @@ import com.altimetrik.interview.entity.RunResult;
 import com.altimetrik.interview.entity.SessionActivityEvent;
 import com.altimetrik.interview.entity.SessionToken;
 import com.altimetrik.interview.enums.ActivityEventType;
+import com.altimetrik.interview.enums.FeedbackRating;
 import com.altimetrik.interview.enums.IdentityCaptureFailureReason;
 import com.altimetrik.interview.enums.IdentityCaptureStatus;
 import com.altimetrik.interview.enums.ParticipantRole;
@@ -53,6 +54,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
@@ -123,10 +125,14 @@ public class SessionService {
     }
 
     @Transactional(readOnly = true)
-    public Page<SessionResponse> listSessions(Pageable pageable, String search) {
-        List<SessionResponse> sessions = sessionRepository.findAll().stream()
-                .map(session -> toSessionResponse(session, false, null))
-                .filter(session -> matchesSearch(session, search))
+    public Page<SessionResponse> listSessions(Pageable pageable,
+                                              String search,
+                                              OffsetDateTime from,
+                                              OffsetDateTime to,
+                                              List<TechnologySkill> technologies,
+                                              List<FeedbackRating> ratings) {
+        List<SessionResponse> sessions = filterSessions(search, from, to, technologies, ratings, false)
+                .stream()
                 .sorted(buildSessionComparator(pageable))
                 .toList();
 
@@ -135,6 +141,81 @@ public class SessionService {
         int start = Math.min(pageNumber * pageSize, sessions.size());
         int end = Math.min(start + pageSize, sessions.size());
         return new PageImpl<>(sessions.subList(start, end), pageable, sessions.size());
+    }
+
+    @Transactional(readOnly = true)
+    public CsvExport exportSessionsCsv(String search,
+                                       OffsetDateTime from,
+                                       OffsetDateTime to,
+                                       List<TechnologySkill> technologies,
+                                       List<FeedbackRating> ratings,
+                                       String sortBy,
+                                       Sort.Direction direction) {
+        List<SessionResponse> sessions = filterSessions(search, from, to, technologies, ratings, true)
+                .stream()
+                .sorted(buildSessionComparator(sortBy, direction))
+                .toList();
+
+        StringBuilder csv = new StringBuilder();
+        csv.append(String.join(",",
+                csvCell("Interview Date"),
+                csvCell("Technology"),
+                csvCell("Status"),
+                csvCell("Summary"),
+                csvCell("Interviewer Name"),
+                csvCell("Interviewer Email"),
+                csvCell("Interviewer Time Zone"),
+                csvCell("Interviewee Name"),
+                csvCell("Interviewee Email"),
+                csvCell("Interviewee Time Zone"),
+                csvCell("Started At"),
+                csvCell("Ended At"),
+                csvCell("Rating"),
+                csvCell("Recommendation"),
+                csvCell("Comments"),
+                csvCell("Identity Snapshot Status"),
+                csvCell("Identity Capture Failure Reason"),
+                csvCell("Suspicious Event Count"),
+                csvCell("Tab Switch Count"),
+                csvCell("Paste Event Count")
+        )).append('\n');
+
+        for (SessionResponse session : sessions) {
+            ParticipantDto interviewer = findParticipant(session, ParticipantRole.INTERVIEWER);
+            ParticipantDto interviewee = findParticipant(session, ParticipantRole.INTERVIEWEE);
+            List<ActivityEventDto> activityEvents = session.getActivityEvents() == null ? List.of() : session.getActivityEvents();
+            long tabSwitchCount = activityEvents.stream().filter(event -> event.getEventType() == ActivityEventType.TAB_HIDDEN).count();
+            long pasteCount = activityEvents.stream().filter(event -> event.getEventType() == ActivityEventType.PASTE_IN_EDITOR).count();
+
+            csv.append(String.join(",",
+                    csvCell(toCsvTimestamp(session.getCreatedAt())),
+                    csvCell(session.getTechnology() == null ? "" : session.getTechnology().name()),
+                    csvCell(session.getStatus() == null ? "" : session.getStatus().name()),
+                    csvCell(nullSafe(session.getSummary())),
+                    csvCell(interviewer == null ? "" : interviewer.getName()),
+                    csvCell(interviewer == null ? "" : interviewer.getEmail()),
+                    csvCell(interviewer == null ? "" : nullSafe(interviewer.getTimeZone())),
+                    csvCell(interviewee == null ? "" : interviewee.getName()),
+                    csvCell(interviewee == null ? "" : interviewee.getEmail()),
+                    csvCell(interviewee == null ? "" : nullSafe(interviewee.getTimeZone())),
+                    csvCell(toCsvTimestamp(session.getStartedAt())),
+                    csvCell(toCsvTimestamp(session.getEndedAt())),
+                    csvCell(session.getFeedback() == null || session.getFeedback().getRating() == null ? "" : session.getFeedback().getRating().name()),
+                    csvCell(session.getFeedback() == null || session.getFeedback().getRecommendationDecision() == null ? "" : session.getFeedback().getRecommendationDecision().name()),
+                    csvCell(session.getFeedback() == null ? "" : nullSafe(session.getFeedback().getComments())),
+                    csvCell(interviewee == null || interviewee.getIdentityCaptureStatus() == null ? "" : interviewee.getIdentityCaptureStatus().name()),
+                    csvCell(interviewee == null || interviewee.getIdentityCaptureFailureReason() == null ? "" : interviewee.getIdentityCaptureFailureReason().name()),
+                    csvCell(String.valueOf(activityEvents.size())),
+                    csvCell(String.valueOf(tabSwitchCount)),
+                    csvCell(String.valueOf(pasteCount))
+            )).append('\n');
+        }
+
+        String filename = DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss")
+                .withZone(ZoneOffset.UTC)
+                .format(nowUtc().toInstant()) + ".csv";
+
+        return new CsvExport(filename, csv.toString());
     }
 
     @Transactional(readOnly = true)
@@ -682,22 +763,84 @@ public class SessionService {
                 .anyMatch(value -> value.contains(normalizedSearch));
     }
 
+    private boolean matchesFilters(SessionResponse session,
+                                   OffsetDateTime from,
+                                   OffsetDateTime to,
+                                   List<TechnologySkill> technologies,
+                                   List<FeedbackRating> ratings) {
+        if (from != null && (session.getCreatedAt() == null || session.getCreatedAt().isBefore(from))) {
+            return false;
+        }
+        if (to != null && (session.getCreatedAt() == null || session.getCreatedAt().isAfter(to))) {
+            return false;
+        }
+        if (technologies != null && !technologies.isEmpty() && (session.getTechnology() == null || !technologies.contains(session.getTechnology()))) {
+            return false;
+        }
+        if (ratings != null && !ratings.isEmpty()) {
+            if (session.getFeedback() == null || session.getFeedback().getRating() == null || !ratings.contains(session.getFeedback().getRating())) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private List<SessionResponse> filterSessions(String search,
+                                                 OffsetDateTime from,
+                                                 OffsetDateTime to,
+                                                 List<TechnologySkill> technologies,
+                                                 List<FeedbackRating> ratings,
+                                                 boolean includeDetails) {
+        return sessionRepository.findAll().stream()
+                .map(session -> toSessionResponse(session, includeDetails, null))
+                .filter(session -> matchesSearch(session, search))
+                .filter(session -> matchesFilters(session, from, to, technologies, ratings))
+                .toList();
+    }
+
     private Comparator<SessionResponse> buildSessionComparator(Pageable pageable) {
         Sort.Order order = pageable != null && pageable.getSort().isSorted()
                 ? pageable.getSort().iterator().next()
                 : Sort.Order.desc("createdAt");
 
-        Comparator<SessionResponse> comparator = switch (order.getProperty()) {
+        return buildSessionComparator(order.getProperty(), order.getDirection());
+    }
+
+    private Comparator<SessionResponse> buildSessionComparator(String property, Sort.Direction direction) {
+        Comparator<SessionResponse> comparator = switch (property) {
             case "status" -> Comparator.comparing(session -> session.getStatus().name(), String.CASE_INSENSITIVE_ORDER);
             case "summary" -> Comparator.comparing(session -> session.getSummary() == null ? "" : session.getSummary(), String.CASE_INSENSITIVE_ORDER);
             default -> Comparator.comparing(SessionResponse::getCreatedAt, Comparator.nullsLast(Comparator.naturalOrder()));
         };
 
-        if (order.getDirection() == Sort.Direction.DESC) {
+        if (direction == Sort.Direction.DESC) {
             comparator = comparator.reversed();
         }
 
         return comparator;
+    }
+
+    private ParticipantDto findParticipant(SessionResponse session, ParticipantRole role) {
+        if (session.getParticipants() == null) {
+            return null;
+        }
+        return session.getParticipants().stream()
+                .filter(participant -> participant.getRole() == role)
+                .findFirst()
+                .orElse(null);
+    }
+
+    private String toCsvTimestamp(OffsetDateTime value) {
+        return value == null ? "" : value.toString();
+    }
+
+    private String nullSafe(String value) {
+        return value == null ? "" : value;
+    }
+
+    private String csvCell(String value) {
+        String safe = value == null ? "" : value;
+        return "\"" + safe.replace("\"", "\"\"") + "\"";
     }
 
     private IdentityCaptureFailureReason resolveCaptureFailureReason(IdentityCaptureStatus status,
@@ -712,5 +855,8 @@ public class SessionService {
     }
 
     public record ResourceWithMetadata(org.springframework.core.io.Resource resource, String contentType) {
+    }
+
+    public record CsvExport(String filename, String content) {
     }
 }

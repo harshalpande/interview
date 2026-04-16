@@ -1,27 +1,157 @@
-import React, { useDeferredValue, useState } from 'react';
+import React, { useDeferredValue, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { InterviewRow } from '../components/InterviewRow';
 import { sessionApi } from '../services/sessionApi';
-import type { SessionResponse } from '../types/session';
+import type { FeedbackRating, SessionResponse, TechnologySkill } from '../types/session';
 import './Dashboard.css';
+
+type SortKey = 'createdAt' | 'status' | 'summary';
+type DatePresetKey = 'today' | 'week' | 'month' | 'year' | 'financialYear';
+
+const TECHNOLOGY_OPTIONS: TechnologySkill[] = ['JAVA', 'PYTHON', 'ANGULAR', 'REACT', 'SQL'];
+const RATING_OPTIONS: FeedbackRating[] = ['EXCELLENT', 'GOOD', 'FAIR', 'BAD'];
+const TODAY_DATE = toDateValue(new Date());
+const TABLE_COLUMN_WIDTHS = ['15%', '10%', '21%', '21%', '11%', '14%', '8%'];
 
 const Dashboard: React.FC = () => {
   const [page, setPage] = useState(0);
-  const [pageSize, setPageSize] = useState(20);
+  const [pageSize, setPageSize] = useState(10);
   const [searchInput, setSearchInput] = useState('');
-  const [sortBy, setSortBy] = useState<'createdAt' | 'status' | 'summary'>('createdAt');
+  const [sortBy, setSortBy] = useState<SortKey>('createdAt');
   const [direction, setDirection] = useState<'asc' | 'desc'>('desc');
+  const [filtersEnabled, setFiltersEnabled] = useState(false);
+  const [selectedPreset, setSelectedPreset] = useState<DatePresetKey | null>(null);
+  const [filters, setFilters] = useState<{
+    from: string;
+    to: string;
+    technologies: TechnologySkill[];
+    ratings: FeedbackRating[];
+  }>({
+    from: '',
+    to: '',
+    technologies: [],
+    ratings: [],
+  });
   const deferredSearch = useDeferredValue(searchInput.trim());
   const activeSearch = deferredSearch.length >= 3 ? deferredSearch : '';
 
-  const { data, isLoading, error } = useQuery({
-    queryKey: ['sessions', page, pageSize, sortBy, direction, activeSearch],
-    queryFn: () => sessionApi.listSessions(page, pageSize, sortBy, direction, activeSearch),
+  const activeFilters = useMemo(() => {
+    if (!filtersEnabled) {
+      return undefined;
+    }
+
+    return {
+      from: filters.from ? toIsoString(filters.from, 'start') : undefined,
+      to: filters.to ? toIsoString(filters.to, 'end') : undefined,
+      technologies: filters.technologies,
+      ratings: filters.ratings,
+    };
+  }, [filters, filtersEnabled]);
+
+  const { data, isLoading, error, isFetching } = useQuery({
+    queryKey: ['sessions', page, pageSize, sortBy, direction, activeSearch, activeFilters],
+    queryFn: () => sessionApi.listSessions(page, pageSize, sortBy, direction, activeSearch, activeFilters),
   });
 
   const sessions = data?.content || [];
   const totalPages = data?.totalPages || 0;
+  const totalElements = data?.totalElements || 0;
+  const presetOptions = useMemo(() => buildPresetOptions(), []);
+  const fromMax = filters.to ? minDate(filters.to, TODAY_DATE) : TODAY_DATE;
+  const toMin = filters.from || undefined;
+
+  const handlePresetSelection = (preset: DatePresetKey) => {
+    if (selectedPreset === preset) {
+      setSelectedPreset(null);
+      setFilters((previous) => ({
+        ...previous,
+        from: '',
+        to: '',
+      }));
+      setPage(0);
+      return;
+    }
+
+    const nextRange = createPresetRange(preset);
+    setSelectedPreset(preset);
+    setFilters((previous) => ({
+      ...previous,
+      from: nextRange.from,
+      to: nextRange.to,
+    }));
+    setPage(0);
+  };
+
+  const handleFilterToggle = () => {
+    setFiltersEnabled((previous) => !previous);
+    setPage(0);
+  };
+
+  const handleDateChange = (key: 'from' | 'to', value: string) => {
+    setSelectedPreset(null);
+    setFilters((previous) => ({
+      ...previous,
+      [key]: value,
+    }));
+    setPage(0);
+  };
+
+  const clearFilterField = (key: 'technologies' | 'ratings' | 'from' | 'to') => {
+    if (key === 'from' || key === 'to') {
+      setSelectedPreset(null);
+      setFilters((previous) => ({
+        ...previous,
+        [key]: '',
+      }));
+    } else {
+      setFilters((previous) => ({
+        ...previous,
+        [key]: [],
+      }));
+    }
+    setPage(0);
+  };
+
+  const resetFilters = () => {
+    setSelectedPreset(null);
+    setFilters({
+      from: '',
+      to: '',
+      technologies: [],
+      ratings: [],
+    });
+    setPage(0);
+  };
+
+  const handleMultiSelectChange = (
+    key: 'technologies' | 'ratings',
+    event: React.ChangeEvent<HTMLSelectElement>
+  ) => {
+    const values = Array.from(event.target.selectedOptions).map((option) => option.value);
+    setFilters((previous) => ({
+      ...previous,
+      [key]: values,
+    }));
+    setPage(0);
+  };
+
+  const handleDownload = async () => {
+    try {
+      const exportFilters = filtersEnabled ? activeFilters : undefined;
+      const { blob, filename } = await sessionApi.exportSessionsCsv(sortBy, direction, activeSearch, exportFilters);
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = objectUrl;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      URL.revokeObjectURL(objectUrl);
+    } catch (downloadError) {
+      window.alert(downloadError instanceof Error ? downloadError.message : 'Unable to download report');
+    }
+  };
 
   return (
     <div className="dashboard">
@@ -36,6 +166,11 @@ const Dashboard: React.FC = () => {
             <input
               id="session-search"
               type="search"
+              name="session-search-dashboard"
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="none"
+              spellCheck={false}
               value={searchInput}
               onChange={(event) => {
                 setSearchInput(event.target.value);
@@ -43,6 +178,14 @@ const Dashboard: React.FC = () => {
               }}
               placeholder="Type at least 3 characters"
             />
+            <button
+              type="button"
+              className={`btn btn-secondary filter-toggle-btn ${filtersEnabled ? 'is-active' : ''}`}
+              onClick={handleFilterToggle}
+              aria-pressed={filtersEnabled}
+            >
+              Filter
+            </button>
             <Link to="/start" className="btn btn-primary start-interview-btn">
               Start Interview
             </Link>
@@ -51,12 +194,150 @@ const Dashboard: React.FC = () => {
         </div>
       </div>
 
+      <div className={`dashboard-filters ${filtersEnabled ? 'is-open' : ''}`} aria-hidden={!filtersEnabled}>
+        <div className="filter-header">
+          <div className="filter-header-title">Filters</div>
+          <div className="filter-header-actions">
+            <button type="button" className="filter-reset-button" onClick={resetFilters}>
+              Reset
+            </button>
+            {sessions.length > 0 && (
+              <button type="button" className="download-link-button" onClick={handleDownload}>
+                Download CSV
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div className="filter-body">
+          <div className="filter-presets">
+            {presetOptions.map((preset) => (
+              <button
+                key={preset.key}
+                type="button"
+                className={`preset-chip ${selectedPreset === preset.key ? 'is-selected' : ''}`}
+                onClick={() => handlePresetSelection(preset.key)}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="filter-grid">
+            <div className="filter-group filter-group-date">
+              <div className="filter-date-stack">
+                <div className="filter-field filter-field-date filter-field-date-compact">
+                  <div className="filter-label-row">
+                    <label htmlFor="filter-from">From</label>
+                    {filters.from && (
+                      <button type="button" className="filter-clear-button" onClick={() => clearFilterField('from')}>
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                  <input
+                    id="filter-from"
+                    type="date"
+                    value={filters.from}
+                    max={fromMax}
+                    onChange={(event) => handleDateChange('from', event.target.value)}
+                  />
+                </div>
+
+                <div className="filter-field filter-field-date filter-field-date-compact">
+                  <div className="filter-label-row">
+                    <label htmlFor="filter-to">To</label>
+                    {filters.to && (
+                      <button type="button" className="filter-clear-button" onClick={() => clearFilterField('to')}>
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                  <input
+                    id="filter-to"
+                    type="date"
+                    value={filters.to}
+                    min={toMin}
+                    max={TODAY_DATE}
+                    onChange={(event) => handleDateChange('to', event.target.value)}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="filter-group">
+              <div className="filter-field">
+                <div className="filter-label-row">
+                  <label htmlFor="filter-technology">Technology</label>
+                  {filters.technologies.length > 0 && (
+                    <button
+                      type="button"
+                      className="filter-clear-button"
+                      onClick={() => clearFilterField('technologies')}
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+                <select
+                  id="filter-technology"
+                  multiple
+                  value={filters.technologies}
+                  onChange={(event) => handleMultiSelectChange('technologies', event)}
+                >
+                  {TECHNOLOGY_OPTIONS.map((technology) => (
+                    <option key={technology} value={technology}>
+                      {formatTechnology(technology)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="filter-group">
+              <div className="filter-field">
+                <div className="filter-label-row">
+                  <label htmlFor="filter-rating">Summary</label>
+                  {filters.ratings.length > 0 && (
+                    <button type="button" className="filter-clear-button" onClick={() => clearFilterField('ratings')}>
+                      Clear
+                    </button>
+                  )}
+                </div>
+                <select
+                  id="filter-rating"
+                  multiple
+                  value={filters.ratings}
+                  onChange={(event) => handleMultiSelectChange('ratings', event)}
+                >
+                  {RATING_OPTIONS.map((rating) => (
+                    <option key={rating} value={rating}>
+                      {formatRating(rating)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {error && <div className="error">Error loading sessions: {error.message}</div>}
-      {isLoading && !data ? (
+      {(isLoading && !data) ? (
         <div>Loading...</div>
       ) : (
         <>
+          {isFetching && <div className="grid-refreshing">Refreshing filtered results...</div>}
+          <div className="grid-count">
+            Total records: <strong>{totalElements}</strong>
+          </div>
+
           <table className="interviews-table">
+            <colgroup>
+              {TABLE_COLUMN_WIDTHS.map((width, index) => (
+                <col key={index} style={{ width }} />
+              ))}
+            </colgroup>
             <thead>
               <tr>
                 <th>
@@ -81,9 +362,15 @@ const Dashboard: React.FC = () => {
               </tr>
             </thead>
             <tbody>
-              {sessions.map((session: SessionResponse) => (
-                <InterviewRow key={session.id} session={session} searchTerm={activeSearch} />
-              ))}
+              {sessions.length > 0 ? (
+                sessions.map((session: SessionResponse) => (
+                  <InterviewRow key={session.id} session={session} searchTerm={activeSearch} />
+                ))
+              ) : (
+                <tr className="empty-grid-row">
+                  <td colSpan={7}>No interview sessions match the current search and filter criteria.</td>
+                </tr>
+              )}
             </tbody>
           </table>
 
@@ -115,10 +402,10 @@ const Dashboard: React.FC = () => {
 export default Dashboard;
 
 function toggleSort(
-  nextSort: 'createdAt' | 'status' | 'summary',
-  currentSort: 'createdAt' | 'status' | 'summary',
+  nextSort: SortKey,
+  currentSort: SortKey,
   currentDirection: 'asc' | 'desc',
-  setSortBy: React.Dispatch<React.SetStateAction<'createdAt' | 'status' | 'summary'>>,
+  setSortBy: React.Dispatch<React.SetStateAction<SortKey>>,
   setDirection: React.Dispatch<React.SetStateAction<'asc' | 'desc'>>
 ) {
   if (nextSort === currentSort) {
@@ -131,12 +418,93 @@ function toggleSort(
 }
 
 function renderSortIndicator(
-  key: 'createdAt' | 'status' | 'summary',
-  sortBy: 'createdAt' | 'status' | 'summary',
+  key: SortKey,
+  sortBy: SortKey,
   direction: 'asc' | 'desc'
 ) {
   if (key !== sortBy) {
-    return ' +/-';
+    return ' ↕';
   }
-  return direction === 'asc' ? ' ^' : ' v';
+  return direction === 'asc' ? ' ↑' : ' ↓';
+}
+
+function toIsoString(value: string, boundary: 'start' | 'end') {
+  const date = new Date(`${value}T00:00:00`);
+  if (boundary === 'end') {
+    date.setHours(23, 59, 59, 999);
+  } else {
+    date.setHours(0, 0, 0, 0);
+  }
+  return date.toISOString();
+}
+
+function toDateValue(date: Date) {
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, '0');
+  const day = `${date.getDate()}`.padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function createPresetRange(preset: DatePresetKey) {
+  const now = new Date();
+  const start = new Date(now);
+  const end = new Date(now);
+
+  switch (preset) {
+    case 'today':
+      start.setHours(0, 0, 0, 0);
+      break;
+    case 'week': {
+      const day = now.getDay();
+      const mondayOffset = day === 0 ? -6 : 1 - day;
+      start.setDate(now.getDate() + mondayOffset);
+      start.setHours(0, 0, 0, 0);
+      end.setDate(start.getDate() + 6);
+      end.setHours(23, 59, 0, 0);
+      break;
+    }
+    case 'month':
+      start.setDate(1);
+      start.setHours(0, 0, 0, 0);
+      break;
+    case 'year':
+      start.setMonth(0, 1);
+      start.setHours(0, 0, 0, 0);
+      break;
+    case 'financialYear': {
+      const currentYear = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
+      start.setFullYear(currentYear, 3, 1);
+      start.setHours(0, 0, 0, 0);
+      break;
+    }
+  }
+
+  return {
+    from: toDateValue(start),
+    to: toDateValue(end),
+  };
+}
+
+function buildPresetOptions() {
+  const now = new Date();
+  const monthName = new Intl.DateTimeFormat(undefined, { month: 'long' }).format(now);
+  return [
+    { key: 'today' as const, label: 'Today' },
+    { key: 'week' as const, label: 'Curr. Week' },
+    { key: 'month' as const, label: monthName },
+    { key: 'year' as const, label: 'Curr. Year' },
+    { key: 'financialYear' as const, label: 'Curr. Fin. Year' },
+  ];
+}
+
+function minDate(first: string, second: string) {
+  return first <= second ? first : second;
+}
+
+function formatTechnology(value: TechnologySkill) {
+  return value.charAt(0) + value.slice(1).toLowerCase();
+}
+
+function formatRating(value: FeedbackRating) {
+  return value.charAt(0) + value.slice(1).toLowerCase();
 }

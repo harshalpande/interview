@@ -5,10 +5,12 @@ import type {
   ActivityEventRequest,
   CreateSessionRequest, 
   EndSessionRequest,
+  FeedbackRating,
   IdentityCaptureRequest,
   JoinSessionRequest,
   SessionResponse, 
   FeedbackRequest,
+  TechnologySkill,
   ValidateTokenResponse 
 } from '../types/session';
 import { resolveApiBaseUrl } from '../utils/apiUrls';
@@ -49,7 +51,13 @@ class SessionApiClient {
     size: number = 20,
     sortBy: 'createdAt' | 'status' | 'summary' = 'createdAt',
     direction: 'asc' | 'desc' = 'desc',
-    search: string = ''
+    search: string = '',
+    filters?: {
+      from?: string;
+      to?: string;
+      technologies?: TechnologySkill[];
+      ratings?: FeedbackRating[];
+    }
   ): Promise<{ content: SessionResponse[]; totalPages: number; totalElements: number; number: number; size: number; }> {
     try {
       const params = new URLSearchParams({
@@ -60,8 +68,59 @@ class SessionApiClient {
       if (search.trim()) {
         params.set('search', search.trim());
       }
+      if (filters?.from) {
+        params.set('from', filters.from);
+      }
+      if (filters?.to) {
+        params.set('to', filters.to);
+      }
+      filters?.technologies?.forEach((technology) => params.append('technologies', technology));
+      filters?.ratings?.forEach((rating) => params.append('ratings', rating));
       const response = await this.axiosInstance.get<any>(`/sessions?${params.toString()}`);
       return response.data;
+    } catch (error) {
+      throw this.handleError(error);
+    }
+  }
+
+  async exportSessionsCsv(
+    sortBy: 'createdAt' | 'status' | 'summary' = 'createdAt',
+    direction: 'asc' | 'desc' = 'desc',
+    search: string = '',
+    filters?: {
+      from?: string;
+      to?: string;
+      technologies?: TechnologySkill[];
+      ratings?: FeedbackRating[];
+    }
+  ): Promise<{ blob: Blob; filename: string }> {
+    try {
+      const params = new URLSearchParams({
+        sortBy,
+        direction,
+      });
+      if (search.trim()) {
+        params.set('search', search.trim());
+      }
+      if (filters?.from) {
+        params.set('from', filters.from);
+      }
+      if (filters?.to) {
+        params.set('to', filters.to);
+      }
+      filters?.technologies?.forEach((technology) => params.append('technologies', technology));
+      filters?.ratings?.forEach((rating) => params.append('ratings', rating));
+
+      const response = await this.axiosInstance.get(`/sessions/export?${params.toString()}`, {
+        responseType: 'blob',
+      });
+
+      const disposition = response.headers['content-disposition'] as string | undefined;
+      const filenameMatch = disposition?.match(/filename="?([^"]+)"?/i);
+      return {
+        blob: response.data,
+        filename: filenameMatch?.[1] || 'sessions-export.csv',
+      };
     } catch (error) {
       throw this.handleError(error);
     }

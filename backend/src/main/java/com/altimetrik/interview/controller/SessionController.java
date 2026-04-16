@@ -12,6 +12,8 @@ import com.altimetrik.interview.dto.JoinSessionRequest;
 import com.altimetrik.interview.dto.SessionResponse;
 import com.altimetrik.interview.dto.SessionSocketMessage;
 import com.altimetrik.interview.dto.ValidateTokenResponse;
+import com.altimetrik.interview.enums.FeedbackRating;
+import com.altimetrik.interview.enums.TechnologySkill;
 import com.altimetrik.interview.service.SessionService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -26,6 +28,10 @@ import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.bind.annotation.*;
+
+import java.nio.charset.StandardCharsets;
+import java.time.OffsetDateTime;
+import java.util.List;
 
 @RestController
 @RequestMapping("/sessions")
@@ -49,16 +55,44 @@ public class SessionController {
 
     @GetMapping
     public ResponseEntity<?> listSessions(Pageable pageable,
-                                          @RequestParam(required = false) String search) {
+                                          @RequestParam(required = false) String search,
+                                          @RequestParam(required = false) OffsetDateTime from,
+                                          @RequestParam(required = false) OffsetDateTime to,
+                                          @RequestParam(required = false) List<TechnologySkill> technologies,
+                                          @RequestParam(required = false) List<FeedbackRating> ratings) {
         if (pageable == null || pageable.getSort().isUnsorted()) {
             Pageable defaultPageable = PageRequest.of(
                 pageable != null ? pageable.getPageNumber() : 0,
                 pageable != null && pageable.getPageSize() > 0 ? pageable.getPageSize() : 20,
                 Sort.by("createdAt").descending()
             );
-            return ResponseEntity.ok(sessionService.listSessions(defaultPageable, search));
+            return ResponseEntity.ok(sessionService.listSessions(defaultPageable, search, from, to, technologies, ratings));
         }
-        return ResponseEntity.ok(sessionService.listSessions(pageable, search));
+        return ResponseEntity.ok(sessionService.listSessions(pageable, search, from, to, technologies, ratings));
+    }
+
+    @GetMapping("/export")
+    public ResponseEntity<byte[]> exportSessions(@RequestParam(required = false) String search,
+                                                 @RequestParam(required = false) OffsetDateTime from,
+                                                 @RequestParam(required = false) OffsetDateTime to,
+                                                 @RequestParam(required = false) List<TechnologySkill> technologies,
+                                                 @RequestParam(required = false) List<FeedbackRating> ratings,
+                                                 @RequestParam(defaultValue = "createdAt") String sortBy,
+                                                 @RequestParam(defaultValue = "desc") String direction) {
+        SessionService.CsvExport export = sessionService.exportSessionsCsv(
+                search,
+                from,
+                to,
+                technologies,
+                ratings,
+                sortBy,
+                Sort.Direction.fromOptionalString(direction).orElse(Sort.Direction.DESC)
+        );
+
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + export.filename() + "\"")
+                .contentType(new MediaType("text", "csv", StandardCharsets.UTF_8))
+                .body(export.content().getBytes(StandardCharsets.UTF_8));
     }
 
     @PostMapping("/{id}/disclaimer")
