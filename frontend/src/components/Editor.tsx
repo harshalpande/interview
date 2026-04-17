@@ -11,6 +11,7 @@ const TEMPLATE_CODE = `public class Solution {
         System.out.println("Hello, World!");
     }
 }`;
+const JAVA_SANDBOX_LABEL = 'Sandbox: Eclipse Temurin JDK 17';
 
 interface EditorState {
   code: string;
@@ -24,10 +25,10 @@ interface EditorProps {
   readOnly?: boolean;
   initialCode?: string;
   onCodeChange?: (code: string) => void;
-  onPasteInEditor?: (text: string) => void;
+  onPasteInEditor?: (text: string) => boolean | void;
   onCopyFromEditor?: (text: string) => void;
   onCutFromEditor?: (text: string) => void;
-  onExternalDropBlocked?: (text: string) => void;
+  onExternalDropBlocked?: () => void;
   showResetButton?: boolean;
   canRun?: boolean;
   emptyStateMessage?: string;
@@ -160,7 +161,9 @@ const Editor: React.FC<EditorProps> = ({
 
       event.preventDefault();
       event.stopPropagation();
-      onExternalDropBlocked(event.dataTransfer?.getData('text/plain') ?? '');
+      if (event.type === 'drop') {
+        onExternalDropBlocked();
+      }
     };
 
     window.addEventListener('dragenter', handleBlockedDrag, true);
@@ -242,6 +245,7 @@ const Editor: React.FC<EditorProps> = ({
         <div className="editor-header">
           <div className="editor-title">
             <span>Java Code Editor</span>
+            <span className="editor-sandbox-label">{JAVA_SANDBOX_LABEL}</span>
           </div>
           <div className="editor-actions">
             <button className="btn btn-secondary" onClick={toggleTheme} title="Toggle theme">
@@ -289,26 +293,26 @@ const Editor: React.FC<EditorProps> = ({
             ref={editorMountRef}
             className="editor-mount"
             onDragEnterCapture={(event) => {
-              const draggedText = event.dataTransfer?.getData('text/plain') ?? '';
               event.preventDefault();
               event.stopPropagation();
-              onExternalDropBlocked?.(draggedText);
             }}
             onDropCapture={(event) => {
-              const droppedText = event.dataTransfer?.getData('text/plain') ?? '';
               event.preventDefault();
               event.stopPropagation();
-              onExternalDropBlocked?.(droppedText);
+              onExternalDropBlocked?.();
             }}
             onDragOverCapture={(event) => {
               event.preventDefault();
               event.stopPropagation();
-              onExternalDropBlocked?.('');
             }}
             onPasteCapture={(event) => {
               const pastedText = event.clipboardData?.getData('text') ?? '';
               if (pastedText && !readOnly) {
-                onPasteInEditor?.(pastedText);
+                const allowPaste = onPasteInEditor?.(pastedText);
+                if (allowPaste === false) {
+                  event.preventDefault();
+                  event.stopPropagation();
+                }
               }
             }}
           >
@@ -367,17 +371,15 @@ const Editor: React.FC<EditorProps> = ({
                   domNode.addEventListener('dragover', (event: DragEvent) => {
                     event.preventDefault();
                     event.stopPropagation();
-                    onExternalDropBlocked?.('');
                   }, true);
                   domNode.addEventListener('dragenter', (event: DragEvent) => {
                     event.preventDefault();
                     event.stopPropagation();
-                    onExternalDropBlocked?.(event.dataTransfer?.getData('text/plain') ?? '');
                   }, true);
                   domNode.addEventListener('drop', (event: DragEvent) => {
                     event.preventDefault();
                     event.stopPropagation();
-                    onExternalDropBlocked?.(event.dataTransfer?.getData('text/plain') ?? '');
+                    onExternalDropBlocked?.();
                   }, true);
                 }
               }}

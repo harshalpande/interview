@@ -27,9 +27,11 @@ public class SessionActivityEvent {
     private String sessionId;
 
     @Enumerated(EnumType.STRING)
+    @Column(length = 32)
     private ParticipantRole participantRole;
 
     @Enumerated(EnumType.STRING)
+    @Column(length = 64, columnDefinition = "VARCHAR(64)")
     private ActivityEventType eventType;
 
     @Column(columnDefinition = "TEXT")

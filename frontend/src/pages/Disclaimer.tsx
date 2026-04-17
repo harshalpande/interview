@@ -105,18 +105,22 @@ const Disclaimer: React.FC = () => {
         </p>
 
         <div className="disclaimer-identity">
-          <div>
-            <strong>Name:</strong> {participant?.name || 'Not available'}
+          <div className="identity-item identity-item-row identity-item-wide">
+            <strong>Name:</strong>
+            <span>{participant?.name || 'Not available'}</span>
           </div>
-          <div>
-            <strong>Email:</strong> {participant?.email || 'Not available'}
+          <div className="identity-item identity-item-row">
+            <strong>Email:</strong>
+            <span>{participant?.email || 'Not available'}</span>
           </div>
-          <div>
-            <strong>Current timezone:</strong> {getLocalTimeZoneLabel()}
+          <div className="identity-item identity-item-row identity-item-timezone">
+            <strong>Current timezone:</strong>
+            <span>{getLocalTimeZoneLabel()}</span>
           </div>
           {session?.createdAt && (
-            <div>
-              <strong>Created:</strong> {formatDateTime(session.createdAt)}
+            <div className="identity-item identity-item-row identity-item-wide">
+              <strong>Created:</strong>
+              <span>{formatDateTime(session.createdAt)}</span>
             </div>
           )}
         </div>

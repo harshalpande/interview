@@ -82,6 +82,19 @@
   padding: 22px 24px;
 }
 
+.result-section-title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 0 0 16px;
+}
+
+.result-section-total {
+  color: var(--text-soft);
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
 .activity-summary {
   display: grid;
   gap: 18px;
