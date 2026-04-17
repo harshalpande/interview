@@ -4,8 +4,8 @@
 
 .disclaimer-identity {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 12px 20px;
+  grid-template-columns: minmax(0, 1.6fr) minmax(180px, 0.8fr);
+  gap: 10px 20px;
   padding: 16px;
   background: #f5f7fb;
   border: 1px solid #d7dfea;
@@ -13,8 +13,55 @@
   margin: 20px 0;
 }
 
-.disclaimer-identity > div {
-  white-space: nowrap;
+.identity-item {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.identity-item-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.identity-item strong {
+  color: #133b67;
+  flex-shrink: 0;
+}
+
+.identity-item span {
+  min-width: 0;
+  color: #284256;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.identity-item-wide {
+  grid-column: span 2;
+}
+
+.identity-item-timezone {
+  justify-self: end;
+}
+
+@media (max-width: 720px) {
+  .disclaimer-identity {
+    grid-template-columns: 1fr;
+  }
+
+  .identity-item-wide {
+    grid-column: span 1;
+  }
+
+  .identity-item-timezone {
+    justify-self: stretch;
+  }
+
+  .identity-item-row {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
 }
 
 .disclaimer-list {

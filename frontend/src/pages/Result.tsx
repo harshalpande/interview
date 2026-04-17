@@ -110,14 +110,13 @@ const Result: React.FC = () => {
       {!isTokenExpired && (
         <div className="result-panels">
           <section className="result-panel">
-            <h3>Suspicious Activity</h3>
+            <h3 className="result-section-title">
+              <span>Suspicious Activity</span>
+              {activityEvents.length ? <span className="result-section-total">Total {activityEvents.length}</span> : null}
+            </h3>
             {activityEvents.length ? (
               <div className="activity-summary">
                 <div className="activity-summary-grid">
-                  <div className="activity-metric">
-                    <span className="activity-metric-label">Total events</span>
-                    <strong>{activityEvents.length}</strong>
-                  </div>
                   <div className="activity-metric">
                     <span className="activity-metric-label">Tab switches</span>
                     <strong>{tabSwitchEvents.length}</strong>
@@ -143,7 +142,7 @@ const Result: React.FC = () => {
                 </div>
               </div>
             ) : (
-              <p className="activity-empty">No suspicious activities were observed. The candidate attempted the interview honestly.</p>
+              <p className="activity-empty">No suspicious activities were observed.</p>
             )}
           </section>
 

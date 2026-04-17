@@ -43,8 +43,9 @@ const Session: React.FC = () => {
     comments: '',
     recommendationDecision: 'YES' as RecommendationDecision,
   });
+  const [closeCountdown, setCloseCountdown] = React.useState<number | null>(null);
   const lastTabHiddenAtRef = React.useRef(0);
-  const lastExternalDragAtRef = React.useRef(0);
+  const lastBlockedDropAtRef = React.useRef(0);
   const internalClipboardTextsRef = React.useRef<Map<string, number>>(new Map());
 
   const { data: session, isLoading, error } = useQuery({
@@ -108,7 +109,8 @@ const Session: React.FC = () => {
 
   const pushPersistentToast = React.useCallback((message: string, tone: ToastItem['tone'] = 'warning') => {
     const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    setToastItems((prev) => [...prev, { id, message, tone, persistent: true, createdAt: Date.now(), autoCloseMs: 60000 }]);
+    const prefixedMessage = message.startsWith('Suspicious Alert :') ? message : `Suspicious Alert : ${message}`;
+    setToastItems((prev) => [...prev, { id, message: prefixedMessage, tone, persistent: true, createdAt: Date.now(), autoCloseMs: 60000 }]);
   }, []);
 
   const dismissToast = React.useCallback((id: string) => {
@@ -291,6 +293,37 @@ const Session: React.FC = () => {
     return () => document.removeEventListener('visibilitychange', onVisibilityChange);
   }, [interviewee?.name, recordActivityEvent, role, session?.status, sessionId]);
 
+  React.useEffect(() => {
+    if (role !== 'interviewee' || session?.status !== 'ENDED') {
+      setCloseCountdown(null);
+      return;
+    }
+
+    setCloseCountdown((previous) => previous ?? 10);
+    const interval = window.setInterval(() => {
+      setCloseCountdown((previous) => {
+        if (previous === null) {
+          return 10;
+        }
+        if (previous <= 1) {
+          window.clearInterval(interval);
+          try {
+            window.close();
+          } catch {
+            // best-effort only
+          }
+          window.setTimeout(() => {
+            navigate('/java');
+          }, 250);
+          return 0;
+        }
+        return previous - 1;
+      });
+    }, 1000);
+
+    return () => window.clearInterval(interval);
+  }, [navigate, role, session?.status]);
+
   if (isLoading) {
     return <div className="page-shell"><div className="page-card">Loading session...</div></div>;
   }
@@ -396,16 +429,16 @@ const Session: React.FC = () => {
             showResetButton={isInterviewer}
             onCopyFromEditor={rememberInternalClipboardText}
             onCutFromEditor={rememberInternalClipboardText}
-            onExternalDropBlocked={(text) => {
+            onExternalDropBlocked={() => {
               if (role !== 'interviewee' || session.status !== 'ACTIVE') {
                 return;
               }
 
               const now = Date.now();
-              if (now - lastExternalDragAtRef.current < 1200) {
+              if (now - lastBlockedDropAtRef.current < 1200) {
                 return;
               }
-              lastExternalDragAtRef.current = now;
+              lastBlockedDropAtRef.current = now;
 
               void recordActivityEvent(
                 'EXTERNAL_DROP_BLOCKED',
@@ -414,12 +447,12 @@ const Session: React.FC = () => {
             }}
             onPasteInEditor={(text) => {
               if (role !== 'interviewee' || session.status !== 'ACTIVE') {
-                return;
+                return true;
               }
 
               const normalized = normalizeClipboardText(text);
               if (normalized && internalClipboardTextsRef.current.has(normalized)) {
-                return;
+                return true;
               }
 
               const normalizedCurrentCode = normalizeClipboardText(currentCode || session.latestCode || '');
@@ -430,7 +463,7 @@ const Session: React.FC = () => {
                 normalized.includes('\n') &&
                 (normalizedCurrentCode.includes(normalized) || currentCodeWithoutIndent.includes(normalizedWithoutIndent))
               ) {
-                return;
+                return true;
               }
 
               const lineCount = text.split(/\r?\n/).length;
@@ -439,6 +472,7 @@ const Session: React.FC = () => {
                 'PASTE_IN_EDITOR',
                 `${interviewee?.name?.trim() || 'Interviewee'} pasted ${charCount} characters across ${lineCount} line${lineCount === 1 ? '' : 's'} into the editor.`
               );
+              return false;
             }}
             emptyStateMessage={
               session.status !== 'ACTIVE'
@@ -497,7 +531,7 @@ const Session: React.FC = () => {
           <p className="page-subtitle">
             {isInterviewer
               ? 'The editor has been frozen, final code/output have been saved, and your feedback is required before returning to the dashboard.'
-              : `The coding test is now complete. ${interviewer?.name || 'The interviewer'} is submitting the feedback. You can check the results with ${interviewer?.name || 'the interviewer'} or the HR.`}
+              : `The coding test is now complete. ${interviewer?.name || 'The interviewer'} is submitting the feedback. You can check the results with ${interviewer?.name || 'the interviewer'} or the HR.${typeof closeCountdown === 'number' ? ` This tab will automatically close in ${closeCountdown}.` : ''}`}
           </p>
 
           {waitingForFeedback ? (

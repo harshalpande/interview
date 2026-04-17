@@ -459,8 +459,6 @@ function createPresetRange(preset: DatePresetKey) {
       const mondayOffset = day === 0 ? -6 : 1 - day;
       start.setDate(now.getDate() + mondayOffset);
       start.setHours(0, 0, 0, 0);
-      end.setDate(start.getDate() + 6);
-      end.setHours(23, 59, 0, 0);
       break;
     }
     case 'month':
