@@ -30,8 +30,8 @@
 
 .session-banner {
   display: grid;
-  grid-template-columns: 1.6fr auto auto;
-  grid-template-areas: "participants role status";
+  grid-template-columns: 1.6fr minmax(360px, auto);
+  grid-template-areas: "participants status";
   gap: 14px;
   padding: 20px 22px;
   background: linear-gradient(135deg, #16324f 0%, #0b7285 100%);
@@ -87,10 +87,6 @@
   font-weight: 700;
 }
 
-.role-indicator {
-  grid-area: role;
-}
-
 .status-chip-waiting_join {
   background: rgba(255, 241, 214, 0.24);
   border-color: rgba(255, 234, 176, 0.5);
@@ -104,13 +100,16 @@
 .session-status {
   grid-area: status;
   display: grid;
-  justify-items: end;
+  justify-items: stretch;
   gap: 8px;
+  align-content: start;
 }
 
 .status-meta {
   font-size: 0.9rem;
   opacity: 0.9;
+  justify-self: end;
+  text-align: right;
 }
 
 .timer {
@@ -128,6 +127,130 @@
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
+}
+
+.interviewer-stage {
+  display: grid;
+  grid-template-columns: minmax(680px, 1.52fr) minmax(340px, 0.78fr);
+  gap: 12px;
+  align-items: stretch;
+}
+
+.session-banner-interviewer {
+  grid-template-columns: 1fr;
+  grid-template-areas:
+    "participants"
+    "status";
+  align-content: space-between;
+  min-height: 218px;
+  height: 218px;
+  max-height: 218px;
+  padding: 14px 16px;
+  gap: 12px;
+  overflow: hidden;
+}
+
+.session-banner-interviewer .banner-participants {
+  grid-template-columns: repeat(2, minmax(250px, 1fr));
+  gap: 12px;
+}
+
+.session-status-interviewer {
+  justify-items: stretch;
+  align-self: end;
+  gap: 8px;
+}
+
+.session-status-row {
+  display: flex;
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+}
+
+.session-banner-interviewer .role-indicator,
+.session-banner-interviewer .status-chip,
+.session-banner-interviewer .timer-live,
+.session-banner-interviewer .session-status-inline-action {
+  width: auto;
+}
+
+.session-banner-interviewer .status-meta {
+  justify-self: end;
+  text-align: right;
+}
+
+.camera-strip {
+  display: block;
+}
+
+.video-panel {
+  border-radius: var(--radius-lg);
+  background: #fff;
+  border: 1px solid rgba(203, 217, 230, 0.9);
+  box-shadow: 0 16px 32px rgba(16, 37, 66, 0.08);
+}
+
+.video-panel {
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-height: 218px;
+  height: 218px;
+  max-height: 218px;
+}
+
+.video-panel-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 14px 8px;
+}
+
+.video-panel-title {
+  font-size: 0.98rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.video-panel-status {
+  font-size: 0.84rem;
+  color: var(--text-soft);
+}
+
+.video-frame {
+  position: relative;
+  min-height: 0;
+  background: linear-gradient(135deg, #0f2741 0%, #1b6f84 100%);
+}
+
+.video-frame video,
+.video-placeholder {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.video-frame video {
+  object-fit: cover;
+  background: #0c2238;
+}
+
+.video-frame.mirror video {
+  transform: scaleX(-1);
+}
+
+.video-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 28px;
+  color: rgba(255, 255, 255, 0.92);
+  text-align: center;
+  line-height: 1.6;
 }
 
 .session-editor-btn {
@@ -274,6 +397,39 @@
 
   .session-status {
     justify-items: start;
+  }
+
+  .interviewer-stage {
+    grid-template-columns: 1fr;
+  }
+
+  .session-banner-interviewer {
+    min-height: unset;
+    height: auto;
+    max-height: none;
+  }
+
+  .video-panel {
+    height: auto;
+    max-height: none;
+  }
+
+  .session-status-row {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .session-banner-interviewer .role-indicator,
+  .session-banner-interviewer .status-chip,
+  .session-banner-interviewer .timer-live,
+  .session-banner-interviewer .session-status-inline-action {
+    justify-self: stretch;
+  }
+
+  .status-meta,
+  .session-banner-interviewer .status-meta {
+    justify-self: start;
+    text-align: left;
   }
 }
 

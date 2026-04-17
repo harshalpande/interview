@@ -124,8 +124,20 @@
   margin-top: 22px;
 }
 
+.identity-capture-panel-actions {
+  align-items: stretch;
+}
+
+.identity-capture-panel-actions > * {
+  flex: 1 1 100%;
+}
+
 @media (max-width: 900px) {
   .identity-capture-layout {
     grid-template-columns: 1fr;
+  }
+
+  .identity-capture-panel-actions > * {
+    flex-basis: auto;
   }
 }

@@ -4,9 +4,12 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import Editor from '../components/Editor';
 import ShareUrlToggle from '../components/ShareUrlToggle';
 import ToastStack, { ToastItem } from '../components/ToastStack';
+import VideoPanel from '../components/VideoPanel';
+import { useCameraMonitor } from '../hooks/useCameraMonitor';
 import { useSessionStore } from '../stores/sessionStore';
 import { sessionApi } from '../services/sessionApi';
 import { useWebSocket } from '../hooks/useWebSocket';
+import { useWebRtcSession } from '../hooks/useWebRtcSession';
 import { useBackGuard } from '../hooks/useBackGuard';
 import type { ActivityEventType, FeedbackRating, ParticipantRole, RecommendationDecision, SessionResponse, SessionSocketMessage, SessionStatus } from '../types/session';
 import { formatDateTime, formatTimeZoneLabel } from '../utils/dateTime';
@@ -38,14 +41,16 @@ const Session: React.FC = () => {
   const [timeLeft, setTimeLeft] = React.useState<number | null>(null);
   const [isFullscreen, setIsFullscreen] = React.useState(false);
   const [toastItems, setToastItems] = React.useState<ToastItem[]>([]);
+  const [incomingSignal, setIncomingSignal] = React.useState<SessionSocketMessage | null>(null);
   const [feedback, setFeedback] = React.useState({
-    rating: 'GOOD' as FeedbackRating,
+    rating: '' as FeedbackRating | '',
     comments: '',
-    recommendationDecision: 'YES' as RecommendationDecision,
+    recommendationDecision: '' as RecommendationDecision | '',
   });
   const [closeCountdown, setCloseCountdown] = React.useState<number | null>(null);
   const lastTabHiddenAtRef = React.useRef(0);
   const lastBlockedDropAtRef = React.useRef(0);
+  const lastCameraStreamIssueRef = React.useRef('');
   const internalClipboardTextsRef = React.useRef<Map<string, number>>(new Map());
 
   const { data: session, isLoading, error } = useQuery({
@@ -64,12 +69,17 @@ const Session: React.FC = () => {
 
   const interviewer = session?.participants.find((participant) => participant.role === 'INTERVIEWER');
   const interviewee = session?.participants.find((participant) => participant.role === 'INTERVIEWEE');
+  const intervieweeName = interviewee?.name?.trim() || 'Interviewee';
 
   useBackGuard({
     enabled: true,
     message: 'Leave the interview session? You will be returned to the dashboard.',
     redirectTo: '/java',
   });
+
+  React.useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'auto' });
+  }, []);
 
   React.useEffect(() => {
     if (role && storedRole !== role) {
@@ -140,6 +150,12 @@ const Session: React.FC = () => {
     setIsFullscreen((prev) => !prev);
   }, []);
 
+  React.useEffect(() => {
+    if (isFullscreen) {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, [isFullscreen]);
+
   const recordActivityEvent = React.useCallback(
     async (eventType: ActivityEventType, detail: string) => {
       if (!sessionId || role !== 'interviewee' || session?.status !== 'ACTIVE') {
@@ -173,11 +189,42 @@ const Session: React.FC = () => {
       if (message.type === 'ACTIVITY_EVENT' && message.activityEvent && role === 'interviewer') {
         pushPersistentToast(message.activityEvent.detail, 'warning');
       }
+      if (message.type === 'WEBRTC_SIGNAL') {
+        setIncomingSignal(message);
+      }
     },
     [pushPersistentToast, refreshSession, role, setCurrentCode]
   );
 
-  const { isReconnecting, sendCode } = useWebSocket(sessionId || '', handleSocketMessage);
+  const { isReconnecting, sendCode, sendSignal } = useWebSocket(sessionId || '', handleSocketMessage);
+  const isCameraSessionActive = session?.status === 'ACTIVE';
+  const handleCameraStreamLost = React.useCallback(() => {
+    void recordActivityEvent('CAMERA_STREAM_LOST', `${formatPossessiveLabel(intervieweeName)} camera stream was interrupted.`);
+  }, [intervieweeName, recordActivityEvent]);
+  const handleNoFaceDetected = React.useCallback(() => {
+    void recordActivityEvent('NO_FACE_DETECTED', `${formatPossessiveLabel(intervieweeName)} face was not visible in the camera frame.`);
+  }, [intervieweeName, recordActivityEvent]);
+  const handleMultipleFacesDetected = React.useCallback(() => {
+    void recordActivityEvent('MULTIPLE_FACES_DETECTED', `Multiple faces were detected in ${formatPossessiveLabel(intervieweeName)} camera frame.`);
+  }, [intervieweeName, recordActivityEvent]);
+  const {
+    connectionState: cameraConnectionState,
+    localStream,
+    remoteStream,
+    streamError,
+  } = useWebRtcSession({
+    enabled: Boolean(sessionId && role && isCameraSessionActive),
+    role: role === 'interviewer' ? 'interviewer' : 'interviewee',
+    incomingSignal,
+    sendSignal,
+  });
+  const { status: cameraMonitorStatus } = useCameraMonitor({
+    enabled: role === 'interviewee' && isCameraSessionActive,
+    stream: localStream,
+    onStreamLost: handleCameraStreamLost,
+    onNoFaceDetected: handleNoFaceDetected,
+    onMultipleFacesDetected: handleMultipleFacesDetected,
+  });
 
   const startMutation = useMutation({
     mutationFn: () => sessionApi.startSession(sessionId!),
@@ -198,7 +245,12 @@ const Session: React.FC = () => {
   });
 
   const feedbackMutation = useMutation({
-    mutationFn: () => sessionApi.submitFeedback(sessionId!, feedback),
+    mutationFn: () =>
+      sessionApi.submitFeedback(sessionId!, {
+        rating: feedback.rating as FeedbackRating,
+        comments: feedback.comments,
+        recommendationDecision: feedback.recommendationDecision as RecommendationDecision,
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
       navigate('/java');
@@ -307,14 +359,7 @@ const Session: React.FC = () => {
         }
         if (previous <= 1) {
           window.clearInterval(interval);
-          try {
-            window.close();
-          } catch {
-            // best-effort only
-          }
-          window.setTimeout(() => {
-            navigate('/java');
-          }, 250);
+          window.location.assign('https://www.altimetrik.com/');
           return 0;
         }
         return previous - 1;
@@ -322,7 +367,26 @@ const Session: React.FC = () => {
     }, 1000);
 
     return () => window.clearInterval(interval);
-  }, [navigate, role, session?.status]);
+  }, [role, session?.status]);
+
+  React.useEffect(() => {
+    if (role !== 'interviewee' || session?.status !== 'ACTIVE' || !streamError) {
+      if (session?.status !== 'ACTIVE') {
+        lastCameraStreamIssueRef.current = '';
+      }
+      return;
+    }
+
+    if (lastCameraStreamIssueRef.current === streamError) {
+      return;
+    }
+
+    lastCameraStreamIssueRef.current = streamError;
+    void recordActivityEvent(
+      'CAMERA_STREAM_LOST',
+      `${formatPossessiveLabel(intervieweeName)} camera stream was interrupted.`
+    );
+  }, [intervieweeName, recordActivityEvent, role, session?.status, streamError]);
 
   if (isLoading) {
     return <div className="page-shell"><div className="page-card">Loading session...</div></div>;
@@ -343,18 +407,110 @@ const Session: React.FC = () => {
   const showPreStartState = showEditor && session.status !== 'ACTIVE';
   const waitingForFeedback = isInterviewer && session.status === 'ENDED' && !session.feedback;
   const waitingJoinLabel = `Waiting for ${interviewee?.name || 'Interviewee'} to join`;
+  const hasCompleteFeedback = Boolean(feedback.rating && feedback.recommendationDecision && feedback.comments.trim());
 
   const timerLabel =
     session.status === 'ACTIVE'
       ? `${Math.floor(displayedTimeLeft / 60)}:${(displayedTimeLeft % 60).toString().padStart(2, '0')}`
       : null;
   const feedbackCharsRemaining = FEEDBACK_COMMENT_LIMIT - feedback.comments.length;
+  const statusTimestampLabel = session.startedAt ? 'Started' : 'Created';
+  const statusTimestampValue = session.startedAt ? formatDateTime(session.startedAt) : formatDateTime(session.createdAt);
+  const interviewerCameraStatus = remoteStream
+    ? cameraConnectionState === 'connected'
+      ? 'Live camera active'
+      : 'Connecting live camera'
+    : 'Waiting for live camera';
+  const intervieweeCameraStatus = streamError
+    ? 'Camera unavailable'
+    : cameraMonitorStatus === 'multiple-faces'
+      ? 'Multiple faces detected'
+      : cameraMonitorStatus === 'no-face'
+        ? 'Face not visible'
+        : cameraMonitorStatus === 'stream-lost'
+          ? 'Camera interrupted'
+          : cameraMonitorStatus === 'face-checks-unavailable'
+            ? 'Camera active (basic monitoring)'
+            : localStream
+              ? 'Camera active'
+              : 'Preparing camera';
+  const activeStageClassName = `interviewer-stage ${session.status === 'ACTIVE' ? 'active' : ''}`;
+  const activeBannerClassName = `session-banner session-banner-interviewer ${session.status === 'ACTIVE' ? 'active' : ''}`;
 
   return (
     <div className={`session-page polished-page ${isFullscreen ? 'fullscreen' : ''}`}>
       {isReconnecting && <div className="reconnecting">Reconnecting to the live session...</div>}
 
-      {!isFullscreen && (
+      {!isFullscreen && session.status === 'ACTIVE' ? (
+        <div className={activeStageClassName}>
+          <div className={activeBannerClassName}>
+            <div className="banner-participants">
+              <div className="participant-card">
+                <span className="participant-role">Interviewer</span>
+                <span className="participant-name">{interviewer?.name}{interviewer?.timeZone ? ` (${formatTimeZoneLabel(interviewer.timeZone)})` : ''}</span>
+                <span>{interviewer?.email}</span>
+              </div>
+              <div className="participant-card">
+                <span className="participant-role">Interviewee</span>
+                <span className="participant-name">{interviewee?.name}{interviewee?.timeZone ? ` (${formatTimeZoneLabel(interviewee.timeZone)})` : ''}</span>
+                <span>{interviewee?.email}</span>
+                {interviewee?.identityCaptureStatus && (
+                  <span className="participant-meta">
+                    Identity snapshot: {formatIdentityCaptureStatus(interviewee.identityCaptureStatus, interviewee.identityCaptureFailureReason)}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <div className="session-status session-status-interviewer">
+              <div className="session-status-row">
+                <div className={`status-chip status-chip-${session.status.toLowerCase()}`}>
+                  {STATUS_LABELS[session.status]}
+                </div>
+                {timerLabel && <div className="timer timer-live">Time left: {timerLabel}</div>}
+                <div className={`role-indicator ${role}`}>Role: {role}</div>
+                {canStart && (
+                  <button
+                    className="control-btn btn-start session-status-inline-action"
+                    onClick={() => startMutation.mutate()}
+                    disabled={startMutation.isPending}
+                  >
+                    {startMutation.isPending ? 'Starting...' : 'Start Interview'}
+                  </button>
+                )}
+                {canEnd && (
+                  <button
+                    className="control-btn btn-end session-status-inline-action"
+                    onClick={() => endMutation.mutate()}
+                    disabled={endMutation.isPending}
+                  >
+                    {endMutation.isPending ? 'Ending...' : 'End Interview'}
+                  </button>
+                )}
+              </div>
+              <div className="status-meta">{statusTimestampLabel}: {statusTimestampValue}</div>
+            </div>
+          </div>
+
+          {isInterviewer ? (
+            <VideoPanel
+              title={`${interviewee?.name || 'Interviewee'} Live Camera`}
+              stream={remoteStream}
+              status={interviewerCameraStatus}
+              emptyMessage="Waiting for the interviewee camera stream to connect."
+            />
+          ) : (
+            <VideoPanel
+              title="Your Camera"
+              stream={localStream}
+              status={intervieweeCameraStatus}
+              emptyMessage={streamError || 'Preparing your camera preview.'}
+              mirror
+              muted
+            />
+          )}
+        </div>
+      ) : !isFullscreen && (
         <div className="session-banner">
           <div className="banner-participants">
             <div className="participant-card">
@@ -374,16 +530,35 @@ const Session: React.FC = () => {
             </div>
           </div>
 
-          <div className={`role-indicator ${role}`}>Role: {role}</div>
-
           <div className="session-status">
-            <div className={`status-chip status-chip-${session.status.toLowerCase()}`}>
-              {session.status === 'WAITING_JOIN' ? waitingJoinLabel : STATUS_LABELS[session.status]}
+            <div className="session-status-row">
+              <div className={`status-chip status-chip-${session.status.toLowerCase()}`}>
+                {session.status === 'WAITING_JOIN' ? waitingJoinLabel : STATUS_LABELS[session.status]}
+              </div>
+              {session.status === 'ACTIVE' && timerLabel && (
+                <div className="timer timer-live">Time left: {timerLabel}</div>
+              )}
+              <div className={`role-indicator ${role}`}>Role: {role}</div>
+              {canStart && (
+                <button
+                  className="control-btn btn-start session-status-inline-action"
+                  onClick={() => startMutation.mutate()}
+                  disabled={startMutation.isPending}
+                >
+                  {startMutation.isPending ? 'Starting...' : 'Start Interview'}
+                </button>
+              )}
+              {canEnd && (
+                <button
+                  className="control-btn btn-end session-status-inline-action"
+                  onClick={() => endMutation.mutate()}
+                  disabled={endMutation.isPending}
+                >
+                  {endMutation.isPending ? 'Ending...' : 'End Interview'}
+                </button>
+              )}
             </div>
-            <div className="status-meta">Created: {formatDateTime(session.createdAt)}</div>
-            {session.status === 'ACTIVE' && timerLabel && (
-              <div className="timer timer-live">Time left: {timerLabel}</div>
-            )}
+            <div className="status-meta">{statusTimestampLabel}: {statusTimestampValue}</div>
           </div>
         </div>
       )}
@@ -479,32 +654,6 @@ const Session: React.FC = () => {
                 ? 'Editing and code execution are disabled until the interviewer starts the interview.'
                 : undefined
             }
-            headerRightSlot={
-              isInterviewer ? (
-                <>
-                  {canStart && (
-                    <button
-                      className="btn btn-small session-editor-btn session-editor-btn-start"
-                      onClick={() => startMutation.mutate()}
-                      disabled={startMutation.isPending}
-                      title="Start the interview"
-                    >
-                      {startMutation.isPending ? 'Starting...' : 'Start Interview'}
-                    </button>
-                  )}
-                  {canEnd && (
-                    <button
-                      className="btn btn-small session-editor-btn session-editor-btn-end"
-                      onClick={() => endMutation.mutate()}
-                      disabled={endMutation.isPending}
-                      title="End the interview"
-                    >
-                      {endMutation.isPending ? 'Ending...' : 'End Interview'}
-                    </button>
-                  )}
-                </>
-              ) : null
-            }
             initialCode={currentCode || session.latestCode || ''}
             showFullscreenToggle={canFullscreen}
             isFullscreen={isFullscreen}
@@ -542,8 +691,16 @@ const Session: React.FC = () => {
                   <select
                     id="rating"
                     value={feedback.rating}
-                    onChange={(event) => setFeedback((prev) => ({ ...prev, rating: event.target.value as FeedbackRating }))}
+                    onChange={(event) =>
+                      setFeedback((prev) => ({
+                        ...prev,
+                        rating: event.target.value as FeedbackRating | '',
+                        recommendationDecision:
+                          event.target.value === 'BAD' ? 'NO' : prev.recommendationDecision,
+                      }))
+                    }
                   >
+                    <option value="">Select rating</option>
                     <option value="EXCELLENT">Excellent</option>
                     <option value="GOOD">Good</option>
                     <option value="FAIR">Fair</option>
@@ -573,9 +730,10 @@ const Session: React.FC = () => {
                   <select
                     id="recommendation"
                     value={feedback.recommendationDecision}
-                    onChange={(event) => setFeedback((prev) => ({ ...prev, recommendationDecision: event.target.value as RecommendationDecision }))}
+                    onChange={(event) => setFeedback((prev) => ({ ...prev, recommendationDecision: event.target.value as RecommendationDecision | '' }))}
                     disabled={feedback.rating === 'BAD'}
                   >
+                    <option value="">Select recommendation</option>
                     <option value="YES">Next round yes</option>
                     <option value="NO">Next round no</option>
                     <option value="REEVALUATION">Reevaluation</option>
@@ -585,7 +743,7 @@ const Session: React.FC = () => {
                   <button
                     className="control-btn btn-start"
                     onClick={() => feedbackMutation.mutate()}
-                    disabled={feedbackMutation.isPending || !feedback.comments.trim()}
+                    disabled={feedbackMutation.isPending || !hasCompleteFeedback}
                   >
                     {feedbackMutation.isPending ? 'Submitting...' : 'Submit Feedback'}
                   </button>
@@ -647,4 +805,8 @@ function formatCaptureReason(reason: string) {
     .split('_')
     .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
     .join(' ');
+}
+
+function formatPossessiveLabel(name: string) {
+  return name.endsWith('s') ? `${name}'` : `${name}'s`;
 }

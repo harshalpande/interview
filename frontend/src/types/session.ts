@@ -1,11 +1,18 @@
 export type ParticipantRole = 'INTERVIEWER' | 'INTERVIEWEE';
 export type SessionStatus = 'CREATED' | 'WAITING_JOIN' | 'ACTIVE' | 'ENDED' | 'EXPIRED';
 export type FeedbackRating = 'EXCELLENT' | 'GOOD' | 'FAIR' | 'BAD';
-export type ActivityEventType = 'TAB_HIDDEN' | 'PASTE_IN_EDITOR' | 'EXTERNAL_DROP_BLOCKED';
+export type ActivityEventType =
+  | 'TAB_HIDDEN'
+  | 'PASTE_IN_EDITOR'
+  | 'EXTERNAL_DROP_BLOCKED'
+  | 'CAMERA_STREAM_LOST'
+  | 'NO_FACE_DETECTED'
+  | 'MULTIPLE_FACES_DETECTED';
 export type TechnologySkill = 'JAVA' | 'PYTHON' | 'ANGULAR' | 'REACT' | 'SQL';
 export type RecommendationDecision = 'YES' | 'NO' | 'REEVALUATION';
 export type IdentityCaptureStatus = 'PENDING' | 'SUCCESS' | 'FAILED' | 'SKIPPED';
 export type IdentityCaptureFailureReason = 'NO_CAMERA' | 'PERMISSION_DENIED' | 'CAMERA_IN_USE' | 'UNSUPPORTED' | 'DEVICE_ERROR' | 'USER_SKIPPED' | 'UNKNOWN';
+export type WebRtcSignalType = 'READY' | 'OFFER' | 'ANSWER' | 'ICE_CANDIDATE';
 
 export interface Participant {
   role: ParticipantRole;
@@ -70,7 +77,7 @@ export interface SessionResponse {
 }
 
 export interface SessionSocketMessage {
-  type: 'CODE_UPDATE' | 'SESSION_STATE' | 'SESSION_START' | 'SESSION_END' | 'SESSION_EXTEND' | 'USER_JOINED' | 'TIMER_TICK' | 'ACTIVITY_EVENT';
+  type: 'CODE_UPDATE' | 'SESSION_STATE' | 'SESSION_START' | 'SESSION_END' | 'SESSION_EXTEND' | 'USER_JOINED' | 'TIMER_TICK' | 'ACTIVITY_EVENT' | 'WEBRTC_SIGNAL';
   sessionId: string;
   version?: number;
   code?: string;
@@ -78,6 +85,13 @@ export interface SessionSocketMessage {
   session?: SessionResponse;
   activityEvent?: ActivityEvent;
   message?: string;
+  signalType?: WebRtcSignalType;
+  senderRole?: ParticipantRole;
+  targetRole?: ParticipantRole;
+  sdp?: string;
+  candidate?: string;
+  sdpMid?: string | null;
+  sdpMLineIndex?: number | null;
 }
 
 export interface CreateSessionRequest {

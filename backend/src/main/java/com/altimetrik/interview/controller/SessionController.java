@@ -206,6 +206,22 @@ public class SessionController {
                 .build());
     }
 
+    @MessageMapping("/session/{id}/signal")
+    public void relaySignal(@DestinationVariable String id, SessionSocketMessage request) {
+        messagingTemplate.convertAndSend("/topic/session/" + id, SessionSocketMessage.builder()
+                .type("WEBRTC_SIGNAL")
+                .sessionId(id)
+                .signalType(request.getSignalType())
+                .senderRole(request.getSenderRole())
+                .targetRole(request.getTargetRole())
+                .sdp(request.getSdp())
+                .candidate(request.getCandidate())
+                .sdpMid(request.getSdpMid())
+                .sdpMLineIndex(request.getSdpMLineIndex())
+                .message("Realtime signal relayed")
+                .build());
+    }
+
     private void broadcastSession(SessionResponse response, String type, String message) {
         messagingTemplate.convertAndSend("/topic/session/" + response.getId(), SessionSocketMessage.builder()
                 .type(type)

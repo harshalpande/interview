@@ -2,11 +2,12 @@ spring:
   datasource:
     # Persist data across container restarts via docker volume mount (/data)
     # Files created: /data/interviewdb.mv.db (and related)
-    url: jdbc:h2:file:/data/interviewdb;AUTO_SERVER=TRUE
+    url: jdbc:h2:file:/data/interviewdb;DB_CLOSE_ON_EXIT=FALSE;AUTO_RECONNECT=TRUE
     driver-class-name: org.h2.Driver
     username: sa
     password: ''
   jpa:
+    database-platform: org.hibernate.dialect.H2Dialect
     hibernate:
       ddl-auto: update
   h2:

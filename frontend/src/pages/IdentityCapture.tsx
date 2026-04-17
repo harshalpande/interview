@@ -257,45 +257,44 @@ const IdentityCapture: React.FC = () => {
             <p>We request camera access only after you press <strong>OK</strong>.</p>
             <p>A 5 second countdown will run before the photo is captured.</p>
             <p>If the camera is blocked, missing, or unavailable, you can continue and the outcome will be stored with the interview session.</p>
+            <div className="identity-capture-actions identity-capture-panel-actions">
+              {step === 'intro' && (
+                <>
+                  <Button onClick={handleStartCamera}>OK</Button>
+                  <Button variant="secondary" onClick={() => void persistCaptureState('SKIPPED', 'USER_SKIPPED')}>
+                    Continue without photo
+                  </Button>
+                </>
+              )}
+
+              {step === 'preview' && (
+                <>
+                  <Button onClick={handleCapture}>Capture Photo</Button>
+                  <Button variant="secondary" onClick={() => void persistCaptureState('SKIPPED', 'USER_SKIPPED')}>
+                    Continue without photo
+                  </Button>
+                </>
+              )}
+
+              {step === 'captured' && (
+                <>
+                  <Button onClick={() => capturedBlob && void persistCaptureState('SUCCESS', undefined, capturedBlob)} disabled={!capturedBlob}>
+                    Continue
+                  </Button>
+                  <Button variant="secondary" onClick={handleRetake}>Retake</Button>
+                </>
+              )}
+
+              {step === 'issue' && (
+                <>
+                  <Button onClick={handleStartCamera}>Retry Camera</Button>
+                  <Button variant="secondary" onClick={() => void persistCaptureState('FAILED', issueReason)}>
+                    Continue and Record Issue
+                  </Button>
+                </>
+              )}
+            </div>
           </aside>
-        </div>
-
-        <div className="identity-capture-actions">
-          {step === 'intro' && (
-            <>
-              <Button onClick={handleStartCamera}>OK</Button>
-              <Button variant="secondary" onClick={() => void persistCaptureState('SKIPPED', 'USER_SKIPPED')}>
-                Continue without photo
-              </Button>
-            </>
-          )}
-
-          {step === 'preview' && (
-            <>
-              <Button onClick={handleCapture}>Capture Photo</Button>
-              <Button variant="secondary" onClick={() => void persistCaptureState('SKIPPED', 'USER_SKIPPED')}>
-                Continue without photo
-              </Button>
-            </>
-          )}
-
-          {step === 'captured' && (
-            <>
-              <Button onClick={() => capturedBlob && void persistCaptureState('SUCCESS', undefined, capturedBlob)} disabled={!capturedBlob}>
-                Continue
-              </Button>
-              <Button variant="secondary" onClick={handleRetake}>Retake</Button>
-            </>
-          )}
-
-          {step === 'issue' && (
-            <>
-              <Button onClick={handleStartCamera}>Retry Camera</Button>
-              <Button variant="secondary" onClick={() => void persistCaptureState('FAILED', issueReason)}>
-                Continue and Record Issue
-              </Button>
-            </>
-          )}
         </div>
       </div>
     </div>
