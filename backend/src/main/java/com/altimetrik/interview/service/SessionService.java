@@ -717,10 +717,14 @@ public class SessionService {
             return request.getDetail().trim();
         }
 
-        if (request.getEventType() == ActivityEventType.TAB_HIDDEN) {
-            return "Interviewee switched away from the interview tab or window.";
-        }
-        return "Interviewee pasted content into the editor.";
+        return switch (request.getEventType()) {
+            case TAB_HIDDEN -> "Interviewee switched away from the interview tab or window.";
+            case EXTERNAL_DROP_BLOCKED -> "Interviewee tried to drag text into the editor.";
+            case CAMERA_STREAM_LOST -> "Interviewee's camera stream was interrupted.";
+            case NO_FACE_DETECTED -> "Interviewee's face was not visible in the camera frame.";
+            case MULTIPLE_FACES_DETECTED -> "Multiple faces were detected in the interviewee's camera frame.";
+            case PASTE_IN_EDITOR -> "Interviewee pasted content into the editor.";
+        };
     }
 
     private ActivityEventDto toActivityEventDto(SessionActivityEvent event) {

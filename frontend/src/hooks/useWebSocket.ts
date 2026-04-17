@@ -1,14 +1,24 @@
 import { Client, IMessage } from '@stomp/stompjs';
 import SockJS from 'sockjs-client';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { debounce } from 'lodash';
-import type { ParticipantRole, SessionSocketMessage } from '../types/session';
+import type { ParticipantRole, SessionSocketMessage, WebRtcSignalType } from '../types/session';
 import { buildSocketUrlFromApiBase, resolveApiBaseUrl } from '../utils/apiUrls';
 
 interface CodePayload {
   code: string;
   version: number;
   updatedByRole: ParticipantRole;
+}
+
+interface SignalPayload {
+  signalType: WebRtcSignalType;
+  senderRole: ParticipantRole;
+  targetRole: ParticipantRole;
+  sdp?: string;
+  candidate?: string;
+  sdpMid?: string | null;
+  sdpMLineIndex?: number | null;
 }
 
 export const useWebSocket = (
@@ -76,12 +86,24 @@ export const useWebSocket = (
     };
   }, [debouncedSendCode, sessionId]);
 
-  const sendCode = (code: string, version: number, updatedByRole: ParticipantRole) => {
+  const sendCode = useCallback((code: string, version: number, updatedByRole: ParticipantRole) => {
     debouncedSendCode({ code, version, updatedByRole });
-  };
+  }, [debouncedSendCode]);
+
+  const sendSignal = useCallback((payload: SignalPayload) => {
+    if (!clientRef.current?.active) {
+      return;
+    }
+
+    clientRef.current.publish({
+      destination: `/app/session/${sessionId}/signal`,
+      body: JSON.stringify(payload),
+    });
+  }, [sessionId]);
 
   return {
     sendCode,
+    sendSignal,
     isReconnecting,
   };
 };

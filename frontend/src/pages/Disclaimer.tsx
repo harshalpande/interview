@@ -9,23 +9,23 @@ import { useBackGuard } from '../hooks/useBackGuard';
 import './Disclaimer.css';
 
 const interviewerPoints = [
-  'Wrap up the interview within 60 minutes. Only one 15 minute extension is allowed and it should be used sparingly.',
-  'Conduct the session fairly and evaluate problem solving, communication, and code quality without discrimination, bias, or partiality.',
-  'Be polite, professional, and respectful at all times. Avoid hostile, intimidating, sarcastic, or dismissive behavior.',
-  'Ask relevant technical questions, provide clear instructions, and give the candidate a reasonable chance to think aloud.',
-  'Do not ask for personal, protected, or irrelevant information unrelated to the role.',
-  'Use the collaboration tools responsibly and do not share the interview link with anyone other than the intended interviewee.',
-  "Provide honest and constructive feedback based only on the candidate's interview performance.",
+  'Use this platform only for the scheduled interview and protect the interview link, candidate details, captured identity snapshot, and session outputs from unauthorized sharing.',
+  'Conduct the interview professionally, evaluate only job-relevant skills, and avoid discriminatory, intimidating, abusive, or irrelevant questioning.',
+  'Clearly explain the problem statement, constraints, and expectations, and give the candidate a fair opportunity to think aloud, ask clarifying questions, and demonstrate problem solving.',
+  'Use monitoring alerts responsibly. Camera, tab-switch, paste, and drag-drop alerts are intended to support human judgment and should not be treated as automatic proof of misconduct without context.',
+  'Do not request confidential personal information, credentials, unrelated sensitive data, or any action that falls outside a legitimate interview process.',
+  'Record feedback honestly and objectively based on code quality, problem solving approach, communication, correctness, and overall interview conduct.',
+  'The interview is designed for 60 minutes. Only one 15-minute extension is allowed, and it should be used only when genuinely necessary.',
 ];
 
 const intervieweePoints = [
-  'Participate professionally, communicate clearly, and treat the interviewer with respect.',
-  'You may ask relevant clarifying questions about the problem, constraints, or expectations.',
-  'Do not use unfair assistance such as hidden notes, copied solutions, AI-generated answers, or help from another person unless explicitly allowed.',
-  'Do not misrepresent your identity, prior work, or coding process during the interview.',
-  'Stay focused on the interview and avoid disruptive, abusive, or inappropriate behavior.',
-  'Use the shared editor responsibly and keep your work relevant to the interview problem.',
-  'The interview is expected to conclude within 60 minutes unless the interviewer grants the one permitted 15 minute extension.',
+  'By continuing, you confirm that you are the registered interviewee and agree to the identity, editor, and activity monitoring controls enabled for this interview session.',
+  'A pre-interview identity snapshot may be captured and the interviewer may view your live camera stream during the active interview for security, verification, and interview integrity purposes.',
+  'Remain clearly visible in the camera frame, keep your camera available during the session, and do not permit another person to appear on screen or assist you unless explicitly allowed by the interviewer.',
+  'Do not use copied solutions, external notes, unauthorized websites, AI-generated answers, hidden communication tools, or help from another person unless the interviewer has expressly permitted it.',
+  'Use the shared editor only for interview-related work. Paste, drag-drop, tab-switch, and similar monitored actions may be recorded and surfaced to the interviewer as suspicious activity alerts.',
+  'Communicate professionally, ask clarifying questions when needed, and focus on demonstrating your own reasoning, coding approach, and problem-solving ability.',
+  'The interview is designed for 60 minutes unless the interviewer grants the one permitted 15-minute extension.',
 ];
 
 const Disclaimer: React.FC = () => {
@@ -78,6 +78,12 @@ const Disclaimer: React.FC = () => {
   const participantRole = role === 'interviewer' ? 'INTERVIEWER' : 'INTERVIEWEE';
   const participant = session?.participants.find((entry) => entry.role === participantRole);
   const points = role === 'interviewer' ? interviewerPoints : intervieweePoints;
+  const subtitle = role === 'interviewer'
+    ? 'Please review the interviewer responsibilities, privacy obligations, and fair-use expectations before continuing.'
+    : 'Please review the interview monitoring, privacy, and conduct expectations carefully before continuing.';
+  const acknowledgement = role === 'interviewer'
+    ? 'I understand my responsibilities as the interviewer and will use this platform fairly, professionally, and in accordance with the interview process.'
+    : 'I understand that this interview session may use identity capture, live camera streaming, and activity monitoring controls, and I agree to participate under these guidelines.';
 
   const handleAccept = async () => {
     try {
@@ -86,6 +92,7 @@ const Disclaimer: React.FC = () => {
         role: participantRole,
       });
       setSession(nextSession);
+      window.scrollTo({ top: 0, behavior: 'auto' });
       navigate(`/java/session/${activeSessionId}?role=${role}`);
     } catch (acceptError) {
       const message = acceptError instanceof Error ? acceptError.message : 'Failed to save disclaimer';
@@ -100,9 +107,7 @@ const Disclaimer: React.FC = () => {
       <div className="page-card disclaimer-card">
         <div className="page-kicker">Interview Agreement</div>
         <h2>Disclaimer for {role === 'interviewer' ? 'Interviewer' : 'Interviewee'}</h2>
-        <p className="page-subtitle">
-          Please review the interview expectations carefully before continuing.
-        </p>
+        <p className="page-subtitle">{subtitle}</p>
 
         <div className="disclaimer-identity">
           <div className="identity-item identity-item-row identity-item-wide">
@@ -138,7 +143,7 @@ const Disclaimer: React.FC = () => {
               checked={accepted}
               onChange={(event) => setAccepted(event.target.checked)}
             />
-            I have read, understood, and agree to follow the interview guidelines above.
+            {acknowledgement}
           </label>
           <Button onClick={handleAccept} disabled={!accepted || submitting} className="accept-btn">
             {submitting ? 'Saving...' : 'Accept and Continue'}

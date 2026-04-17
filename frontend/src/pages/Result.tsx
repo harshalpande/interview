@@ -46,6 +46,9 @@ const Result: React.FC = () => {
   const tabSwitchEvents = activityEvents.filter((event) => event.eventType === 'TAB_HIDDEN');
   const pasteEvents = activityEvents.filter((event) => event.eventType === 'PASTE_IN_EDITOR');
   const blockedDropEvents = activityEvents.filter((event) => event.eventType === 'EXTERNAL_DROP_BLOCKED');
+  const cameraStreamLostEvents = activityEvents.filter((event) => event.eventType === 'CAMERA_STREAM_LOST');
+  const noFaceEvents = activityEvents.filter((event) => event.eventType === 'NO_FACE_DETECTED');
+  const multipleFaceEvents = activityEvents.filter((event) => event.eventType === 'MULTIPLE_FACES_DETECTED');
   const latestActivity = activityEvents.length ? activityEvents[activityEvents.length - 1] : null;
   const snapshotUrl = interviewee?.identityCaptureStatus === 'SUCCESS'
     ? sessionApi.getIdentityCaptureImageUrl(session.id, 'INTERVIEWEE')
@@ -129,10 +132,22 @@ const Result: React.FC = () => {
                     <span className="activity-metric-label">Blocked drops</span>
                     <strong>{blockedDropEvents.length}</strong>
                   </div>
+                  <div className="activity-metric">
+                    <span className="activity-metric-label">Camera interruptions</span>
+                    <strong>{cameraStreamLostEvents.length}</strong>
+                  </div>
+                  <div className="activity-metric">
+                    <span className="activity-metric-label">Face not visible</span>
+                    <strong>{noFaceEvents.length}</strong>
+                  </div>
+                  <div className="activity-metric">
+                    <span className="activity-metric-label">Multiple faces</span>
+                    <strong>{multipleFaceEvents.length}</strong>
+                  </div>
                 </div>
                 <div className="activity-summary-note">
                   <p>
-                    <strong>Summary:</strong> {tabSwitchEvents.length} tab switch event{tabSwitchEvents.length === 1 ? '' : 's'}, {pasteEvents.length} paste event{pasteEvents.length === 1 ? '' : 's'}, and {blockedDropEvents.length} blocked drag-and-drop attempt{blockedDropEvents.length === 1 ? '' : 's'} were recorded during the session.
+                    <strong>Summary:</strong> {tabSwitchEvents.length} tab switch event{tabSwitchEvents.length === 1 ? '' : 's'}, {pasteEvents.length} paste event{pasteEvents.length === 1 ? '' : 's'}, {blockedDropEvents.length} blocked drag-and-drop attempt{blockedDropEvents.length === 1 ? '' : 's'}, {cameraStreamLostEvents.length} camera interruption{cameraStreamLostEvents.length === 1 ? '' : 's'}, {noFaceEvents.length} no-face alert{noFaceEvents.length === 1 ? '' : 's'}, and {multipleFaceEvents.length} multiple-face alert{multipleFaceEvents.length === 1 ? '' : 's'} were recorded during the session.
                   </p>
                   {latestActivity ? (
                     <p>
