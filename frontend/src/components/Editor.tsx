@@ -6,9 +6,16 @@ import { compilerApi } from '../services/api';
 import './Editor.css';
 import Console from './Console';
 
-const TEMPLATE_CODE = `public class Solution {
+const TEMPLATE_CODE = `import org.junit.Assert;
+
+public class Solution {
+    static int add(int a, int b) {
+        return a + b;
+    }
+
     public static void main(String[] args) {
-        System.out.println("Hello, World!");
+        Assert.assertEquals(5, add(2, 3));
+        System.out.println("All assertions passed");
     }
 }`;
 const JAVA_SANDBOX_LABEL = 'Sandbox: Eclipse Temurin JDK 17';

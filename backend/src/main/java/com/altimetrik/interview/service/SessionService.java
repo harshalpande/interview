@@ -71,9 +71,16 @@ public class SessionService {
     private static final int EXTENSION_THRESHOLD_SEC = 15 * 60;
     private static final int TOKEN_EXPIRY_MINUTES = 5;
     private static final String DEFAULT_TEMPLATE = """
+            import org.junit.Assert;
+
             public class Solution {
+                static int add(int a, int b) {
+                    return a + b;
+                }
+
                 public static void main(String[] args) {
-                    System.out.println("Hello, World!");
+                    Assert.assertEquals(5, add(2, 3));
+                    System.out.println("All assertions passed");
                 }
             }""";
 

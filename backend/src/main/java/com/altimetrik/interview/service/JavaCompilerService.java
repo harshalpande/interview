@@ -38,6 +38,8 @@ public class JavaCompilerService {
     private static final long DEFAULT_TIMEOUT_SECONDS = 5;
     private static final Pattern PACKAGE_PATTERN = Pattern.compile("^\\s*package\\s+([\\w.]+)\\s*;\\s*$", Pattern.MULTILINE);
     private static final Pattern PUBLIC_CLASS_PATTERN = Pattern.compile("public\\s+(?:\\w+\\s+)*class\\s+(\\w+)");
+    private static final Path DOCKER_LIBS_PATH = Path.of("/app/libs");
+    private static final Path LOCAL_LIBS_PATH = Path.of("libs");
 
     private record EntryPoint(String runClassName, Path sourceFile, Path classFile) {}
 
@@ -145,34 +147,9 @@ public class JavaCompilerService {
      * Compiles Java source using javac command.
      */
     private CompileResult compileWithJavac(Path workDir, Path sourceFile) throws IOException {
-        // Use libs for dev + Docker
-        Path libDir = workDir.resolve("libs");
-        Files.createDirectories(libDir);
-        
-        // Copy libs for reliable classpath
-        String libsEnv = System.getenv("SANDBOX_LIBS");
-        Path libsPath = (libsEnv != null) ? Path.of(libsEnv) : Path.of("/app/libs");
-        if (Files.exists(libsPath)) {
-            try (var libs = Files.walk(libsPath)) {
-                libs.filter(Files::isRegularFile)
-                    .filter(p -> p.toString().endsWith(".jar"))
-                    .forEach(lib -> {
-                        try {
-                            Path target = libDir.resolve(libsPath.relativize(lib).toString());
-                            Files.createDirectories(target.getParent());
-                            Files.copy(lib, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-                        } catch (IOException e) {
-                            log.warn("Failed to copy lib {}: {}", lib, e.getMessage());
-                        }
-                    });
-            }
-            String cp = workDir.toString() + File.pathSeparator + libDir.toString();
-            log.debug("Classpath: {}", cp);
-        }
-        
-        String cp = workDir.toString() + File.pathSeparator + libDir.toString();
+        String cp = buildClasspath(workDir);
         log.debug("Classpath: {}", cp);
-        
+
         List<String> javacArgs = new ArrayList<>();
 
         javacArgs.add("javac");
@@ -272,42 +249,42 @@ public class JavaCompilerService {
         command.add("java");
         command.add("-Xmx" + memoryLimitMb + "m");
         command.add("-Xms64m");
-        
-        // Copy libs to workdir for runtime too
-        Path libDir = workDir.resolve("libs");
-        try {
-            Files.createDirectories(libDir);
-        } catch (IOException e) {
-            // TODO Auto-generated catch block
-            e.printStackTrace();
-        }
-        
-        String libsEnv = System.getenv("SANDBOX_LIBS");
-        Path libsPath = (libsEnv != null) ? Path.of(libsEnv) : Path.of("/app/libs");
-        if (Files.exists(libsPath)) {
-            try {
-                Files.walk(libsPath)
-                    .filter(Files::isRegularFile)
-                    .filter(p -> p.toString().endsWith(".jar"))
-                    .forEach(lib -> {
-                        try {
-                            Path target = libDir.resolve(libsPath.relativize(lib).toString());
-                            Files.createDirectories(target.getParent());
-                            Files.copy(lib, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-                        } catch (IOException e) {
-                            log.warn("Failed to copy lib {}: {}", lib, e.getMessage());
-                        }
-                    });
-            } catch (IOException e) {
-                // TODO Auto-generated catch block
-                e.printStackTrace();
-            }
-        }
-        String cp = workDir.toString() + File.pathSeparator + libDir.toString();
+
+        String cp = buildClasspath(workDir);
         command.add("-cp");
         command.add(cp);
         command.add(className);
         return command;
+    }
+
+    private String buildClasspath(Path workDir) {
+        Path libsPath = resolveSandboxLibrariesPath();
+        if (libsPath == null) {
+            return workDir.toString();
+        }
+
+        return workDir + File.pathSeparator + libsPath.resolve("*");
+    }
+
+    private Path resolveSandboxLibrariesPath() {
+        String libsEnv = System.getenv("SANDBOX_LIBS");
+        if (libsEnv != null && !libsEnv.isBlank()) {
+            Path envPath = Path.of(libsEnv);
+            if (Files.exists(envPath)) {
+                return envPath;
+            }
+        }
+
+        if (Files.exists(DOCKER_LIBS_PATH)) {
+            return DOCKER_LIBS_PATH;
+        }
+
+        if (Files.exists(LOCAL_LIBS_PATH)) {
+            return LOCAL_LIBS_PATH;
+        }
+
+        log.warn("Sandbox libraries path not found; external assertion libraries will be unavailable");
+        return null;
     }
 
     /**
