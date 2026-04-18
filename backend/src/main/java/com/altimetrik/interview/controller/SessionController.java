@@ -1,22 +1,10 @@
 package com.altimetrik.interview.controller;
 
-import com.altimetrik.interview.dto.AcceptDisclaimerRequest;
-import com.altimetrik.interview.dto.ActivityEventDto;
-import com.altimetrik.interview.dto.ActivityEventRequest;
-import com.altimetrik.interview.dto.CodeUpdateRequest;
-import com.altimetrik.interview.dto.CreateSessionRequest;
-import com.altimetrik.interview.dto.AbandonSessionRequest;
-import com.altimetrik.interview.dto.EndSessionRequest;
-import com.altimetrik.interview.dto.FeedbackRequest;
-import com.altimetrik.interview.dto.JoinSessionRequest;
-import com.altimetrik.interview.dto.SessionResponse;
-import com.altimetrik.interview.dto.SessionSocketMessage;
-import com.altimetrik.interview.dto.ValidateTokenResponse;
-import com.altimetrik.interview.enums.FeedbackRating;
-import com.altimetrik.interview.enums.TechnologySkill;
-import com.altimetrik.interview.service.SessionService;
-import jakarta.validation.Valid;
-import lombok.RequiredArgsConstructor;
+import java.nio.charset.StandardCharsets;
+import java.time.OffsetDateTime;
+import java.util.List;
+
+import org.eclipse.jdt.annotation.Nullable;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
@@ -26,12 +14,34 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.messaging.handler.annotation.DestinationVariable;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RequestPart;
+import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
-import org.springframework.web.bind.annotation.*;
 
-import java.nio.charset.StandardCharsets;
-import java.time.OffsetDateTime;
-import java.util.List;
+import com.altimetrik.interview.dto.AbandonSessionRequest;
+import com.altimetrik.interview.dto.AcceptDisclaimerRequest;
+import com.altimetrik.interview.dto.ActivityEventDto;
+import com.altimetrik.interview.dto.ActivityEventRequest;
+import com.altimetrik.interview.dto.CodeUpdateRequest;
+import com.altimetrik.interview.dto.CreateSessionRequest;
+import com.altimetrik.interview.dto.EndSessionRequest;
+import com.altimetrik.interview.dto.FeedbackRequest;
+import com.altimetrik.interview.dto.JoinSessionRequest;
+import com.altimetrik.interview.dto.SessionResponse;
+import com.altimetrik.interview.dto.SessionSocketMessage;
+import com.altimetrik.interview.dto.ValidateTokenResponse;
+import com.altimetrik.interview.enums.FeedbackRating;
+import com.altimetrik.interview.enums.TechnologySkill;
+import com.altimetrik.interview.service.SessionService;
+
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
 
 @RestController
 @RequestMapping("/sessions")
@@ -55,11 +65,11 @@ public class SessionController {
 
     @GetMapping
     public ResponseEntity<?> listSessions(Pageable pageable,
-                                          @RequestParam(required = false) String search,
-                                          @RequestParam(required = false) OffsetDateTime from,
-                                          @RequestParam(required = false) OffsetDateTime to,
-                                          @RequestParam(required = false) List<TechnologySkill> technologies,
-                                          @RequestParam(required = false) List<FeedbackRating> ratings) {
+                                          @RequestParam(required = false) @Nullable String search,
+                                          @RequestParam(required = false) @Nullable OffsetDateTime from,
+                                          @RequestParam(required = false) @Nullable OffsetDateTime to,
+                                          @RequestParam(required = false) @Nullable List<TechnologySkill> technologies,
+                                          @RequestParam(required = false) @Nullable List<FeedbackRating> ratings) {
         if (pageable == null || pageable.getSort().isUnsorted()) {
             Pageable defaultPageable = PageRequest.of(
                 pageable != null ? pageable.getPageNumber() : 0,
@@ -72,11 +82,11 @@ public class SessionController {
     }
 
     @GetMapping("/export")
-    public ResponseEntity<byte[]> exportSessions(@RequestParam(required = false) String search,
-                                                 @RequestParam(required = false) OffsetDateTime from,
-                                                 @RequestParam(required = false) OffsetDateTime to,
-                                                 @RequestParam(required = false) List<TechnologySkill> technologies,
-                                                 @RequestParam(required = false) List<FeedbackRating> ratings,
+    public ResponseEntity<byte[]> exportSessions(@RequestParam(required = false) @Nullable String search,
+                                                 @RequestParam(required = false) @Nullable OffsetDateTime from,
+                                                 @RequestParam(required = false) @Nullable OffsetDateTime to,
+                                                 @RequestParam(required = false) @Nullable List<TechnologySkill> technologies,
+                                                 @RequestParam(required = false) @Nullable List<FeedbackRating> ratings,
                                                  @RequestParam(defaultValue = "createdAt") String sortBy,
                                                  @RequestParam(defaultValue = "desc") String direction) {
         SessionService.CsvExport export = sessionService.exportSessionsCsv(
@@ -148,7 +158,7 @@ public class SessionController {
 
     @PostMapping("/{id}/abandon")
     public ResponseEntity<SessionResponse> abandonSession(@PathVariable String id,
-                                                          @RequestBody(required = false) AbandonSessionRequest request) {
+                                                          @RequestBody(required = false) @Nullable AbandonSessionRequest request) {
         String finalCode = request == null ? "" : request.getFinalCode();
         SessionResponse response = sessionService.abandonSession(id, finalCode);
         broadcastSession(response, "SESSION_END", "Interview marked incomplete");
@@ -173,7 +183,7 @@ public class SessionController {
                                                                  @RequestParam com.altimetrik.interview.enums.ParticipantRole role,
                                                                  @RequestParam com.altimetrik.interview.enums.IdentityCaptureStatus status,
                                                                  @RequestParam(required = false) com.altimetrik.interview.enums.IdentityCaptureFailureReason failureReason,
-                                                                 @RequestPart(required = false) MultipartFile image) {
+                                                                 @RequestPart(required = false) @Nullable MultipartFile image) {
         SessionResponse response = sessionService.updateIdentityCapture(id, role, status, failureReason, image);
         broadcastSession(response, "SESSION_STATE", "Identity capture updated");
         return ResponseEntity.ok(response);

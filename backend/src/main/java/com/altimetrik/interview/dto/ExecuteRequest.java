@@ -20,7 +20,7 @@ public class ExecuteRequest {
 
     public ExecuteRequest(String sourceCode) {
         this.sourceCode = sourceCode;
-        this.timeoutMs = 5000;      // 5 seconds default
-        this.memoryLimitMb = 512;   // 512 MB default
+        this.timeoutMs = com.altimetrik.interview.service.JavaCompilerService.defaultTimeoutMs();
+        this.memoryLimitMb = com.altimetrik.interview.service.JavaCompilerService.defaultMemoryMb();
     }
 }

@@ -76,8 +76,12 @@ public class CompilerController {
         }
 
         // Validate constraints
-        long timeoutMs = request.getTimeoutMs() > 0 ? request.getTimeoutMs() : 5000;
-        long memoryMb = request.getMemoryLimitMb() > 0 ? request.getMemoryLimitMb() : 512;
+        long timeoutMs = request.getTimeoutMs() > 0
+                ? request.getTimeoutMs()
+                : JavaCompilerService.defaultTimeoutMs();
+        long memoryMb = request.getMemoryLimitMb() > 0
+                ? Math.min(request.getMemoryLimitMb(), JavaCompilerService.maxMemoryMb())
+                : JavaCompilerService.defaultMemoryMb();
 
         ExecutionResult result = compilerService.execute(request.getSourceCode(), timeoutMs, memoryMb);
         

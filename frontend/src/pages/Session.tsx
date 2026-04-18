@@ -70,6 +70,8 @@ const Session: React.FC = () => {
   const interviewer = session?.participants.find((participant) => participant.role === 'INTERVIEWER');
   const interviewee = session?.participants.find((participant) => participant.role === 'INTERVIEWEE');
   const intervieweeName = interviewee?.name?.trim() || 'Interviewee';
+  const interviewerFirstName = firstName(interviewer?.name, 'Interviewer');
+  const intervieweeFirstName = firstName(interviewee?.name, 'Interviewee');
 
   useBackGuard({
     enabled: true,
@@ -212,6 +214,11 @@ const Session: React.FC = () => {
     localStream,
     remoteStream,
     streamError,
+    isMuted,
+    isCameraEnabled,
+    canToggleCamera,
+    toggleMute,
+    toggleCamera,
   } = useWebRtcSession({
     enabled: Boolean(sessionId && role && isCameraSessionActive),
     role: role === 'interviewer' ? 'interviewer' : 'interviewee',
@@ -418,24 +425,43 @@ const Session: React.FC = () => {
   const statusTimestampValue = session.startedAt ? formatDateTime(session.startedAt) : formatDateTime(session.createdAt);
   const interviewerCameraStatus = remoteStream
     ? cameraConnectionState === 'connected'
-      ? 'Live camera active'
-      : 'Connecting live camera'
-    : 'Waiting for live camera';
-  const intervieweeCameraStatus = streamError
-    ? 'Camera unavailable'
-    : cameraMonitorStatus === 'multiple-faces'
-      ? 'Multiple faces detected'
-      : cameraMonitorStatus === 'no-face'
-        ? 'Face not visible'
-        : cameraMonitorStatus === 'stream-lost'
-          ? 'Camera interrupted'
-          : cameraMonitorStatus === 'face-checks-unavailable'
-            ? 'Camera active (basic monitoring)'
-            : localStream
-              ? 'Camera active'
-              : 'Preparing camera';
+      ? remoteStream.getVideoTracks().length > 0
+        ? 'Live audio and video active'
+        : 'Live audio active'
+      : 'Connecting live media'
+    : isInterviewer
+      ? 'Waiting for the interviewee media stream'
+      : 'Waiting for the interviewer media stream';
+  const localMediaStatus = streamError
+    ? streamError
+    : isInterviewer
+      ? `${isMuted ? 'Mic muted' : 'Mic live'} • ${isCameraEnabled ? 'Camera live' : 'Camera off'}`
+      : cameraMonitorStatus === 'multiple-faces'
+        ? 'Mic live • Multiple faces detected'
+        : cameraMonitorStatus === 'no-face'
+          ? 'Mic live • Face not visible'
+          : cameraMonitorStatus === 'stream-lost'
+            ? 'Mic live • Camera interrupted'
+            : cameraMonitorStatus === 'face-checks-unavailable'
+              ? `${isMuted ? 'Mic muted' : 'Mic live'} • Camera active`
+              : `${isMuted ? 'Mic muted' : 'Mic live'} • Camera live`;
   const activeStageClassName = `interviewer-stage ${session.status === 'ACTIVE' ? 'active' : ''}`;
   const activeBannerClassName = `session-banner session-banner-interviewer ${session.status === 'ACTIVE' ? 'active' : ''}`;
+  const remotePanelTitle = isInterviewer
+    ? `${intervieweeFirstName} live stream`
+    : `${interviewerFirstName} live stream`;
+  const remoteEmptyMessage = isInterviewer
+    ? 'Waiting for the interviewee audio and camera stream to connect.'
+    : 'Waiting for the interviewer stream to connect.';
+  const remoteVideoStream = remoteStream && remoteStream.getVideoTracks().length > 0 ? remoteStream : null;
+  const localVideoStream = localStream && localStream.getVideoTracks().length > 0 ? localStream : null;
+  const displayedPanelStream =
+    remoteVideoStream ?? localVideoStream;
+  const panelStatus = remoteStream
+    ? interviewerCameraStatus
+    : localStream
+      ? localMediaStatus
+      : streamError || 'Preparing local media';
 
   return (
     <div className={`session-page polished-page ${isFullscreen ? 'fullscreen' : ''}`}>
@@ -492,23 +518,39 @@ const Session: React.FC = () => {
             </div>
           </div>
 
-          {isInterviewer ? (
-            <VideoPanel
-              title={`${interviewee?.name || 'Interviewee'} Live Camera`}
-              stream={remoteStream}
-              status={interviewerCameraStatus}
-              emptyMessage="Waiting for the interviewee camera stream to connect."
-            />
-          ) : (
-            <VideoPanel
-              title="Your Camera"
-              stream={localStream}
-              status={intervieweeCameraStatus}
-              emptyMessage={streamError || 'Preparing your camera preview.'}
-              mirror
-              muted
-            />
-          )}
+          <VideoPanel
+            title={remotePanelTitle}
+            stream={displayedPanelStream}
+            audioStream={remoteStream}
+            status={panelStatus}
+            emptyMessage={remoteEmptyMessage}
+            mirror={!remoteVideoStream && Boolean(localVideoStream)}
+            muted
+            headerActions={
+              <div className="media-action-group">
+                <button
+                  type="button"
+                  className={`media-icon-button ${isMuted ? 'off' : 'on'}`}
+                  onClick={toggleMute}
+                  aria-label={isMuted ? 'Unmute microphone' : 'Mute microphone'}
+                  title={isMuted ? 'Unmute microphone' : 'Mute microphone'}
+                >
+                  <MicrophoneIcon muted={isMuted} />
+                </button>
+                {canToggleCamera ? (
+                  <button
+                    type="button"
+                    className={`media-icon-button ${isCameraEnabled ? 'on' : 'off'}`}
+                    onClick={toggleCamera}
+                    aria-label={isCameraEnabled ? 'Turn camera off' : 'Turn camera on'}
+                    title={isCameraEnabled ? 'Turn camera off' : 'Turn camera on'}
+                  >
+                    <CameraIcon disabled={!isCameraEnabled} />
+                  </button>
+                ) : null}
+              </div>
+            }
+          />
         </div>
       ) : !isFullscreen && (
         <div className="session-banner">
@@ -809,4 +851,76 @@ function formatCaptureReason(reason: string) {
 
 function formatPossessiveLabel(name: string) {
   return name.endsWith('s') ? `${name}'` : `${name}'s`;
+}
+
+function firstName(value: string | undefined, fallback: string) {
+  const normalized = value?.trim();
+  if (!normalized) {
+    return fallback;
+  }
+  return normalized.split(/\s+/)[0] || fallback;
+}
+
+function MicrophoneIcon({ muted }: { muted: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        d="M12 15.25a3.25 3.25 0 0 0 3.25-3.25V7a3.25 3.25 0 1 0-6.5 0v5A3.25 3.25 0 0 0 12 15.25Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M6.75 11.75a5.25 5.25 0 0 0 8.92 3.75M17.25 11.75A5.25 5.25 0 0 1 12 17v2.25M9.75 19.25h4.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      {muted ? (
+        <path
+          d="M5 5l14 14"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+        />
+      ) : null}
+    </svg>
+  );
+}
+
+function CameraIcon({ disabled }: { disabled: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        d="M4.75 8.5A1.75 1.75 0 0 1 6.5 6.75h8A1.75 1.75 0 0 1 16.25 8.5v7A1.75 1.75 0 0 1 14.5 17.25h-8A1.75 1.75 0 0 1 4.75 15.5v-7Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M16.25 10.25 19.25 8.5v7l-3-1.75"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      {disabled ? (
+        <path
+          d="M5 5l14 14"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+        />
+      ) : null}
+    </svg>
+  );
 }

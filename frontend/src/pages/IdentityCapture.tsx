@@ -204,8 +204,7 @@ const IdentityCapture: React.FC = () => {
         <h2>Capture a quick photo before entering the interview</h2>
         <p className="page-subtitle">
           {interviewee?.name ? `${interviewee.name}, ` : ''}
-          please allow camera access, remove any camera lid or sticker, and center your face inside the frame. If your device
-          cannot provide a camera feed, you can still continue and the issue will be recorded for the interviewer.
+          allow camera access and center your face in the frame. If the camera is unavailable, you can still continue and we will record the issue.
         </p>
 
         {submitError && <div className="error-banner">{submitError}</div>}
@@ -253,10 +252,10 @@ const IdentityCapture: React.FC = () => {
           </section>
 
           <aside className="identity-capture-panel hint-panel">
-            <p><strong>What happens here</strong></p>
-            <p>We request camera access only after you press <strong>OK</strong>.</p>
-            <p>A 5 second countdown will run before the photo is captured.</p>
-            <p>If the camera is blocked, missing, or unavailable, you can continue and the outcome will be stored with the interview session.</p>
+            <p><strong>Quick steps</strong></p>
+            <p>Press <strong>OK</strong> to start the camera.</p>
+            <p>A 5 second countdown captures the photo automatically.</p>
+            <p>If the camera does not work, continue and the issue will be stored with the session.</p>
             <div className="identity-capture-actions identity-capture-panel-actions">
               {step === 'intro' && (
                 <>
