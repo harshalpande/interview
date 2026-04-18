@@ -34,8 +34,10 @@ import lombok.extern.slf4j.Slf4j;
 public class JavaCompilerService {
 
     private static final String TEMP_DIR_PREFIX = "java-compiler-";
+    private static final long DEFAULT_MEMORY_MB = 512;
     private static final long MAX_MEMORY_MB = 1024;
     private static final long DEFAULT_TIMEOUT_SECONDS = 5;
+    private static final long DEFAULT_TIMEOUT_MS = TimeUnit.SECONDS.toMillis(DEFAULT_TIMEOUT_SECONDS);
     private static final Pattern PACKAGE_PATTERN = Pattern.compile("^\\s*package\\s+([\\w.]+)\\s*;\\s*$", Pattern.MULTILINE);
     private static final Pattern PUBLIC_CLASS_PATTERN = Pattern.compile("public\\s+(?:\\w+\\s+)*class\\s+(\\w+)");
     private static final Path DOCKER_LIBS_PATH = Path.of("/app/libs");
@@ -69,6 +71,8 @@ public class JavaCompilerService {
      * Executes compiled Java code and captures output.
      */
     public ExecutionResult execute(String sourceCode, long timeoutMs, long memoryLimitMb) {
+        long effectiveTimeoutMs = sanitizeTimeoutMs(timeoutMs);
+        long effectiveMemoryLimitMb = sanitizeMemoryLimitMb(memoryLimitMb);
         Path workDir = null;
         try {
             // Create temporary directory
@@ -84,7 +88,7 @@ public class JavaCompilerService {
             }
 
             // Execute the compiled code
-            return executeCompiledClass(workDir, timeoutMs, memoryLimitMb, entryPoint.runClassName(), entryPoint.classFile());
+            return executeCompiledClass(workDir, effectiveTimeoutMs, effectiveMemoryLimitMb, entryPoint.runClassName(), entryPoint.classFile());
         } catch (Exception e) {
             log.error("Execution error", e);
             return ExecutionResult.error(e.getMessage());
@@ -255,6 +259,29 @@ public class JavaCompilerService {
         command.add(cp);
         command.add(className);
         return command;
+    }
+
+    public static long defaultTimeoutMs() {
+        return DEFAULT_TIMEOUT_MS;
+    }
+
+    public static long defaultMemoryMb() {
+        return DEFAULT_MEMORY_MB;
+    }
+
+    public static long maxMemoryMb() {
+        return MAX_MEMORY_MB;
+    }
+
+    private long sanitizeTimeoutMs(long timeoutMs) {
+        return timeoutMs > 0 ? timeoutMs : DEFAULT_TIMEOUT_MS;
+    }
+
+    private long sanitizeMemoryLimitMb(long memoryLimitMb) {
+        if (memoryLimitMb <= 0) {
+            return DEFAULT_MEMORY_MB;
+        }
+        return Math.min(memoryLimitMb, MAX_MEMORY_MB);
     }
 
     private String buildClasspath(Path workDir) {

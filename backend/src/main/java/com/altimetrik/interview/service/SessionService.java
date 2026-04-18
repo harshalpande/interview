@@ -369,7 +369,11 @@ public class SessionService {
 
         upsertCodeState(sessionId, finalCode, ParticipantRole.INTERVIEWER);
 
-        JavaCompilerService.ExecutionResult executionResult = javaCompilerService.execute(finalCode, 5000, 512);
+        JavaCompilerService.ExecutionResult executionResult = javaCompilerService.execute(
+                finalCode,
+                JavaCompilerService.defaultTimeoutMs(),
+                JavaCompilerService.defaultMemoryMb()
+        );
         RunResult runResult = runResultRepository.findTopBySessionIdOrderByCompiledAtDesc(sessionId).orElseGet(RunResult::new);
         runResult.setSessionId(sessionId);
         runResult.setStdout(executionResult.getStdout());
@@ -399,7 +403,11 @@ public class SessionService {
 
         upsertCodeState(sessionId, finalCode == null ? "" : finalCode, ParticipantRole.INTERVIEWER);
 
-        JavaCompilerService.ExecutionResult executionResult = javaCompilerService.execute(finalCode == null ? "" : finalCode, 5000, 512);
+        JavaCompilerService.ExecutionResult executionResult = javaCompilerService.execute(
+                finalCode == null ? "" : finalCode,
+                JavaCompilerService.defaultTimeoutMs(),
+                JavaCompilerService.defaultMemoryMb()
+        );
         RunResult runResult = runResultRepository.findTopBySessionIdOrderByCompiledAtDesc(sessionId).orElseGet(RunResult::new);
         runResult.setSessionId(sessionId);
         runResult.setStdout(executionResult.getStdout());
