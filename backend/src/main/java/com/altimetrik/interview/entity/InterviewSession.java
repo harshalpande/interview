@@ -2,6 +2,8 @@ package com.altimetrik.interview.entity;
 
 import com.altimetrik.interview.enums.SessionStatus;
 import com.altimetrik.interview.enums.TechnologySkill;
+import com.altimetrik.interview.enums.FeedbackRating;
+import com.altimetrik.interview.enums.RecommendationDecision;
 import jakarta.persistence.*;
 import lombok.Data;
 import org.hibernate.annotations.CreationTimestamp;
@@ -23,6 +25,29 @@ public class InterviewSession {
     private OffsetDateTime startedAt;
     
     private OffsetDateTime endedAt;
+
+    private OffsetDateTime interruptedAt;
+
+    private OffsetDateTime recoveryDeadlineAt;
+
+    private Boolean suspiciousRejected = false;
+
+    private String suspiciousScenarioKey;
+
+    @Column(columnDefinition = "TEXT")
+    private String suspiciousActivityReason;
+
+    @Column(columnDefinition = "TEXT")
+    private String suspiciousActivityHistory;
+
+    @Enumerated(EnumType.STRING)
+    private FeedbackRating feedbackDraftRating;
+
+    @Column(columnDefinition = "TEXT")
+    private String feedbackDraftComments;
+
+    @Enumerated(EnumType.STRING)
+    private RecommendationDecision feedbackDraftRecommendationDecision;
     
     private Integer durationSec;
 

@@ -2,6 +2,8 @@ package com.altimetrik.interview.entity;
 
 import com.altimetrik.interview.enums.IdentityCaptureFailureReason;
 import com.altimetrik.interview.enums.IdentityCaptureStatus;
+import com.altimetrik.interview.enums.ParticipantConnectionStatus;
+import com.altimetrik.interview.enums.ResumeReason;
 import jakarta.persistence.*;
 import lombok.Data;
 import org.hibernate.annotations.CreationTimestamp;
@@ -44,4 +46,30 @@ public class Participant {
     
     @CreationTimestamp
     private OffsetDateTime joinedAt;
+
+    @Enumerated(EnumType.STRING)
+    private ParticipantConnectionStatus connectionStatus = ParticipantConnectionStatus.DISCONNECTED;
+
+    private String deviceId;
+
+    private String userAgent;
+
+    private String lastKnownIp;
+
+    private OffsetDateTime lastSeenAt;
+
+    private OffsetDateTime disconnectedAt;
+
+    private OffsetDateTime resumeRequestedAt;
+
+    private OffsetDateTime resumeApprovedAt;
+
+    private OffsetDateTime resumeRejectedAt;
+
+    private Integer resumeCount = 0;
+
+    @Enumerated(EnumType.STRING)
+    private ResumeReason pendingResumeReason;
+
+    private Boolean awaitingResumeApproval = false;
 }

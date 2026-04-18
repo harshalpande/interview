@@ -26,7 +26,13 @@ public class SessionResponse {
     private Long codeVersion;
     private RunResultDto finalRunResult;
     private FeedbackDto feedback;
+    private FeedbackDto feedbackDraft;
     private List<ActivityEventDto> activityEvents;
     private JoinTokenResponse joinInfo;
     private String summary;
+    private OffsetDateTime interruptedAt;
+    private OffsetDateTime recoveryDeadlineAt;
+    private Boolean suspiciousRejected;
+    private String suspiciousScenarioKey;
+    private String suspiciousActivityReason;
 }

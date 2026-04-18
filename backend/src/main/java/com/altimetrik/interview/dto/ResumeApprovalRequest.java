@@ -5,15 +5,11 @@ import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
 @Data
-public class JoinSessionRequest {
+public class ResumeApprovalRequest {
     @NotBlank
-    private String name;
+    private String interviewerName;
 
     @Email
     @NotBlank
-    private String email;
-
-    private String timeZone;
-
-    private String deviceId;
+    private String interviewerEmail;
 }

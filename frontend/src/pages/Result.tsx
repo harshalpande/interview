@@ -89,7 +89,7 @@ const Result: React.FC = () => {
           <p><strong>Allocated duration:</strong> {Math.round(session.durationSec / 60)} minutes</p>
           {session.feedback && (
             <>
-              <p><strong>Rating:</strong> {session.feedback.rating}</p>
+              <p><strong>Rating:</strong> {formatRating(session.feedback.rating)}</p>
               <p><strong>Recommendation:</strong> {formatRecommendation(session.feedback.recommendationDecision)}</p>
               <p><strong>Comments:</strong> {session.feedback.comments}</p>
             </>
@@ -187,6 +187,10 @@ function formatRecommendation(value: string) {
   return value === 'REEVALUATION'
     ? 'Reevaluation'
     : value.charAt(0) + value.slice(1).toLowerCase();
+}
+
+function formatRating(value: string) {
+  return value.charAt(0) + value.slice(1).toLowerCase();
 }
 
 function formatIdentityCaptureStatus(status?: string | null, reason?: string | null) {

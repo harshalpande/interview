@@ -6,6 +6,7 @@ import type { ValidateTokenResponse } from '../types/session';
 import { useSessionStore } from '../stores/sessionStore';
 import { useBackGuard } from '../hooks/useBackGuard';
 import { getBrowserTimeZone } from '../utils/dateTime';
+import { getOrCreateDeviceId } from '../utils/device';
 
 const Join: React.FC = () => {
   const { token } = useParams<{ token: string }>();
@@ -31,6 +32,9 @@ const Join: React.FC = () => {
       const result = await sessionApi.validateToken(token);
       if (!result.valid) {
         setError(result.message);
+      } else if (result.resumeRequired) {
+        navigate(`/java/resume/${result.sessionId}?role=interviewee&reason=MANUAL_RESUME`, { replace: true });
+        return;
       } else {
         // Do not pre-fill. Interviewee must type to confirm identity.
         setName('');
@@ -42,7 +46,7 @@ const Join: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [navigate, token]);
 
   React.useEffect(() => {
     validateToken();
@@ -56,7 +60,12 @@ const Join: React.FC = () => {
     }
     try {
       setRole('interviewee');
-      const session = await sessionApi.joinSession(token, { name, email, timeZone: getBrowserTimeZone() });
+      const session = await sessionApi.joinSession(token, {
+        name,
+        email,
+        timeZone: getBrowserTimeZone(),
+        deviceId: getOrCreateDeviceId(),
+      });
       setSession(session);
       navigate(`/java/identity-capture/${session.id}`);
     } catch (err) {

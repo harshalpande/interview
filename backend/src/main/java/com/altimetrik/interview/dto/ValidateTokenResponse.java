@@ -14,4 +14,5 @@ public class ValidateTokenResponse {
     private ParticipantRole role;
     private OffsetDateTime expiresAt;
     private String message;
+    private boolean resumeRequired;
 }

@@ -8,4 +8,5 @@ Documentation is consolidated under `docs/`:
 - `docs/README.md` (developer guide: local + Docker, DB profiles, H2 console)
 - `docs/architecture.md` (architecture diagram + key flows)
 - `docs/objectives.md` (objectives achieved, features, shortcomings)
-
+- `docs/resume-session-design.md` (persistent session resume behavior and use cases)
+- `docs/pending-test-scenarios.md` (scenarios still pending validation due to environment limitations)

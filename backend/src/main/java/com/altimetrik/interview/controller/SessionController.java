@@ -30,9 +30,14 @@ import com.altimetrik.interview.dto.ActivityEventDto;
 import com.altimetrik.interview.dto.ActivityEventRequest;
 import com.altimetrik.interview.dto.CodeUpdateRequest;
 import com.altimetrik.interview.dto.CreateSessionRequest;
+import com.altimetrik.interview.dto.DisconnectParticipantRequest;
 import com.altimetrik.interview.dto.EndSessionRequest;
 import com.altimetrik.interview.dto.FeedbackRequest;
+import com.altimetrik.interview.dto.HeartbeatRequest;
 import com.altimetrik.interview.dto.JoinSessionRequest;
+import com.altimetrik.interview.dto.ResumeApprovalRequest;
+import com.altimetrik.interview.dto.ResumeRequest;
+import com.altimetrik.interview.dto.ResumeResponse;
 import com.altimetrik.interview.dto.SessionResponse;
 import com.altimetrik.interview.dto.SessionSocketMessage;
 import com.altimetrik.interview.dto.ValidateTokenResponse;
@@ -41,6 +46,7 @@ import com.altimetrik.interview.enums.TechnologySkill;
 import com.altimetrik.interview.service.SessionService;
 
 import jakarta.validation.Valid;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 
 @RestController
@@ -120,9 +126,57 @@ public class SessionController {
 
     @PostMapping("/join/{token}")
     public ResponseEntity<SessionResponse> joinSession(@PathVariable String token,
-                                                       @Valid @RequestBody JoinSessionRequest request) {
-        SessionResponse response = sessionService.joinSession(token, request);
+                                                       @Valid @RequestBody JoinSessionRequest request,
+                                                       HttpServletRequest servletRequest) {
+        SessionResponse response = sessionService.joinSession(token, request, extractClientIp(servletRequest), servletRequest.getHeader("User-Agent"));
         broadcastSession(response, "USER_JOINED", "Interviewee joined");
+        return ResponseEntity.ok(response);
+    }
+
+    @PostMapping("/{id}/resume")
+    public ResponseEntity<ResumeResponse> requestResume(@PathVariable String id,
+                                                        @Valid @RequestBody ResumeRequest request,
+                                                        HttpServletRequest servletRequest) {
+        ResumeResponse response = sessionService.requestResume(id, request, extractClientIp(servletRequest), servletRequest.getHeader("User-Agent"));
+        if (response.getSession() != null) {
+            String message = response.getMessage();
+            String type = ResumeResponse.REJECTED.equals(response.getStatus()) ? "SESSION_END" : "SESSION_STATE";
+            broadcastSession(response.getSession(), type, message);
+        }
+        return ResponseEntity.ok(response);
+    }
+
+    @PostMapping("/{id}/resume/approve")
+    public ResponseEntity<SessionResponse> approveResume(@PathVariable String id,
+                                                         @Valid @RequestBody ResumeApprovalRequest request,
+                                                         HttpServletRequest servletRequest) {
+        SessionResponse response = sessionService.approveResume(id, request, extractClientIp(servletRequest), servletRequest.getHeader("User-Agent"));
+        broadcastSession(response, "SESSION_STATE", "Interviewee resume approved");
+        return ResponseEntity.ok(response);
+    }
+
+    @PostMapping("/{id}/resume/reject")
+    public ResponseEntity<SessionResponse> rejectResume(@PathVariable String id,
+                                                        @Valid @RequestBody ResumeApprovalRequest request,
+                                                        HttpServletRequest servletRequest) {
+        SessionResponse response = sessionService.rejectResume(id, request, extractClientIp(servletRequest), servletRequest.getHeader("User-Agent"));
+        broadcastSession(response, "SESSION_STATE", "Interviewee resume rejected");
+        return ResponseEntity.ok(response);
+    }
+
+    @PostMapping("/{id}/presence")
+    public ResponseEntity<SessionResponse> registerHeartbeat(@PathVariable String id,
+                                                             @Valid @RequestBody HeartbeatRequest request,
+                                                             HttpServletRequest servletRequest) {
+        SessionResponse response = sessionService.registerHeartbeat(id, request, extractClientIp(servletRequest), servletRequest.getHeader("User-Agent"));
+        return ResponseEntity.ok(response);
+    }
+
+    @PostMapping("/{id}/disconnect")
+    public ResponseEntity<SessionResponse> disconnectParticipant(@PathVariable String id,
+                                                                 @Valid @RequestBody DisconnectParticipantRequest request) {
+        SessionResponse response = sessionService.disconnectParticipant(id, request);
+        broadcastSession(response, "SESSION_STATE", "Participant disconnected");
         return ResponseEntity.ok(response);
     }
 
@@ -242,5 +296,13 @@ public class SessionController {
                 .session(response)
                 .message(message)
                 .build());
+    }
+
+    private String extractClientIp(HttpServletRequest request) {
+        String forwardedFor = request.getHeader("X-Forwarded-For");
+        if (forwardedFor != null && !forwardedFor.isBlank()) {
+            return forwardedFor.split(",")[0].trim();
+        }
+        return request.getRemoteAddr();
     }
 }

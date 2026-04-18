@@ -13,6 +13,7 @@ interface SignalPayload {
 
 interface UseWebRtcSessionOptions {
   enabled: boolean;
+  isSocketConnected: boolean;
   role: 'interviewer' | 'interviewee';
   incomingSignal: SessionSocketMessage | null;
   sendSignal: (payload: SignalPayload) => void;
@@ -50,6 +51,7 @@ function buildMediaConstraints(role: 'interviewer' | 'interviewee', isCameraEnab
 
 export function useWebRtcSession({
   enabled,
+  isSocketConnected,
   role,
   incomingSignal,
   sendSignal,
@@ -273,7 +275,7 @@ export function useWebRtcSession({
   }, [applyTrackStates]);
 
   React.useEffect(() => {
-    if (!enabled) {
+    if (!enabled || !isSocketConnected) {
       return;
     }
 
@@ -296,7 +298,7 @@ export function useWebRtcSession({
     });
 
     return () => window.clearInterval(interval);
-  }, [enabled, oppositeRole, participantRole, sendSignal]);
+  }, [enabled, isSocketConnected, oppositeRole, participantRole, sendSignal]);
 
   React.useEffect(() => {
     if (!enabled || !incomingSignal || incomingSignal.type !== 'WEBRTC_SIGNAL') {

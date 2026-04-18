@@ -4,6 +4,7 @@ public enum FeedbackRating {
     EXCELLENT,
     GOOD,
     FAIR,
-    BAD
+    BAD,
+    DISQUALIFIED
 }
 

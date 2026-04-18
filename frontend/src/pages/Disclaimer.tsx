@@ -13,6 +13,7 @@ const interviewerPoints = [
   'Conduct the interview professionally, evaluate only job-relevant skills, and avoid discriminatory, intimidating, abusive, or irrelevant questioning.',
   'Clearly explain the problem statement, constraints, and expectations, and give the candidate a fair opportunity to think aloud, ask clarifying questions, and demonstrate problem solving.',
   'Use monitoring alerts responsibly. Camera, tab-switch, paste, and drag-drop alerts are intended to support human judgment and should not be treated as automatic proof of misconduct without context.',
+  'Session continuity and access controls may require additional verification, review, or platform-enforced restrictions when interview integrity or identity confidence is impacted.',
   'Do not request confidential personal information, credentials, unrelated sensitive data, or any action that falls outside a legitimate interview process.',
   'Record feedback honestly and objectively based on code quality, problem solving approach, communication, correctness, and overall interview conduct.',
   'The interview is designed for 60 minutes. Only one 15-minute extension is allowed, and it should be used only when genuinely necessary.',
@@ -24,6 +25,7 @@ const intervieweePoints = [
   'Remain clearly visible in the camera frame, keep your camera available during the session, and do not permit another person to appear on screen or assist you unless explicitly allowed by the interviewer.',
   'Do not use copied solutions, external notes, unauthorized websites, AI-generated answers, hidden communication tools, or help from another person unless the interviewer has expressly permitted it.',
   'Use the shared editor only for interview-related work. Paste, drag-drop, tab-switch, and similar monitored actions may be recorded and surfaced to the interviewer as suspicious activity alerts.',
+  'If session continuity, identity verification, or monitored interview controls are disrupted, the platform may require additional checks, limit re-entry, or end the session to protect interview integrity.',
   'Communicate professionally, ask clarifying questions when needed, and focus on demonstrating your own reasoning, coding approach, and problem-solving ability.',
   'The interview is designed for 60 minutes unless the interviewer grants the one permitted 15-minute extension.',
 ];
@@ -83,7 +85,7 @@ const Disclaimer: React.FC = () => {
     : 'Please review the interview monitoring, privacy, and conduct expectations carefully before continuing.';
   const acknowledgement = role === 'interviewer'
     ? 'I understand my responsibilities as the interviewer and will use this platform fairly, professionally, and in accordance with the interview process.'
-    : 'I understand that this interview session may use identity capture, live camera streaming, and activity monitoring controls, and I agree to participate under these guidelines.';
+    : 'I understand that this interview session may use identity capture, live camera streaming, activity monitoring, and session integrity controls, and I agree to participate under these guidelines.';
 
   const handleAccept = async () => {
     try {
