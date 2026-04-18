@@ -210,6 +210,18 @@
   padding: 12px 14px 8px;
 }
 
+.video-panel-meta {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.video-panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .video-panel-title {
   font-size: 0.98rem;
   font-weight: 700;
@@ -251,6 +263,46 @@
   color: rgba(255, 255, 255, 0.92);
   text-align: center;
   line-height: 1.6;
+}
+
+.media-action-group {
+  display: flex;
+  gap: 8px;
+}
+
+.media-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid rgba(190, 205, 219, 0.9);
+  border-radius: 999px;
+  background: #f5f8fb;
+  color: #23415c;
+  cursor: pointer;
+  transition: transform 0.18s ease, background 0.18s ease, color 0.18s ease, border-color 0.18s ease;
+}
+
+.media-icon-button:hover {
+  transform: translateY(-1px);
+}
+
+.media-icon-button.on {
+  background: #e9fff4;
+  border-color: rgba(56, 161, 105, 0.35);
+  color: #127046;
+}
+
+.media-icon-button.off {
+  background: #fff1f1;
+  border-color: rgba(211, 72, 54, 0.28);
+  color: #b14233;
+}
+
+.media-icon-button svg {
+  width: 18px;
+  height: 18px;
 }
 
 .session-editor-btn {
@@ -410,6 +462,11 @@
   }
 
   .video-panel {
+    height: auto;
+    max-height: none;
+  }
+
+  .video-panel.compact {
     height: auto;
     max-height: none;
   }

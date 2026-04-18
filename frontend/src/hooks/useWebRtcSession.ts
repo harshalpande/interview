@@ -31,6 +31,23 @@ const RTC_CONFIG: RTCConfiguration = {
   iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
 };
 
+function buildMediaConstraints(role: 'interviewer' | 'interviewee', isCameraEnabled: boolean): MediaStreamConstraints {
+  return {
+    video: role === 'interviewee' || isCameraEnabled
+      ? {
+          facingMode: 'user',
+          width: { ideal: 640 },
+          height: { ideal: 360 },
+        }
+      : false,
+    audio: {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+    },
+  };
+}
+
 export function useWebRtcSession({
   enabled,
   role,
@@ -48,6 +65,9 @@ export function useWebRtcSession({
   const [remoteStream, setRemoteStream] = React.useState<MediaStream | null>(null);
   const [connectionState, setConnectionState] = React.useState<CameraConnectionState>('idle');
   const [streamError, setStreamError] = React.useState<string | null>(null);
+  const [isMuted, setIsMuted] = React.useState(false);
+  const [isCameraEnabled, setIsCameraEnabled] = React.useState(role !== 'interviewer');
+  const shouldCaptureVideo = role === 'interviewee' || isCameraEnabled;
 
   const closePeerConnection = React.useCallback(() => {
     if (peerConnectionRef.current) {
@@ -72,7 +92,7 @@ export function useWebRtcSession({
   }, []);
 
   const attachLocalTracks = React.useCallback((connection: RTCPeerConnection) => {
-    if (!localStreamRef.current || role !== 'interviewee') {
+    if (!localStreamRef.current) {
       return;
     }
 
@@ -90,7 +110,20 @@ export function useWebRtcSession({
     newTracks.forEach((track) => {
       connection.addTrack(track, localStreamRef.current!);
     });
-  }, [role]);
+  }, []);
+
+  const applyTrackStates = React.useCallback(() => {
+    if (!localStreamRef.current) {
+      return;
+    }
+
+    localStreamRef.current.getAudioTracks().forEach((track) => {
+      track.enabled = !isMuted;
+    });
+    localStreamRef.current.getVideoTracks().forEach((track) => {
+      track.enabled = role !== 'interviewer' || isCameraEnabled;
+    });
+  }, [isCameraEnabled, isMuted, role]);
 
   const ensurePeerConnection = React.useCallback(() => {
     if (peerConnectionRef.current) {
@@ -153,15 +186,11 @@ export function useWebRtcSession({
       }
     };
 
-    if (role === 'interviewer') {
-      connection.addTransceiver('video', { direction: 'recvonly' });
-    }
-
     attachLocalTracks(connection);
 
     peerConnectionRef.current = connection;
     return connection;
-  }, [attachLocalTracks, oppositeRole, participantRole, role, sendSignal]);
+  }, [attachLocalTracks, oppositeRole, participantRole, sendSignal]);
 
   const flushPendingCandidates = React.useCallback(async () => {
     if (!peerConnectionRef.current?.remoteDescription) {
@@ -192,25 +221,15 @@ export function useWebRtcSession({
       return;
     }
 
-    if (role !== 'interviewee') {
-      ensurePeerConnection();
-      setConnectionState((previous) => (previous === 'idle' ? 'ready' : previous));
-      return;
-    }
-
     let cancelled = false;
+    closePeerConnection();
+    stopLocalStream();
+    setRemoteStream(null);
     setConnectionState('requesting');
     setStreamError(null);
 
     navigator.mediaDevices
-      .getUserMedia({
-        video: {
-          facingMode: 'user',
-          width: { ideal: 640 },
-          height: { ideal: 360 },
-        },
-        audio: false,
-      })
+      .getUserMedia(buildMediaConstraints(role, shouldCaptureVideo))
       .then((stream) => {
         if (cancelled) {
           stream.getTracks().forEach((track) => track.stop());
@@ -218,6 +237,12 @@ export function useWebRtcSession({
         }
 
         localStreamRef.current = stream;
+        stream.getAudioTracks().forEach((track) => {
+          track.enabled = !isMuted;
+        });
+        stream.getVideoTracks().forEach((track) => {
+          track.enabled = role !== 'interviewer' || isCameraEnabled;
+        });
         setLocalStream(stream);
         const connection = ensurePeerConnection();
         attachLocalTracks(connection);
@@ -231,7 +256,9 @@ export function useWebRtcSession({
         const message =
           error instanceof Error && error.message
             ? error.message
-            : 'Unable to access the interviewee camera.';
+            : role === 'interviewer'
+              ? 'Unable to access the interviewer microphone.'
+              : 'Unable to access the interviewee camera and microphone.';
         setStreamError(message);
         setConnectionState('unavailable');
       });
@@ -239,7 +266,11 @@ export function useWebRtcSession({
     return () => {
       cancelled = true;
     };
-  }, [attachLocalTracks, closePeerConnection, enabled, ensurePeerConnection, role, stopLocalStream]);
+  }, [attachLocalTracks, closePeerConnection, enabled, ensurePeerConnection, isCameraEnabled, isMuted, role, shouldCaptureVideo, stopLocalStream]);
+
+  React.useEffect(() => {
+    applyTrackStates();
+  }, [applyTrackStates]);
 
   React.useEffect(() => {
     if (!enabled) {
@@ -385,10 +416,26 @@ export function useWebRtcSession({
     };
   }, [closePeerConnection, stopLocalStream]);
 
+  const toggleMute = React.useCallback(() => {
+    setIsMuted((previous) => !previous);
+  }, []);
+
+  const toggleCamera = React.useCallback(() => {
+    if (role !== 'interviewer') {
+      return;
+    }
+    setIsCameraEnabled((previous) => !previous);
+  }, [role]);
+
   return {
     connectionState,
     localStream,
     remoteStream,
     streamError,
+    isMuted,
+    isCameraEnabled,
+    canToggleCamera: role === 'interviewer',
+    toggleMute,
+    toggleCamera,
   };
 }

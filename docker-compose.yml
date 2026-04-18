@@ -31,7 +31,7 @@ services:
       dockerfile: Dockerfile
     container_name: java-compiler-frontend
     ports:
-      - "80:3000"
+      - "3000:3000"
 
     networks:
       - java-compiler-network
