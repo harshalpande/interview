@@ -6,6 +6,8 @@ import com.altimetrik.interview.dto.ActivityEventRequest;
 import com.altimetrik.interview.dto.CreateSessionRequest;
 import com.altimetrik.interview.dto.CodeUpdateRequest;
 import com.altimetrik.interview.dto.EndSessionRequest;
+import com.altimetrik.interview.dto.ExecuteRequest;
+import com.altimetrik.interview.dto.ExecuteResponse;
 import com.altimetrik.interview.dto.FeedbackDto;
 import com.altimetrik.interview.dto.FeedbackRequest;
 import com.altimetrik.interview.dto.HeartbeatRequest;
@@ -82,8 +84,6 @@ public class SessionService {
     private static final int EXTENSION_THRESHOLD_SEC = 15 * 60;
     private static final int RECOVERY_WINDOW_SEC = 120;
     private static final int TOKEN_EXPIRY_MINUTES = 5;
-    private static final String REPEAT_RESUME_REJECTION_REASON = "Candidate was rejected due to suspicious activity after attempting to resume the interview more than once.";
-    private static final String EXPIRED_RESUME_REJECTION_REASON = "Candidate was rejected due to suspicious activity because the resume attempt happened after the 120-second recovery window.";
     private static final String SCENARIO_REFRESH = "REFRESH_OR_REOPEN";
     private static final String SCENARIO_CONNECTION = "CONNECTION_RECOVERY";
     private static final String SCENARIO_NETWORK = "NETWORK_CHANGE";
@@ -119,7 +119,7 @@ public class SessionService {
     private final RunResultRepository runResultRepository;
     private final FeedbackRepository feedbackRepository;
     private final SessionActivityEventRepository sessionActivityEventRepository;
-    private final JavaCompilerService javaCompilerService;
+    private final SandboxClientService sandboxClientService;
     private final IdentitySnapshotStorageService identitySnapshotStorageService;
 
     @Transactional
@@ -607,16 +607,12 @@ public class SessionService {
 
         upsertCodeState(sessionId, finalCode, ParticipantRole.INTERVIEWER);
 
-        JavaCompilerService.ExecutionResult executionResult = javaCompilerService.execute(
-                finalCode,
-                JavaCompilerService.defaultTimeoutMs(),
-                JavaCompilerService.defaultMemoryMb()
-        );
+        ExecuteResponse executionResult = sandboxClientService.execute(new ExecuteRequest(finalCode));
         RunResult runResult = runResultRepository.findTopBySessionIdOrderByCompiledAtDesc(sessionId).orElseGet(RunResult::new);
         runResult.setSessionId(sessionId);
         runResult.setStdout(executionResult.getStdout());
-        runResult.setStderr(executionResult.getStderr().isBlank()
-                ? String.join("\n", executionResult.getCompileErrors())
+        runResult.setStderr((executionResult.getStderr() == null || executionResult.getStderr().isBlank())
+                ? String.join("\n", executionResult.getCompileErrors() == null ? List.of() : executionResult.getCompileErrors())
                 : executionResult.getStderr());
         runResult.setExitStatus(executionResult.getExitCode());
         runResultRepository.save(runResult);
@@ -641,16 +637,12 @@ public class SessionService {
 
         upsertCodeState(sessionId, finalCode == null ? "" : finalCode, ParticipantRole.INTERVIEWER);
 
-        JavaCompilerService.ExecutionResult executionResult = javaCompilerService.execute(
-                finalCode == null ? "" : finalCode,
-                JavaCompilerService.defaultTimeoutMs(),
-                JavaCompilerService.defaultMemoryMb()
-        );
+        ExecuteResponse executionResult = sandboxClientService.execute(new ExecuteRequest(finalCode == null ? "" : finalCode));
         RunResult runResult = runResultRepository.findTopBySessionIdOrderByCompiledAtDesc(sessionId).orElseGet(RunResult::new);
         runResult.setSessionId(sessionId);
         runResult.setStdout(executionResult.getStdout());
-        runResult.setStderr(executionResult.getStderr().isBlank()
-                ? String.join("\n", executionResult.getCompileErrors())
+        runResult.setStderr((executionResult.getStderr() == null || executionResult.getStderr().isBlank())
+                ? String.join("\n", executionResult.getCompileErrors() == null ? List.of() : executionResult.getCompileErrors())
                 : executionResult.getStderr());
         runResult.setExitStatus(executionResult.getExitCode());
         runResultRepository.save(runResult);

@@ -60,16 +60,16 @@ const Disclaimer: React.FC = () => {
   const session = currentSession?.id === activeSessionId ? currentSession : fetchedSession;
 
   if (!role || !activeSessionId) {
-    return <div className="page-shell"><div className="page-card">Invalid disclaimer context</div></div>;
+    return <div className="page-shell disclaimer-shell"><div className="page-card">Invalid disclaimer context</div></div>;
   }
 
   if (isLoading && !session) {
-    return <div className="page-shell"><div className="page-card">Loading disclaimer...</div></div>;
+    return <div className="page-shell disclaimer-shell"><div className="page-card">Loading disclaimer...</div></div>;
   }
 
   if (error && !session) {
     return (
-      <div className="page-shell">
+      <div className="page-shell disclaimer-shell">
         <div className="page-card">
           Unable to load the interview session for the disclaimer.
         </div>
@@ -105,7 +105,7 @@ const Disclaimer: React.FC = () => {
   };
 
   return (
-    <div className="page-shell">
+    <div className="page-shell disclaimer-shell">
       <div className="page-card disclaimer-card">
         <div className="page-kicker">Interview Agreement</div>
         <h2>Disclaimer for {role === 'interviewer' ? 'Interviewer' : 'Interviewee'}</h2>

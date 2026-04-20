@@ -6,7 +6,8 @@
 - Share a short-lived join link (token-based).
 - Validate interviewee identity (name/email must match what interviewer registered).
 - Live collaborative editing (WebSocket updates).
-- Run Java code with basic sandboxing (timeout + memory limits).
+- Run Java code through a dedicated sandbox service with basic sandboxing (timeout + memory limits).
+- Sandbox internals now follow a runner-based execution path so additional language runners can be added without changing the external compile/run workflow.
 - Persist sessions and results in H2 (file-based for Docker; file-based local by default).
 
 ## Key Features
@@ -30,6 +31,7 @@
 - Sandbox is “best effort” (process + limits), not a hardened container sandbox.
 - AuthN/AuthZ is currently open (no login / RBAC).
 - H2 is fine for dev/demo; production would typically use Postgres/MySQL with migrations.
+- Current sandbox support is still Java-only, but the internal runner architecture is now in place for future language expansion.
 
 ## Future Enhancements
 

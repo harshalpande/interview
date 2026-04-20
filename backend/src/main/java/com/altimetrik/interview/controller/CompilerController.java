@@ -1,16 +1,19 @@
 package com.altimetrik.interview.controller;
 
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
 import com.altimetrik.interview.dto.CompileRequest;
 import com.altimetrik.interview.dto.CompileResponse;
 import com.altimetrik.interview.dto.ExecuteRequest;
 import com.altimetrik.interview.dto.ExecuteResponse;
-import com.altimetrik.interview.service.JavaCompilerService;
-import com.altimetrik.interview.service.JavaCompilerService.CompileResult;
-import com.altimetrik.interview.service.JavaCompilerService.ExecutionResult;
+import com.altimetrik.interview.service.SandboxClientService;
+
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
 
 /**
  * REST API controller for Java code compilation and execution endpoints.
@@ -22,7 +25,7 @@ import org.springframework.web.bind.annotation.*;
 @Slf4j
 public class CompilerController {
 
-    private final JavaCompilerService compilerService;
+    private final SandboxClientService sandboxClientService;
 
     /**
      * POST /api/compile
@@ -43,15 +46,8 @@ public class CompilerController {
                             .build());
         }
 
-        CompileResult result = compilerService.compile(request.getSourceCode());
-        
-        CompileResponse response = CompileResponse.builder()
-                .success(result.isSuccess())
-                .compileErrors(result.getErrors())
-                .message(result.isSuccess() ? "Compilation successful" : "Compilation failed")
-                .build();
-
-        log.info("Compile response: success={}", result.isSuccess());
+        CompileResponse response = sandboxClientService.compile(request);
+        log.info("Compile response: success={}", response.isSuccess());
         return ResponseEntity.ok(response);
     }
 
@@ -75,28 +71,9 @@ public class CompilerController {
                             .build());
         }
 
-        // Validate constraints
-        long timeoutMs = request.getTimeoutMs() > 0
-                ? request.getTimeoutMs()
-                : JavaCompilerService.defaultTimeoutMs();
-        long memoryMb = request.getMemoryLimitMb() > 0
-                ? Math.min(request.getMemoryLimitMb(), JavaCompilerService.maxMemoryMb())
-                : JavaCompilerService.defaultMemoryMb();
-
-        ExecutionResult result = compilerService.execute(request.getSourceCode(), timeoutMs, memoryMb);
-        
-        ExecuteResponse response = ExecuteResponse.builder()
-                .success(result.isSuccess())
-                .stdout(result.getStdout())
-                .stderr(result.getStderr())
-                .compileErrors(result.getCompileErrors())
-                .exitCode(result.getExitCode())
-                .executionTimeMs(result.getExecutionTimeMs())
-                .message(buildMessage(result))
-                .build();
-
-        log.info("Execute response: success={}, exitCode={}, executionTime={}ms", 
-                 result.isSuccess(), result.getExitCode(), result.getExecutionTimeMs());
+        ExecuteResponse response = sandboxClientService.execute(request);
+        log.info("Execute response: success={}, exitCode={}, executionTime={}ms",
+                response.isSuccess(), response.getExitCode(), response.getExecutionTimeMs());
         return ResponseEntity.ok(response);
     }
 
@@ -109,27 +86,4 @@ public class CompilerController {
         return execute(request);
     }
 
-    /**
-     * Health check endpoint.
-     */
-    @GetMapping("/health")
-    public ResponseEntity<String> health() {
-        return ResponseEntity.ok("Compiler backend is running");
-    }
-
-    /**
-     * Builds a user-friendly message based on execution result.
-     */
-    private String buildMessage(ExecutionResult result) {
-        if (!result.getCompileErrors().isEmpty()) {
-            return "Compilation failed";
-        }
-        if (!result.isSuccess()) {
-            return result.getErrorMessage();
-        }
-        if (result.getExitCode() != 0) {
-            return "Execution completed with exit code: " + result.getExitCode();
-        }
-        return "Execution successful";
-    }
 }
