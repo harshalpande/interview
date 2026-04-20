@@ -46,8 +46,20 @@ app:
   storage:
     root: ${APP_STORAGE_PATH:C:/Users/hpande/Documents/workspace/bindmount}
 
+sandbox:
+  base-url: ${SANDBOX_BASE_URL:http://localhost:8082/api}
+
 springdoc:
   api-docs:
     path: /v3/api-docs
   swagger-ui:
     path: /swagger-ui.html
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never

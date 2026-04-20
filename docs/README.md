@@ -5,6 +5,7 @@
 This repo contains a small interview platform:
 - `frontend/`: React + TypeScript (Monaco editor UI)
 - `backend/`: Spring Boot (REST + WebSocket + H2 persistence)
+- `sandbox/`: Spring Boot compile/run service for execution isolation
 
 ## Run With Docker (Recommended)
 
@@ -30,7 +31,12 @@ docker compose up -d --build
 3) URLs (Docker):
 - UI: `http://localhost/`
 - Backend API: `http://localhost:8081/api`
+- Sandbox API: `http://localhost:8082/api`
 - H2 Console: `http://localhost:8081/api/h2-console`
+- Backend Swagger: `http://localhost:8081/api/swagger-ui.html`
+- Sandbox Swagger: `http://localhost:8082/api/swagger-ui.html`
+- Backend Health: `http://localhost:8081/api/actuator/health`
+- Sandbox Health: `http://localhost:8082/api/actuator/health`
 
 Backend runs with Spring profile `docker` (file-based H2 DB stored at `/data/interviewdb` inside the container, bind-mounted to the Windows folder above).
 
@@ -44,6 +50,12 @@ cd backend
 mvn spring-boot:run
 ```
 
+Sandbox (port 8082):
+```powershell
+cd sandbox
+mvn spring-boot:run "-Dspring-boot.run.arguments=--server.port=8082"
+```
+
 Frontend (port 3000):
 ```powershell
 cd frontend
@@ -54,7 +66,12 @@ npm start
 URLs (Local):
 - UI: `http://localhost:3000`
 - Backend API: `http://localhost:8080/api`
+- Sandbox API: `http://localhost:8082/api`
 - H2 Console: `http://localhost:8080/api/h2-console`
+- Backend Swagger: `http://localhost:8080/api/swagger-ui.html`
+- Sandbox Swagger: `http://localhost:8082/api/swagger-ui.html`
+- Backend Health: `http://localhost:8080/api/actuator/health`
+- Sandbox Health: `http://localhost:8082/api/actuator/health`
 
 ## Database Profiles
 

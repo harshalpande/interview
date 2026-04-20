@@ -5,10 +5,6 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-/**
- * Request DTO for Java code execution.
- * Contains the Java source code to be compiled and executed in one step.
- */
 @Data
 @Builder
 @NoArgsConstructor

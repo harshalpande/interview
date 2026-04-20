@@ -2,6 +2,11 @@
 
 React + Spring Boot app for running live coding interviews (session creation, token-based join, real-time collaboration, compile/run).
 
+The platform currently runs as three services:
+- `frontend` for the UI
+- `backend` for session, AV, feedback, monitoring, and persistence workflows
+- `sandbox` for compile/run execution
+
 ## Documentation
 
 Documentation is consolidated under `docs/`:

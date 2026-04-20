@@ -11,11 +11,7 @@ RUN mvn clean package -DskipTests
 FROM eclipse-temurin:17-jdk-jammy
 WORKDIR /app
 
-# Copy sandbox libraries
-COPY libs/*.jar /app/libs/
 COPY --from=builder /build/target/java-compiler-backend-0.0.1-SNAPSHOT.jar app.jar
-
-ENV SANDBOX_LIBS=/app/libs
 
 EXPOSE 8080
 

@@ -1,5 +1,9 @@
 package com.altimetrik.interview.service;
 
+import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.io.FileUtils;
+import org.springframework.stereotype.Service;
+
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
@@ -20,15 +24,6 @@ import java.util.concurrent.TimeoutException;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import org.apache.commons.io.FileUtils;
-import org.springframework.stereotype.Service;
-
-import lombok.extern.slf4j.Slf4j;
-
-/**
- * Service for compiling and executing Java code in a sandboxed environment.
- * Handles temporary file management, process execution, and resource constraints.
- */
 @Service
 @Slf4j
 public class JavaCompilerService {
@@ -42,73 +37,60 @@ public class JavaCompilerService {
     private static final Pattern PUBLIC_CLASS_PATTERN = Pattern.compile("public\\s+(?:\\w+\\s+)*class\\s+(\\w+)");
     private static final Path DOCKER_LIBS_PATH = Path.of("/app/libs");
     private static final Path LOCAL_LIBS_PATH = Path.of("libs");
+    private static final Path LEGACY_LOCAL_LIBS_PATH = Path.of("../backend/libs");
 
     private record EntryPoint(String runClassName, Path sourceFile, Path classFile) {}
 
-    /**
-     * Compiles Java source code to bytecode.
-     * Returns compilation errors if compilation fails.
-     */
     public CompileResult compile(String sourceCode) {
         Path workDir = null;
         try {
-            // Create temporary directory for this compilation
             workDir = Files.createTempDirectory(TEMP_DIR_PREFIX);
             log.debug("Created temp directory: {}", workDir);
 
-            // Write source code to file
             EntryPoint entryPoint = writeSourceFile(workDir, sourceCode);
-
-            // Compile using javac
             return compileWithJavac(workDir, entryPoint.sourceFile());
         } catch (Exception e) {
             log.error("Compilation error", e);
             return CompileResult.failure(List.of(e.getMessage()));
+        } finally {
+            cleanupWorkDir(workDir);
         }
     }
 
-    /**
-     * Executes compiled Java code and captures output.
-     */
     public ExecutionResult execute(String sourceCode, long timeoutMs, long memoryLimitMb) {
         long effectiveTimeoutMs = sanitizeTimeoutMs(timeoutMs);
         long effectiveMemoryLimitMb = sanitizeMemoryLimitMb(memoryLimitMb);
         Path workDir = null;
         try {
-            // Create temporary directory
             workDir = Files.createTempDirectory(TEMP_DIR_PREFIX);
             log.debug("Created temp directory: {}", workDir);
 
-            // Write and compile source code
             EntryPoint entryPoint = writeSourceFile(workDir, sourceCode);
             CompileResult compileResult = compileWithJavac(workDir, entryPoint.sourceFile());
-
             if (!compileResult.isSuccess()) {
                 return ExecutionResult.compilationFailed(compileResult.getErrors());
             }
 
-            // Execute the compiled code
             return executeCompiledClass(workDir, effectiveTimeoutMs, effectiveMemoryLimitMb, entryPoint.runClassName(), entryPoint.classFile());
         } catch (Exception e) {
             log.error("Execution error", e);
             return ExecutionResult.error(e.getMessage());
         } finally {
-            // Clean up temporary directory
-            if (workDir != null) {
-                try {
-                    FileUtils.deleteDirectory(workDir.toFile());
-                    log.debug("Cleaned up temp directory: {}", workDir);
-                } catch (IOException e) {
-                    log.warn("Failed to cleanup temp directory: {}", workDir, e);
-                }
+            cleanupWorkDir(workDir);
+        }
+    }
+
+    private void cleanupWorkDir(Path workDir) {
+        if (workDir != null) {
+            try {
+                FileUtils.deleteDirectory(workDir.toFile());
+                log.debug("Cleaned up temp directory: {}", workDir);
+            } catch (IOException e) {
+                log.warn("Failed to cleanup temp directory: {}", workDir, e);
             }
         }
     }
 
-    /**
-     * Writes Java source code to a file in the work directory.
-     * Extracts the class name from the source code.
-     */
     private EntryPoint writeSourceFile(Path workDir, String sourceCode) throws IOException {
         String className = extractPublicClassName(sourceCode);
         if (className == null || className.isEmpty()) {
@@ -128,9 +110,6 @@ public class JavaCompilerService {
         return new EntryPoint(runClassName, sourceFile, classFile);
     }
 
-    /**
-     * Extracts the public class name from Java source code.
-     */
     private String extractPublicClassName(String sourceCode) {
         Matcher matcher = PUBLIC_CLASS_PATTERN.matcher(sourceCode);
         if (matcher.find()) {
@@ -147,15 +126,11 @@ public class JavaCompilerService {
         return null;
     }
 
-    /**
-     * Compiles Java source using javac command.
-     */
     private CompileResult compileWithJavac(Path workDir, Path sourceFile) throws IOException {
         String cp = buildClasspath(workDir);
         log.debug("Classpath: {}", cp);
 
         List<String> javacArgs = new ArrayList<>();
-
         javacArgs.add("javac");
         javacArgs.add("-cp");
         javacArgs.add(cp);
@@ -175,11 +150,11 @@ public class JavaCompilerService {
             if (exitCode == 0) {
                 log.debug("Compilation successful");
                 return CompileResult.success();
-            } else {
-                List<String> errors = parseCompilationErrors(output);
-                log.warn("Compilation failed with errors: {}", errors);
-                return CompileResult.failure(errors);
             }
+
+            List<String> errors = parseCompilationErrors(output);
+            log.warn("Compilation failed with errors: {}", errors);
+            return CompileResult.failure(errors);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             log.error("Compilation interrupted", e);
@@ -187,9 +162,6 @@ public class JavaCompilerService {
         }
     }
 
-    /**
-     * Executes the compiled Java class with resource constraints.
-     */
     private ExecutionResult executeCompiledClass(Path workDir, long timeoutMs, long memoryLimitMb, String runClassName, Path classFile)
             throws IOException {
         if (runClassName == null || runClassName.isBlank()) {
@@ -208,8 +180,7 @@ public class JavaCompilerService {
         long startTime = System.currentTimeMillis();
         try {
             Process process = processBuilder.start();
-            
-            // Capture output in separate threads to avoid deadlock
+
             ExecutorService executor = Executors.newFixedThreadPool(2);
             Future<String> stdoutFuture = executor.submit(() -> readStream(process.getInputStream()));
             Future<String> stderrFuture = executor.submit(() -> readStream(process.getErrorStream()));
@@ -245,18 +216,13 @@ public class JavaCompilerService {
         }
     }
 
-    /**
-     * Builds the Java command with JVM options for resource constraints.
-     */
     private List<String> buildJavaCommand(Path workDir, long memoryLimitMb, String className) {
         List<String> command = new ArrayList<>();
         command.add("java");
         command.add("-Xmx" + memoryLimitMb + "m");
         command.add("-Xms64m");
-
-        String cp = buildClasspath(workDir);
         command.add("-cp");
-        command.add(cp);
+        command.add(buildClasspath(workDir));
         command.add(className);
         return command;
     }
@@ -289,7 +255,6 @@ public class JavaCompilerService {
         if (libsPath == null) {
             return workDir.toString();
         }
-
         return workDir + File.pathSeparator + libsPath.resolve("*");
     }
 
@@ -301,22 +266,19 @@ public class JavaCompilerService {
                 return envPath;
             }
         }
-
         if (Files.exists(DOCKER_LIBS_PATH)) {
             return DOCKER_LIBS_PATH;
         }
-
         if (Files.exists(LOCAL_LIBS_PATH)) {
             return LOCAL_LIBS_PATH;
         }
-
+        if (Files.exists(LEGACY_LOCAL_LIBS_PATH)) {
+            return LEGACY_LOCAL_LIBS_PATH;
+        }
         log.warn("Sandbox libraries path not found; external assertion libraries will be unavailable");
         return null;
     }
 
-    /**
-     * Reads output from a process stream.
-     */
     private String readProcessOutput(Process process) throws IOException {
         StringBuilder output = new StringBuilder();
         try (BufferedReader reader = new BufferedReader(
@@ -329,9 +291,6 @@ public class JavaCompilerService {
         return output.toString();
     }
 
-    /**
-     * Reads from an input stream (for non-blocking output capture).
-     */
     private String readStream(InputStream inputStream) {
         StringBuilder output = new StringBuilder();
         try (BufferedReader reader = new BufferedReader(
@@ -346,9 +305,6 @@ public class JavaCompilerService {
         return output.toString();
     }
 
-    /**
-     * Parses javac error output into a list of error messages.
-     */
     private List<String> parseCompilationErrors(String output) {
         List<String> errors = new ArrayList<>();
         if (output != null && !output.isEmpty()) {
@@ -362,9 +318,6 @@ public class JavaCompilerService {
         return errors.isEmpty() ? List.of(output) : errors;
     }
 
-    /**
-     * Data class for compilation results.
-     */
     public static class CompileResult {
         private final boolean success;
         private final List<String> errors;
@@ -391,9 +344,6 @@ public class JavaCompilerService {
         }
     }
 
-    /**
-     * Data class for execution results.
-     */
     public static class ExecutionResult {
         private final boolean success;
         private final String stdout;
@@ -403,9 +353,9 @@ public class JavaCompilerService {
         private final long executionTimeMs;
         private final String errorMessage;
 
-        private ExecutionResult(boolean success, String stdout, String stderr, 
-                               List<String> compileErrors, int exitCode, 
-                               long executionTimeMs, String errorMessage) {
+        private ExecutionResult(boolean success, String stdout, String stderr,
+                                List<String> compileErrors, int exitCode,
+                                long executionTimeMs, String errorMessage) {
             this.success = success;
             this.stdout = stdout != null ? stdout : "";
             this.stderr = stderr != null ? stderr : "";
@@ -415,20 +365,16 @@ public class JavaCompilerService {
             this.errorMessage = errorMessage != null ? errorMessage : "";
         }
 
-        public static ExecutionResult success(String stdout, String stderr, 
-                                             int exitCode, long executionTimeMs) {
-            return new ExecutionResult(true, stdout, stderr, Collections.emptyList(), 
-                                      exitCode, executionTimeMs, "");
+        public static ExecutionResult success(String stdout, String stderr, int exitCode, long executionTimeMs) {
+            return new ExecutionResult(true, stdout, stderr, Collections.emptyList(), exitCode, executionTimeMs, "");
         }
 
         public static ExecutionResult compilationFailed(List<String> errors) {
-            return new ExecutionResult(false, "", "", errors, -1, 0, 
-                                      "Compilation failed");
+            return new ExecutionResult(false, "", "", errors, -1, 0, "Compilation failed");
         }
 
         public static ExecutionResult timeout(long timeoutMs) {
-            return new ExecutionResult(false, "", "", Collections.emptyList(), -1, 
-                                      timeoutMs, "Execution timeout");
+            return new ExecutionResult(false, "", "", Collections.emptyList(), -1, timeoutMs, "Execution timeout");
         }
 
         public static ExecutionResult error(String message) {

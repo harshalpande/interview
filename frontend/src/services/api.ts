@@ -62,8 +62,8 @@ class CompilerApiClient {
    */
   async health(): Promise<string> {
     try {
-      const response = await this.axiosInstance.get<string>('/compile/health');
-      return response.data;
+      const response = await this.axiosInstance.get<{ status?: string }>('/actuator/health');
+      return response.data?.status || 'UNKNOWN';
     } catch (error) {
       throw this.handleError(error);
     }
