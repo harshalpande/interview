@@ -43,12 +43,17 @@ const Result: React.FC = () => {
   const interviewee = session.participants.find((participant) => participant.role === 'INTERVIEWEE');
   const isTokenExpired = session.status === 'EXPIRED';
   const activityEvents = session.activityEvents || [];
-  const tabSwitchEvents = activityEvents.filter((event) => event.eventType === 'TAB_HIDDEN');
+  const tabSwitchEvents = activityEvents.filter(
+    (event) => event.eventType === 'TAB_HIDDEN' && !event.detail.toLowerCase().includes('closed or refreshed the browser/tab')
+  );
+  const browserCloseRefreshEvents = activityEvents.filter(
+    (event) => event.eventType === 'TAB_HIDDEN' && event.detail.toLowerCase().includes('closed or refreshed the browser/tab')
+  );
   const pasteEvents = activityEvents.filter((event) => event.eventType === 'PASTE_IN_EDITOR');
   const blockedDropEvents = activityEvents.filter((event) => event.eventType === 'EXTERNAL_DROP_BLOCKED');
   const cameraStreamLostEvents = activityEvents.filter((event) => event.eventType === 'CAMERA_STREAM_LOST');
-  const noFaceEvents = activityEvents.filter((event) => event.eventType === 'NO_FACE_DETECTED');
-  const multipleFaceEvents = activityEvents.filter((event) => event.eventType === 'MULTIPLE_FACES_DETECTED');
+  const microphoneDisabledEvents = activityEvents.filter((event) => event.eventType === 'MICROPHONE_DISABLED_MANUALLY');
+  const cameraDisabledEvents = activityEvents.filter((event) => event.eventType === 'CAMERA_DISABLED_MANUALLY');
   const latestActivity = activityEvents.length ? activityEvents[activityEvents.length - 1] : null;
   const snapshotUrl = interviewee?.identityCaptureStatus === 'SUCCESS'
     ? sessionApi.getIdentityCaptureImageUrl(session.id, 'INTERVIEWEE')
@@ -89,7 +94,7 @@ const Result: React.FC = () => {
           <p><strong>Allocated duration:</strong> {Math.round(session.durationSec / 60)} minutes</p>
           {session.feedback && (
             <>
-              <p><strong>Rating:</strong> {session.feedback.rating}</p>
+              <p><strong>Rating:</strong> {formatRating(session.feedback.rating)}</p>
               <p><strong>Recommendation:</strong> {formatRecommendation(session.feedback.recommendationDecision)}</p>
               <p><strong>Comments:</strong> {session.feedback.comments}</p>
             </>
@@ -125,6 +130,10 @@ const Result: React.FC = () => {
                     <strong>{tabSwitchEvents.length}</strong>
                   </div>
                   <div className="activity-metric">
+                    <span className="activity-metric-label">Browser refresh / close</span>
+                    <strong>{browserCloseRefreshEvents.length}</strong>
+                  </div>
+                  <div className="activity-metric">
                     <span className="activity-metric-label">Paste events</span>
                     <strong>{pasteEvents.length}</strong>
                   </div>
@@ -137,17 +146,17 @@ const Result: React.FC = () => {
                     <strong>{cameraStreamLostEvents.length}</strong>
                   </div>
                   <div className="activity-metric">
-                    <span className="activity-metric-label">Face not visible</span>
-                    <strong>{noFaceEvents.length}</strong>
+                    <span className="activity-metric-label">Mic turned off</span>
+                    <strong>{microphoneDisabledEvents.length}</strong>
                   </div>
                   <div className="activity-metric">
-                    <span className="activity-metric-label">Multiple faces</span>
-                    <strong>{multipleFaceEvents.length}</strong>
+                    <span className="activity-metric-label">Camera turned off</span>
+                    <strong>{cameraDisabledEvents.length}</strong>
                   </div>
                 </div>
                 <div className="activity-summary-note">
                   <p>
-                    <strong>Summary:</strong> {tabSwitchEvents.length} tab switch event{tabSwitchEvents.length === 1 ? '' : 's'}, {pasteEvents.length} paste event{pasteEvents.length === 1 ? '' : 's'}, {blockedDropEvents.length} blocked drag-and-drop attempt{blockedDropEvents.length === 1 ? '' : 's'}, {cameraStreamLostEvents.length} camera interruption{cameraStreamLostEvents.length === 1 ? '' : 's'}, {noFaceEvents.length} no-face alert{noFaceEvents.length === 1 ? '' : 's'}, and {multipleFaceEvents.length} multiple-face alert{multipleFaceEvents.length === 1 ? '' : 's'} were recorded during the session.
+                    <strong>Summary:</strong> {tabSwitchEvents.length} tab switch event{tabSwitchEvents.length === 1 ? '' : 's'}, {browserCloseRefreshEvents.length} browser refresh/close event{browserCloseRefreshEvents.length === 1 ? '' : 's'}, {pasteEvents.length} paste event{pasteEvents.length === 1 ? '' : 's'}, {blockedDropEvents.length} blocked drag-and-drop attempt{blockedDropEvents.length === 1 ? '' : 's'}, {cameraStreamLostEvents.length} camera interruption{cameraStreamLostEvents.length === 1 ? '' : 's'}, {microphoneDisabledEvents.length} microphone-off event{microphoneDisabledEvents.length === 1 ? '' : 's'}, and {cameraDisabledEvents.length} camera-off event{cameraDisabledEvents.length === 1 ? '' : 's'} were recorded during the session.
                   </p>
                   {latestActivity ? (
                     <p>
@@ -187,6 +196,10 @@ function formatRecommendation(value: string) {
   return value === 'REEVALUATION'
     ? 'Reevaluation'
     : value.charAt(0) + value.slice(1).toLowerCase();
+}
+
+function formatRating(value: string) {
+  return value.charAt(0) + value.slice(1).toLowerCase();
 }
 
 function formatIdentityCaptureStatus(status?: string | null, reason?: string | null) {

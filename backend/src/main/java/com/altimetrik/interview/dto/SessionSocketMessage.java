@@ -21,4 +21,6 @@ public class SessionSocketMessage {
     private String candidate;
     private String sdpMid;
     private Integer sdpMLineIndex;
+    private Boolean cameraEnabled;
+    private Boolean microphoneEnabled;
 }

@@ -13,10 +13,12 @@ import { useWebRtcSession } from '../hooks/useWebRtcSession';
 import { useBackGuard } from '../hooks/useBackGuard';
 import type { ActivityEventType, FeedbackRating, ParticipantRole, RecommendationDecision, SessionResponse, SessionSocketMessage, SessionStatus } from '../types/session';
 import { formatDateTime, formatTimeZoneLabel } from '../utils/dateTime';
+import { getOrCreateDeviceId } from '../utils/device';
 
 import './Session.css';
 
 const FEEDBACK_COMMENT_LIMIT = 4000;
+const ALTIMETRIK_REDIRECT_URL = process.env.REACT_APP_POST_INTERVIEW_REDIRECT_URL || 'https://www.altimetrik.com/';
 
 const STATUS_LABELS: Record<SessionStatus, string> = {
   CREATED: 'Ready to Start',
@@ -34,6 +36,7 @@ const Session: React.FC = () => {
   const storedRole = useSessionStore((state) => state.role);
   const role = storedRole || (searchParams.get('role') as 'interviewer' | 'interviewee' | null);
   const currentSession = useSessionStore((state) => state.currentSession);
+  const hadStoredSession = currentSession?.id === sessionId;
   const setSession = useSessionStore((state) => state.setSession);
   const setRole = useSessionStore((state) => state.setRole);
   const currentCode = useSessionStore((state) => state.currentCode);
@@ -48,9 +51,14 @@ const Session: React.FC = () => {
     recommendationDecision: '' as RecommendationDecision | '',
   });
   const [closeCountdown, setCloseCountdown] = React.useState<number | null>(null);
+  const deviceId = React.useMemo(() => getOrCreateDeviceId(), []);
+  const suspiciousRejectionNoticeShownRef = React.useRef(false);
+  const interviewerRecoveryTimeoutNoticeShownRef = React.useRef(false);
   const lastTabHiddenAtRef = React.useRef(0);
   const lastBlockedDropAtRef = React.useRef(0);
   const lastCameraStreamIssueRef = React.useRef('');
+  const previousMuteStateRef = React.useRef<boolean | null>(null);
+  const previousCameraStateRef = React.useRef<boolean | null>(null);
   const internalClipboardTextsRef = React.useRef<Map<string, number>>(new Map());
 
   const { data: session, isLoading, error } = useQuery({
@@ -99,15 +107,85 @@ const Session: React.FC = () => {
           comments: session.feedback.comments,
           recommendationDecision: session.feedback.recommendationDecision,
         });
+      } else if (session.feedbackDraft) {
+        setFeedback({
+          rating: session.feedbackDraft.rating,
+          comments: session.feedbackDraft.comments,
+          recommendationDecision: session.feedbackDraft.recommendationDecision,
+        });
       }
     }
   }, [session, setSession]);
 
   React.useEffect(() => {
-    if (feedback.rating === 'BAD' && feedback.recommendationDecision !== 'NO') {
+    suspiciousRejectionNoticeShownRef.current = false;
+    interviewerRecoveryTimeoutNoticeShownRef.current = false;
+  }, [sessionId]);
+
+  React.useEffect(() => {
+    if (!sessionId || !session || !role) {
+      return;
+    }
+    if (session.status !== 'ACTIVE') {
+      return;
+    }
+    if (hadStoredSession) {
+      return;
+    }
+
+    navigate(`/java/resume/${sessionId}?role=${role}&reason=MANUAL_RESUME`, { replace: true });
+  }, [hadStoredSession, navigate, role, session, sessionId]);
+
+  React.useEffect(() => {
+    if ((feedback.rating === 'BAD' || feedback.rating === 'DISQUALIFIED') && feedback.recommendationDecision !== 'NO') {
       setFeedback((prev) => ({ ...prev, recommendationDecision: 'NO' }));
     }
   }, [feedback.rating, feedback.recommendationDecision]);
+
+  React.useEffect(() => {
+    if (
+      role !== 'interviewer' ||
+      !sessionId ||
+      !session ||
+      session.status !== 'ENDED' ||
+      !session.suspiciousRejected ||
+      session.feedback ||
+      suspiciousRejectionNoticeShownRef.current
+    ) {
+      return;
+    }
+
+    suspiciousRejectionNoticeShownRef.current = true;
+    const message = session.suspiciousActivityReason || 'The candidate was rejected due to suspicious activity. Please review and submit the prefilled feedback.';
+    window.alert(message);
+    navigate(`/java/session/${sessionId}?role=interviewer&view=feedback`, { replace: true });
+  }, [navigate, role, session, sessionId]);
+
+  React.useEffect(() => {
+    if (
+      role !== 'interviewee' ||
+      !session ||
+      session.status !== 'ENDED' ||
+      session.summary !== 'INCOMPLETE' ||
+      interviewerRecoveryTimeoutNoticeShownRef.current
+    ) {
+      return;
+    }
+
+    const interviewerTimeoutEvent = session.activityEvents?.find((event) =>
+      event.detail.includes('the interviewer did not resume within the 120-second recovery window')
+    );
+    if (!interviewerTimeoutEvent) {
+      return;
+    }
+
+    interviewerRecoveryTimeoutNoticeShownRef.current = true;
+    const interviewerName = interviewer?.name?.trim() || 'the interviewer';
+    window.alert(
+      `${interviewerName} is facing network-associated challenges and could not reconnect within the allowed recovery window. This interview session will now close and be marked as incomplete. Kindly reach out to HR or ${interviewerName} to schedule it again.`
+    );
+    window.location.assign(ALTIMETRIK_REDIRECT_URL);
+  }, [interviewer?.name, role, session]);
 
   const refreshSession = React.useCallback(
     (nextSession: SessionResponse) => {
@@ -177,6 +255,24 @@ const Session: React.FC = () => {
     [role, session?.status, sessionId]
   );
 
+  React.useEffect(() => {
+    if (!sessionId || !role || session?.status !== 'ACTIVE' || !hadStoredSession) {
+      return undefined;
+    }
+
+    const participantRole: ParticipantRole = role === 'interviewer' ? 'INTERVIEWER' : 'INTERVIEWEE';
+    const heartbeat = () => {
+      void sessionApi.heartbeat(sessionId, {
+        role: participantRole,
+        deviceId,
+      });
+    };
+
+    heartbeat();
+    const interval = window.setInterval(heartbeat, 15000);
+    return () => window.clearInterval(interval);
+  }, [deviceId, hadStoredSession, role, session?.status, sessionId]);
+
   const handleSocketMessage = React.useCallback(
     (message: SessionSocketMessage) => {
       if (message.session) {
@@ -198,8 +294,8 @@ const Session: React.FC = () => {
     [pushPersistentToast, refreshSession, role, setCurrentCode]
   );
 
-  const { isReconnecting, sendCode, sendSignal } = useWebSocket(sessionId || '', handleSocketMessage);
-  const isCameraSessionActive = session?.status === 'ACTIVE';
+  const { isReconnecting, isConnected, sendCode, sendSignal } = useWebSocket(sessionId || '', handleSocketMessage);
+  const isCameraSessionActive = session?.status === 'CREATED' || session?.status === 'ACTIVE';
   const handleCameraStreamLost = React.useCallback(() => {
     void recordActivityEvent('CAMERA_STREAM_LOST', `${formatPossessiveLabel(intervieweeName)} camera stream was interrupted.`);
   }, [intervieweeName, recordActivityEvent]);
@@ -213,6 +309,9 @@ const Session: React.FC = () => {
     connectionState: cameraConnectionState,
     localStream,
     remoteStream,
+    hasRemoteVideo,
+    isRemoteCameraEnabled,
+    isRemoteMicrophoneEnabled,
     streamError,
     isMuted,
     isCameraEnabled,
@@ -221,11 +320,12 @@ const Session: React.FC = () => {
     toggleCamera,
   } = useWebRtcSession({
     enabled: Boolean(sessionId && role && isCameraSessionActive),
+    isSocketConnected: isConnected,
     role: role === 'interviewer' ? 'interviewer' : 'interviewee',
     incomingSignal,
     sendSignal,
   });
-  const { status: cameraMonitorStatus } = useCameraMonitor({
+  useCameraMonitor({
     enabled: role === 'interviewee' && isCameraSessionActive,
     stream: localStream,
     onStreamLost: handleCameraStreamLost,
@@ -251,6 +351,24 @@ const Session: React.FC = () => {
     onSuccess: refreshSession,
   });
 
+  const approveResumeMutation = useMutation({
+    mutationFn: () =>
+      sessionApi.approveResume(sessionId!, {
+        interviewerName: interviewer?.name || '',
+        interviewerEmail: interviewer?.email || '',
+      }),
+    onSuccess: refreshSession,
+  });
+
+  const rejectResumeMutation = useMutation({
+    mutationFn: () =>
+      sessionApi.rejectResume(sessionId!, {
+        interviewerName: interviewer?.name || '',
+        interviewerEmail: interviewer?.email || '',
+      }),
+    onSuccess: refreshSession,
+  });
+
   const feedbackMutation = useMutation({
     mutationFn: () =>
       sessionApi.submitFeedback(sessionId!, {
@@ -260,7 +378,7 @@ const Session: React.FC = () => {
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
-      navigate('/java');
+      navigate('/');
     },
   });
 
@@ -293,21 +411,21 @@ const Session: React.FC = () => {
     if (!sessionId) return;
     if (!session || session.status !== 'ACTIVE') return;
 
-    const message =
-      'Interview in progress. Leaving will mark this interview as INCOMPLETE. Do you want to continue?';
-
     const beforeUnload = (event: BeforeUnloadEvent) => {
       event.preventDefault();
-      event.returnValue = message;
-      return message;
+      event.returnValue = 'Interview in progress. Leaving will interrupt the session. Do you want to continue?';
+      return event.returnValue;
     };
 
-    const sendAbandon = () => {
+    const sendDisconnect = () => {
       try {
         const apiBase = process.env.REACT_APP_API_URL || '/api';
-        const url = `${apiBase.replace(/\/$/, '')}/sessions/${sessionId}/abandon`;
+        const url = `${apiBase.replace(/\/$/, '')}/sessions/${sessionId}/disconnect`;
 
         const payload = JSON.stringify({
+          role: role === 'interviewer' ? 'INTERVIEWER' : 'INTERVIEWEE',
+          deviceId,
+          reason: role === 'interviewee' ? 'TAB_OR_BROWSER_CLOSED' : 'MANUAL_RESUME',
           finalCode: currentCode || session.latestCode || '',
         });
         const blob = new Blob([payload], { type: 'application/json' });
@@ -318,7 +436,7 @@ const Session: React.FC = () => {
     };
 
     const pageHide = () => {
-      sendAbandon();
+      sendDisconnect();
     };
 
     window.addEventListener('beforeunload', beforeUnload);
@@ -327,7 +445,7 @@ const Session: React.FC = () => {
       window.removeEventListener('beforeunload', beforeUnload);
       window.removeEventListener('pagehide', pageHide);
     };
-  }, [currentCode, session, sessionId]);
+  }, [currentCode, deviceId, role, session, sessionId]);
 
   React.useEffect(() => {
     if (role !== 'interviewee' || !sessionId || session?.status !== 'ACTIVE') {
@@ -366,7 +484,7 @@ const Session: React.FC = () => {
         }
         if (previous <= 1) {
           window.clearInterval(interval);
-          window.location.assign('https://www.altimetrik.com/');
+          window.location.assign(ALTIMETRIK_REDIRECT_URL);
           return 0;
         }
         return previous - 1;
@@ -395,6 +513,37 @@ const Session: React.FC = () => {
     );
   }, [intervieweeName, recordActivityEvent, role, session?.status, streamError]);
 
+  React.useEffect(() => {
+    if (role !== 'interviewee') {
+      previousMuteStateRef.current = isMuted;
+      previousCameraStateRef.current = isCameraEnabled;
+      return;
+    }
+
+    if (session?.status !== 'ACTIVE') {
+      previousMuteStateRef.current = isMuted;
+      previousCameraStateRef.current = isCameraEnabled;
+      return;
+    }
+
+    if (previousMuteStateRef.current === false && isMuted) {
+      void recordActivityEvent(
+        'MICROPHONE_DISABLED_MANUALLY',
+        `${intervieweeName} manually turned off the microphone during the interview.`
+      );
+    }
+
+    if (previousCameraStateRef.current === true && !isCameraEnabled) {
+      void recordActivityEvent(
+        'CAMERA_DISABLED_MANUALLY',
+        `${intervieweeName} manually turned off the camera during the interview.`
+      );
+    }
+
+    previousMuteStateRef.current = isMuted;
+    previousCameraStateRef.current = isCameraEnabled;
+  }, [intervieweeName, isCameraEnabled, isMuted, recordActivityEvent, role, session?.status]);
+
   if (isLoading) {
     return <div className="page-shell"><div className="page-card">Loading session...</div></div>;
   }
@@ -413,6 +562,10 @@ const Session: React.FC = () => {
   const showEditor = session.status !== 'ENDED' && session.status !== 'EXPIRED';
   const showPreStartState = showEditor && session.status !== 'ACTIVE';
   const waitingForFeedback = isInterviewer && session.status === 'ENDED' && !session.feedback;
+  const lockDisqualificationOutcome = waitingForFeedback && Boolean(session.suspiciousRejected);
+  const suspiciousActivityEvents = (session.activityEvents || []).filter((event) =>
+    ['TAB_HIDDEN', 'PASTE_IN_EDITOR', 'EXTERNAL_DROP_BLOCKED', 'CAMERA_STREAM_LOST', 'MICROPHONE_DISABLED_MANUALLY', 'CAMERA_DISABLED_MANUALLY', 'NO_FACE_DETECTED', 'MULTIPLE_FACES_DETECTED'].includes(event.eventType)
+  );
   const waitingJoinLabel = `Waiting for ${interviewee?.name || 'Interviewee'} to join`;
   const hasCompleteFeedback = Boolean(feedback.rating && feedback.recommendationDecision && feedback.comments.trim());
 
@@ -432,42 +585,42 @@ const Session: React.FC = () => {
     : isInterviewer
       ? 'Waiting for the interviewee media stream'
       : 'Waiting for the interviewer media stream';
-  const localMediaStatus = streamError
-    ? streamError
-    : isInterviewer
-      ? `${isMuted ? 'Mic muted' : 'Mic live'} • ${isCameraEnabled ? 'Camera live' : 'Camera off'}`
-      : cameraMonitorStatus === 'multiple-faces'
-        ? 'Mic live • Multiple faces detected'
-        : cameraMonitorStatus === 'no-face'
-          ? 'Mic live • Face not visible'
-          : cameraMonitorStatus === 'stream-lost'
-            ? 'Mic live • Camera interrupted'
-            : cameraMonitorStatus === 'face-checks-unavailable'
-              ? `${isMuted ? 'Mic muted' : 'Mic live'} • Camera active`
-              : `${isMuted ? 'Mic muted' : 'Mic live'} • Camera live`;
   const activeStageClassName = `interviewer-stage ${session.status === 'ACTIVE' ? 'active' : ''}`;
   const activeBannerClassName = `session-banner session-banner-interviewer ${session.status === 'ACTIVE' ? 'active' : ''}`;
+  const counterpart = isInterviewer ? interviewee : interviewer;
+  const counterpartFirstName = isInterviewer ? intervieweeFirstName : interviewerFirstName;
+  const counterpartConnectionStatus = counterpart?.connectionStatus;
+  const hasRtcPresence =
+    cameraConnectionState === 'connected' ||
+    Boolean(remoteStream && (remoteStream.getAudioTracks().length > 0 || remoteStream.getVideoTracks().length > 0));
+  const counterpartDisconnected =
+    session.status === 'ACTIVE' &&
+    Boolean(counterpart) &&
+    counterpartConnectionStatus !== 'CONNECTED' &&
+    !hasRtcPresence;
   const remotePanelTitle = isInterviewer
     ? `${intervieweeFirstName} live stream`
     : `${interviewerFirstName} live stream`;
-  const remoteEmptyMessage = isInterviewer
-    ? 'Waiting for the interviewee audio and camera stream to connect.'
-    : 'Waiting for the interviewer stream to connect.';
-  const remoteVideoStream = remoteStream && remoteStream.getVideoTracks().length > 0 ? remoteStream : null;
+  const remoteEmptyMessage = counterpartDisconnected
+    ? `${counterpartFirstName} is temporarily disconnected. The live stream will resume when they reconnect.`
+    : isInterviewer
+      ? `Waiting for ${intervieweeFirstName} audio and camera stream to connect.`
+      : `Waiting for ${interviewerFirstName} stream to connect.`;
+  const remoteVideoStream = remoteStream && hasRemoteVideo && isRemoteCameraEnabled ? remoteStream : null;
   const localVideoStream = localStream && localStream.getVideoTracks().length > 0 ? localStream : null;
-  const displayedPanelStream =
-    remoteVideoStream ?? localVideoStream;
-  const panelStatus = remoteStream
-    ? interviewerCameraStatus
-    : localStream
-      ? localMediaStatus
-      : streamError || 'Preparing local media';
+  const displayedPanelStream = counterpartDisconnected ? null : remoteVideoStream;
+  const remotePanelAudioStream = counterpartDisconnected || !isRemoteMicrophoneEnabled ? null : remoteStream;
+  const panelStatus = counterpartDisconnected
+    ? `${counterpartFirstName} disconnected`
+    : remoteStream
+      ? interviewerCameraStatus
+      : streamError || `Waiting for ${counterpartFirstName}`;
 
   return (
     <div className={`session-page polished-page ${isFullscreen ? 'fullscreen' : ''}`}>
       {isReconnecting && <div className="reconnecting">Reconnecting to the live session...</div>}
 
-      {!isFullscreen && session.status === 'ACTIVE' ? (
+      {!isFullscreen && showEditor ? (
         <div className={activeStageClassName}>
           <div className={activeBannerClassName}>
             <div className="banner-participants">
@@ -521,7 +674,7 @@ const Session: React.FC = () => {
           <VideoPanel
             title={remotePanelTitle}
             stream={displayedPanelStream}
-            audioStream={remoteStream}
+            audioStream={remotePanelAudioStream}
             status={panelStatus}
             emptyMessage={remoteEmptyMessage}
             mirror={!remoteVideoStream && Boolean(localVideoStream)}
@@ -618,6 +771,32 @@ const Session: React.FC = () => {
 
       {isInterviewer && session.joinInfo && session.status !== 'ACTIVE' && (
         <ShareUrlToggle token={session.joinInfo.token} />
+      )}
+
+      {isInterviewer && interviewee?.awaitingResumeApproval && (
+        <div className="waiting-panel">
+          <h3>Resume approval required</h3>
+          <p>
+            {interviewee.name || 'The interviewee'} is requesting to resume this session.
+            {interviewee.pendingResumeReason ? ` Reason: ${formatResumeReason(interviewee.pendingResumeReason)}.` : ''}
+          </p>
+          <div className="session-controls">
+            <button
+              className="control-btn btn-start"
+              onClick={() => approveResumeMutation.mutate()}
+              disabled={approveResumeMutation.isPending}
+            >
+              {approveResumeMutation.isPending ? 'Approving...' : 'Approve Resume'}
+            </button>
+            <button
+              className="control-btn btn-end"
+              onClick={() => rejectResumeMutation.mutate()}
+              disabled={rejectResumeMutation.isPending}
+            >
+              {rejectResumeMutation.isPending ? 'Rejecting...' : 'Reject Resume'}
+            </button>
+          </div>
+        </div>
       )}
 
       {showEditor ? (
@@ -721,13 +900,34 @@ const Session: React.FC = () => {
           <h2>{isInterviewer ? 'Submit final feedback' : 'Interview has ended'}</h2>
           <p className="page-subtitle">
             {isInterviewer
-              ? 'The editor has been frozen, final code/output have been saved, and your feedback is required before returning to the dashboard.'
-              : `The coding test is now complete. ${interviewer?.name || 'The interviewer'} is submitting the feedback. You can check the results with ${interviewer?.name || 'the interviewer'} or the HR.${typeof closeCountdown === 'number' ? ` This tab will automatically close in ${closeCountdown}.` : ''}`}
+              ? session.suspiciousRejected
+                ? `The application prefilled rejection feedback because the candidate triggered a suspicious resume rule. Review it and submit to finish the session.${session.suspiciousActivityReason ? ` Reason: ${session.suspiciousActivityReason}` : ''}`
+                : 'The editor has been frozen, final code/output have been saved, and your feedback is required before returning to the dashboard.'
+              : session.suspiciousRejected
+                ? `${session.suspiciousActivityReason || 'This interview session could not be recovered within the allowed integrity controls.'} You will be redirected shortly.${typeof closeCountdown === 'number' ? ` This page will close in ${closeCountdown}.` : ''}`
+                : session.summary === 'INCOMPLETE'
+                  ? `${interviewer?.name || 'The interviewer'} could not reconnect because of a network or session continuity issue, so this interview has been marked incomplete. Please reach out to HR or ${interviewer?.name || 'the interviewer'} to schedule it again.${typeof closeCountdown === 'number' ? ` This tab will automatically close in ${closeCountdown}.` : ''}`
+                  : `The coding test is now complete. ${interviewer?.name || 'The interviewer'} is submitting the feedback. You can check the results with ${interviewer?.name || 'the interviewer'} or the HR.${typeof closeCountdown === 'number' ? ` This tab will automatically close in ${closeCountdown}.` : ''}`}
           </p>
 
           {waitingForFeedback ? (
             <div className="feedback-section end-screen">
               <div className="feedback-form">
+                {(session.suspiciousActivityReason || suspiciousActivityEvents.length > 0) && (
+                  <div className="feedback-warning-panel">
+                    <div className="feedback-warning-title">Suspicious Activity Signals</div>
+                    {session.suspiciousActivityReason ? <p>{session.suspiciousActivityReason}</p> : null}
+                    {suspiciousActivityEvents.length > 0 ? (
+                      <div className="feedback-warning-events">
+                        {suspiciousActivityEvents.map((event) => (
+                          <div key={event.id} className="feedback-warning-event">
+                            <strong>{formatActivityEventLabel(event.eventType)}:</strong> {event.detail}
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                )}
                 <div className="feedback-field">
                   <label htmlFor="rating">Rating</label>
                   <select
@@ -738,15 +938,17 @@ const Session: React.FC = () => {
                         ...prev,
                         rating: event.target.value as FeedbackRating | '',
                         recommendationDecision:
-                          event.target.value === 'BAD' ? 'NO' : prev.recommendationDecision,
+                          event.target.value === 'BAD' || event.target.value === 'DISQUALIFIED' ? 'NO' : prev.recommendationDecision,
                       }))
                     }
+                    disabled={lockDisqualificationOutcome}
                   >
                     <option value="">Select rating</option>
                     <option value="EXCELLENT">Excellent</option>
                     <option value="GOOD">Good</option>
                     <option value="FAIR">Fair</option>
                     <option value="BAD">Bad</option>
+                    <option value="DISQUALIFIED">Disqualified</option>
                   </select>
                 </div>
                 <div className="feedback-field">
@@ -773,7 +975,7 @@ const Session: React.FC = () => {
                     id="recommendation"
                     value={feedback.recommendationDecision}
                     onChange={(event) => setFeedback((prev) => ({ ...prev, recommendationDecision: event.target.value as RecommendationDecision | '' }))}
-                    disabled={feedback.rating === 'BAD'}
+                    disabled={lockDisqualificationOutcome || feedback.rating === 'BAD' || feedback.rating === 'DISQUALIFIED'}
                   >
                     <option value="">Select recommendation</option>
                     <option value="YES">Next round yes</option>
@@ -795,7 +997,7 @@ const Session: React.FC = () => {
           ) : (
             isInterviewer ? (
               <div className="feedback-actions">
-                <button className="control-btn btn-start" onClick={() => navigate('/java')}>
+                <button className="control-btn btn-start" onClick={() => navigate('/')}>
                   Back to Dashboard
                 </button>
               </div>
@@ -843,6 +1045,22 @@ function formatIdentityCaptureStatus(status?: string | null, reason?: string | n
 
 function formatCaptureReason(reason: string) {
   return reason
+    .toLowerCase()
+    .split('_')
+    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+    .join(' ');
+}
+
+function formatResumeReason(reason: string) {
+  return reason
+    .toLowerCase()
+    .split('_')
+    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+    .join(' ');
+}
+
+function formatActivityEventLabel(eventType: ActivityEventType) {
+  return eventType
     .toLowerCase()
     .split('_')
     .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))

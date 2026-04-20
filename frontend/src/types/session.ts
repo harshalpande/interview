@@ -1,18 +1,29 @@
 export type ParticipantRole = 'INTERVIEWER' | 'INTERVIEWEE';
 export type SessionStatus = 'CREATED' | 'WAITING_JOIN' | 'ACTIVE' | 'ENDED' | 'EXPIRED';
-export type FeedbackRating = 'EXCELLENT' | 'GOOD' | 'FAIR' | 'BAD';
+export type ParticipantConnectionStatus = 'DISCONNECTED' | 'CONNECTED' | 'AWAITING_APPROVAL';
+export type FeedbackRating = 'EXCELLENT' | 'GOOD' | 'FAIR' | 'BAD' | 'DISQUALIFIED';
 export type ActivityEventType =
   | 'TAB_HIDDEN'
   | 'PASTE_IN_EDITOR'
   | 'EXTERNAL_DROP_BLOCKED'
   | 'CAMERA_STREAM_LOST'
+  | 'MICROPHONE_DISABLED_MANUALLY'
+  | 'CAMERA_DISABLED_MANUALLY'
   | 'NO_FACE_DETECTED'
   | 'MULTIPLE_FACES_DETECTED';
 export type TechnologySkill = 'JAVA' | 'PYTHON' | 'ANGULAR' | 'REACT' | 'SQL';
 export type RecommendationDecision = 'YES' | 'NO' | 'REEVALUATION';
 export type IdentityCaptureStatus = 'PENDING' | 'SUCCESS' | 'FAILED' | 'SKIPPED';
 export type IdentityCaptureFailureReason = 'NO_CAMERA' | 'PERMISSION_DENIED' | 'CAMERA_IN_USE' | 'UNSUPPORTED' | 'DEVICE_ERROR' | 'USER_SKIPPED' | 'UNKNOWN';
-export type WebRtcSignalType = 'READY' | 'OFFER' | 'ANSWER' | 'ICE_CANDIDATE';
+export type WebRtcSignalType = 'READY' | 'OFFER' | 'ANSWER' | 'ICE_CANDIDATE' | 'MEDIA_STATE';
+export type ResumeReason =
+  | 'CONNECTION_RECOVERY'
+  | 'BACKEND_REDEPLOY'
+  | 'FRONTEND_REDEPLOY'
+  | 'NETWORK_CHANGE'
+  | 'DEVICE_CHANGE'
+  | 'TAB_OR_BROWSER_CLOSED'
+  | 'MANUAL_RESUME';
 
 export interface Participant {
   role: ParticipantRole;
@@ -25,6 +36,17 @@ export interface Participant {
   identitySnapshotCapturedAt?: string | null;
   disclaimerAcceptedAt?: string | null;
   joinedAt?: string | null;
+  connectionStatus?: ParticipantConnectionStatus | null;
+  deviceId?: string | null;
+  lastKnownIp?: string | null;
+  lastSeenAt?: string | null;
+  disconnectedAt?: string | null;
+  resumeRequestedAt?: string | null;
+  resumeApprovedAt?: string | null;
+  resumeRejectedAt?: string | null;
+  resumeCount?: number | null;
+  pendingResumeReason?: ResumeReason | null;
+  awaitingResumeApproval?: boolean | null;
 }
 
 export interface JoinInfo {
@@ -62,6 +84,9 @@ export interface SessionResponse {
   createdAt: string;
   startedAt?: string | null;
   endedAt?: string | null;
+  interruptedAt?: string | null;
+  recoveryDeadlineAt?: string | null;
+  recoveryRequiredRole?: ParticipantRole | null;
   durationSec: number;
   remainingSec: number;
   extensionUsed: boolean;
@@ -71,9 +96,13 @@ export interface SessionResponse {
   codeVersion: number;
   finalRunResult?: RunResult | null;
   feedback?: Feedback | null;
+  feedbackDraft?: Feedback | null;
   activityEvents?: ActivityEvent[];
   joinInfo?: JoinInfo | null;
   summary?: string | null;
+  suspiciousRejected?: boolean;
+  suspiciousScenarioKey?: string | null;
+  suspiciousActivityReason?: string | null;
 }
 
 export interface SessionSocketMessage {
@@ -92,6 +121,8 @@ export interface SessionSocketMessage {
   candidate?: string;
   sdpMid?: string | null;
   sdpMLineIndex?: number | null;
+  cameraEnabled?: boolean | null;
+  microphoneEnabled?: boolean | null;
 }
 
 export interface CreateSessionRequest {
@@ -111,6 +142,7 @@ export interface JoinSessionRequest {
   name: string;
   email: string;
   timeZone?: string;
+  deviceId?: string;
 }
 
 export interface ValidateTokenResponse {
@@ -119,6 +151,40 @@ export interface ValidateTokenResponse {
   role: ParticipantRole;
   expiresAt: string;
   message: string;
+  resumeRequired: boolean;
+}
+
+export interface ResumeRequest {
+  role: ParticipantRole;
+  name: string;
+  email: string;
+  timeZone?: string;
+  deviceId: string;
+  reason: ResumeReason;
+}
+
+export interface ResumeResponse {
+  status: 'APPROVED' | 'PENDING_APPROVAL' | 'REJECTED';
+  message: string;
+  approvalRequired: boolean;
+  session?: SessionResponse | null;
+}
+
+export interface ResumeApprovalRequest {
+  interviewerName: string;
+  interviewerEmail: string;
+}
+
+export interface HeartbeatRequest {
+  role: ParticipantRole;
+  deviceId: string;
+}
+
+export interface DisconnectParticipantRequest {
+  role: ParticipantRole;
+  deviceId: string;
+  reason: ResumeReason;
+  finalCode?: string;
 }
 
 export interface FeedbackRequest {

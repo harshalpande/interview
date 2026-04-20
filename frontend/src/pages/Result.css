@@ -102,30 +102,32 @@
 
 .activity-summary-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(150px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8px;
 }
 
 .activity-metric {
   display: grid;
-  gap: 8px;
-  padding: 16px 18px;
-  border-radius: 16px;
+  gap: 6px;
+  padding: 10px 8px;
+  border-radius: 14px;
   background: #f8fbfd;
   border: 1px solid #dce7f0;
+  text-align: center;
 }
 
 .activity-metric strong {
-  font-size: 1.5rem;
+  font-size: 1.1rem;
   color: var(--text);
 }
 
 .activity-metric-label,
 .activity-summary-note strong {
   color: var(--text-soft);
-  font-size: 0.84rem;
-  letter-spacing: 0.04em;
+  font-size: 0.68rem;
+  letter-spacing: 0.02em;
   text-transform: uppercase;
+  line-height: 1.35;
 }
 
 .activity-summary-note {
@@ -185,6 +187,6 @@
   }
 
   .activity-summary-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

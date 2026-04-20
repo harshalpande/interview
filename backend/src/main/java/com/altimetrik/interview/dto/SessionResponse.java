@@ -2,6 +2,7 @@ package com.altimetrik.interview.dto;
 
 import com.altimetrik.interview.enums.SessionStatus;
 import com.altimetrik.interview.enums.TechnologySkill;
+import com.altimetrik.interview.enums.ParticipantRole;
 import lombok.Builder;
 import lombok.Data;
 
@@ -26,7 +27,14 @@ public class SessionResponse {
     private Long codeVersion;
     private RunResultDto finalRunResult;
     private FeedbackDto feedback;
+    private FeedbackDto feedbackDraft;
     private List<ActivityEventDto> activityEvents;
     private JoinTokenResponse joinInfo;
     private String summary;
+    private OffsetDateTime interruptedAt;
+    private OffsetDateTime recoveryDeadlineAt;
+    private ParticipantRole recoveryRequiredRole;
+    private Boolean suspiciousRejected;
+    private String suspiciousScenarioKey;
+    private String suspiciousActivityReason;
 }

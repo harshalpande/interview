@@ -7,30 +7,24 @@ import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
-import java.time.Duration;
-import java.time.OffsetDateTime;
-import java.time.ZoneOffset;
-import java.util.Map;
-
 @Service
 @RequiredArgsConstructor
 public class SessionBroadcastService {
 
     private final SessionService sessionService;
     private final SimpMessagingTemplate messagingTemplate;
-    private final ActiveSessionTracker activeSessionTracker;
 
     @Scheduled(fixedRate = 1000)
     public void broadcastTimerTicks() {
-        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
-        for (Map.Entry<String, OffsetDateTime> entry : activeSessionTracker.snapshot().entrySet()) {
-            String sessionId = entry.getKey();
-            int timeLeft = Math.max(0, (int) Duration.between(now, entry.getValue()).getSeconds());
+        for (SessionResponse activeSession : sessionService.listActiveSessions()) {
+            String sessionId = activeSession.getId();
+            int timeLeft = activeSession.getRemainingSec() == null ? 0 : activeSession.getRemainingSec();
 
             if (timeLeft == 0) {
-                SessionResponse endedSession = sessionService.getSession(sessionId);
-                if (endedSession.getStatus() != com.altimetrik.interview.enums.SessionStatus.ENDED) {
-                    String finalCode = endedSession.getLatestCode() == null ? "" : endedSession.getLatestCode();
+                SessionResponse endedSession = activeSession;
+                if (endedSession.getStatus() != com.altimetrik.interview.enums.SessionStatus.ENDED
+                        && endedSession.getStatus() != com.altimetrik.interview.enums.SessionStatus.EXPIRED) {
+                    String finalCode = activeSession.getLatestCode() == null ? "" : activeSession.getLatestCode();
                     endedSession = sessionService.endSession(sessionId, finalCode, null);
                 }
                 messagingTemplate.convertAndSend("/topic/session/" + sessionId, SessionSocketMessage.builder()
@@ -49,6 +43,17 @@ public class SessionBroadcastService {
                     .sessionId(sessionId)
                     .timeLeft(timeLeft)
                     .message("Timer update")
+                    .build());
+        }
+
+        for (SessionResponse interruptedSession : sessionService.closeInterruptedSessionsPastRecoveryWindow()) {
+            messagingTemplate.convertAndSend("/topic/session/" + interruptedSession.getId(), SessionSocketMessage.builder()
+                    .type("SESSION_END")
+                    .sessionId(interruptedSession.getId())
+                    .timeLeft(interruptedSession.getRemainingSec())
+                    .version(interruptedSession.getCodeVersion())
+                    .session(interruptedSession)
+                    .message("Session marked incomplete after recovery timeout")
                     .build());
         }
     }

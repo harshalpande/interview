@@ -19,6 +19,8 @@ interface SignalPayload {
   candidate?: string;
   sdpMid?: string | null;
   sdpMLineIndex?: number | null;
+  cameraEnabled?: boolean | null;
+  microphoneEnabled?: boolean | null;
 }
 
 export const useWebSocket = (
@@ -28,6 +30,7 @@ export const useWebSocket = (
   const clientRef = useRef<Client | null>(null);
   const onMessageRef = useRef(onMessage);
   const [isReconnecting, setIsReconnecting] = useState(false);
+  const [isConnected, setIsConnected] = useState(false);
 
   useEffect(() => {
     onMessageRef.current = onMessage;
@@ -59,6 +62,7 @@ export const useWebSocket = (
       heartbeatIncoming: 4000,
       heartbeatOutgoing: 4000,
       onConnect: () => {
+        setIsConnected(true);
         setIsReconnecting(false);
         client.subscribe(`/topic/session/${sessionId}`, (message: IMessage) => {
           const data = JSON.parse(message.body) as SessionSocketMessage;
@@ -66,12 +70,15 @@ export const useWebSocket = (
         });
       },
       onStompError: () => {
+        setIsConnected(false);
         setIsReconnecting(true);
       },
       onWebSocketClose: () => {
+        setIsConnected(false);
         setIsReconnecting(true);
       },
       onWebSocketError: () => {
+        setIsConnected(false);
         setIsReconnecting(true);
       },
     });
@@ -81,6 +88,7 @@ export const useWebSocket = (
 
     return () => {
       debouncedSendCode.cancel();
+      setIsConnected(false);
       client.deactivate();
       clientRef.current = null;
     };
@@ -91,7 +99,7 @@ export const useWebSocket = (
   }, [debouncedSendCode]);
 
   const sendSignal = useCallback((payload: SignalPayload) => {
-    if (!clientRef.current?.active) {
+    if (!clientRef.current?.active || !clientRef.current.connected) {
       return;
     }
 
@@ -105,6 +113,7 @@ export const useWebSocket = (
     sendCode,
     sendSignal,
     isReconnecting,
+    isConnected,
   };
 };
 

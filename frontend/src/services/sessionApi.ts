@@ -4,10 +4,15 @@ import type {
   ActivityEvent,
   ActivityEventRequest,
   CreateSessionRequest, 
+  DisconnectParticipantRequest,
   EndSessionRequest,
   FeedbackRating,
+  HeartbeatRequest,
   IdentityCaptureRequest,
   JoinSessionRequest,
+  ResumeApprovalRequest,
+  ResumeRequest,
+  ResumeResponse,
   SessionResponse, 
   FeedbackRequest,
   TechnologySkill,
@@ -147,6 +152,51 @@ class SessionApiClient {
   async joinSession(token: string, request: JoinSessionRequest): Promise<SessionResponse> {
     try {
       const response = await this.axiosInstance.post<SessionResponse>(`/sessions/join/${token}`, request);
+      return response.data;
+    } catch (error) {
+      throw this.handleError(error);
+    }
+  }
+
+  async requestResume(id: string, request: ResumeRequest): Promise<ResumeResponse> {
+    try {
+      const response = await this.axiosInstance.post<ResumeResponse>(`/sessions/${id}/resume`, request);
+      return response.data;
+    } catch (error) {
+      throw this.handleError(error);
+    }
+  }
+
+  async approveResume(id: string, request: ResumeApprovalRequest): Promise<SessionResponse> {
+    try {
+      const response = await this.axiosInstance.post<SessionResponse>(`/sessions/${id}/resume/approve`, request);
+      return response.data;
+    } catch (error) {
+      throw this.handleError(error);
+    }
+  }
+
+  async rejectResume(id: string, request: ResumeApprovalRequest): Promise<SessionResponse> {
+    try {
+      const response = await this.axiosInstance.post<SessionResponse>(`/sessions/${id}/resume/reject`, request);
+      return response.data;
+    } catch (error) {
+      throw this.handleError(error);
+    }
+  }
+
+  async heartbeat(id: string, request: HeartbeatRequest): Promise<SessionResponse> {
+    try {
+      const response = await this.axiosInstance.post<SessionResponse>(`/sessions/${id}/presence`, request);
+      return response.data;
+    } catch (error) {
+      throw this.handleError(error);
+    }
+  }
+
+  async disconnectParticipant(id: string, request: DisconnectParticipantRequest): Promise<SessionResponse> {
+    try {
+      const response = await this.axiosInstance.post<SessionResponse>(`/sessions/${id}/disconnect`, request);
       return response.data;
     } catch (error) {
       throw this.handleError(error);

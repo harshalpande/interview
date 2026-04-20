@@ -5,6 +5,7 @@ import StartInterview from './pages/StartInterview';
 import Disclaimer from './pages/Disclaimer';
 import Session from './pages/Session';
 import Join from './pages/Join';
+import Resume from './pages/Resume';
 import Result from './pages/Result';
 import TechnologySelection from './pages/TechnologySelection';
 import IdentityCapture from './pages/IdentityCapture';
@@ -53,6 +54,7 @@ function AppContent() {
           <Route path="/java/disclaimer/:role" element={<Disclaimer />} />
           <Route path="/java/session/:sessionId" element={<Session />} />
           <Route path="/java/join/:token" element={<Join />} />
+          <Route path="/java/resume/:sessionId" element={<Resume />} />
           <Route path="/java/result/:sessionId" element={<Result />} />
           <Route path="/disclaimer/:role" element={<LegacyDisclaimerRedirect />} />
           <Route path="/session/:sessionId" element={<LegacySessionRedirect />} />

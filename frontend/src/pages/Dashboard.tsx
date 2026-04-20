@@ -10,7 +10,7 @@ type SortKey = 'createdAt' | 'status' | 'summary';
 type DatePresetKey = 'today' | 'week' | 'month' | 'year' | 'financialYear';
 
 const TECHNOLOGY_OPTIONS: TechnologySkill[] = ['JAVA', 'PYTHON', 'ANGULAR', 'REACT', 'SQL'];
-const RATING_OPTIONS: FeedbackRating[] = ['EXCELLENT', 'GOOD', 'FAIR', 'BAD'];
+const RATING_OPTIONS: FeedbackRating[] = ['EXCELLENT', 'GOOD', 'FAIR', 'BAD', 'DISQUALIFIED'];
 const TODAY_DATE = toDateValue(new Date());
 const TABLE_COLUMN_WIDTHS = ['15%', '10%', '21%', '21%', '11%', '14%', '8%'];
 
@@ -350,7 +350,7 @@ const Dashboard: React.FC = () => {
                 <th>Interviewee</th>
                 <th>
                   <button type="button" className="sort-button" onClick={() => toggleSort('status', sortBy, direction, setSortBy, setDirection)}>
-                    Status{renderSortIndicator('status', sortBy, direction)}
+                    State{renderSortIndicator('status', sortBy, direction)}
                   </button>
                 </th>
                 <th>

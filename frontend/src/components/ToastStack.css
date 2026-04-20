@@ -28,25 +28,50 @@
 
 .toast-message-group {
   display: grid;
-  gap: 8px;
+  gap: 4px;
+  min-width: 0;
+  color: #66788b;
+  font-weight: 500;
+  flex: 1 1 auto;
+}
+
+.toast-title {
+  display: block;
+  font-weight: 800;
+  color: #8a6b2a;
+}
+
+.toast-message {
+  display: block;
   color: #66788b;
   font-weight: 500;
 }
 
+.toast-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
 .toast-countdown {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   justify-content: center;
   width: 30px;
-  min-height: 30px;
+  height: 30px;
   border-radius: 999px;
   background: rgba(106, 75, 19, 0.12);
   color: inherit;
   font-weight: 800;
 }
 
+.toast-countdown.is-hidden {
+  visibility: hidden;
+}
+
 .toast-close {
-  flex-shrink: 0;
   width: 28px;
   height: 28px;
   padding: 0;

@@ -12,7 +12,10 @@
 ## Key Features
 
 - Monaco editor with Run/Reset, theme toggle, and `Ctrl+Enter` run shortcut.
+- Two-way live audio/video session controls with pre-start media readiness, interviewer/interviewee toggles, explicit no-video states, and interviewer-visible suspicious activity signals during feedback.
+- Suspicious external drag attempts into the editor are blocked and surfaced as interviewer-visible monitoring activity.
 - Session dashboard with status + summary.
+- Persistent session resume for active interviews, including reconnect/redeploy recovery, interviewer approval for high-risk interviewee resumes, and automatic incomplete handling after interruption timeout.
 - Token expiry handling:
   - Marks session as expired with summary `Token Expired`
   - Hides “Result” action for expired sessions
@@ -27,11 +30,10 @@
 - Sandbox is “best effort” (process + limits), not a hardened container sandbox.
 - AuthN/AuthZ is currently open (no login / RBAC).
 - H2 is fine for dev/demo; production would typically use Postgres/MySQL with migrations.
-- Suspicious external drag attempts into the editor are blocked in the UI, but the corresponding activity event is still not emitted reliably in all browser drag scenarios.
-  - This needs a follow-up implementation pass before it can be treated as complete interviewer-visible monitoring.
 
 ## Future Enhancements
 
+- Shift the next product phase toward performance analysis and future-scope enhancements now that the core AV workflow is complete.
 - Add a program-evaluation engine that compares the interviewee solution with an ideal/reference solution.
   - Phase 1 metrics should focus on:
     - correctness / passed tests
