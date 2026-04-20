@@ -1,12 +1,12 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import MonacoEditor from '@monaco-editor/react';
-import { ExecuteRequest } from '../types/api';
+import { ExecuteRequest, ExecutionLanguage } from '../types/api';
 import ResizeHandle from './ResizeHandle';
 import { compilerApi } from '../services/api';
 import './Editor.css';
 import Console from './Console';
 
-const TEMPLATE_CODE = `import org.junit.Assert;
+const JAVA_TEMPLATE_CODE = `import org.junit.Assert;
 
 public class Solution {
     static int add(int a, int b) {
@@ -18,7 +18,36 @@ public class Solution {
         System.out.println("All assertions passed");
     }
 }`;
-const JAVA_SANDBOX_LABEL = 'Sandbox: Eclipse Temurin JDK 17';
+const PYTHON_TEMPLATE_CODE = `def add(a, b):
+    return a + b
+
+def main():
+    assert add(2, 3) == 5
+    print("All assertions passed")
+
+if __name__ == "__main__":
+    main()
+`;
+
+const SANDBOX_LABELS: Record<ExecutionLanguage, string> = {
+  JAVA: 'Sandbox: Eclipse Temurin JDK 17',
+  PYTHON: 'Sandbox: CPython 3.12',
+};
+
+const EDITOR_TITLES: Record<ExecutionLanguage, string> = {
+  JAVA: 'Java Code Editor',
+  PYTHON: 'Python Code Editor',
+};
+
+const MONACO_LANGUAGE: Record<ExecutionLanguage, 'java' | 'python'> = {
+  JAVA: 'java',
+  PYTHON: 'python',
+};
+
+const DEFAULT_TEMPLATES: Record<ExecutionLanguage, string> = {
+  JAVA: JAVA_TEMPLATE_CODE,
+  PYTHON: PYTHON_TEMPLATE_CODE,
+};
 
 interface EditorState {
   code: string;
@@ -29,6 +58,7 @@ interface EditorState {
 }
 
 interface EditorProps {
+  executionLanguage?: ExecutionLanguage;
   readOnly?: boolean;
   initialCode?: string;
   onCodeChange?: (code: string) => void;
@@ -46,8 +76,9 @@ interface EditorProps {
 }
 
 const Editor: React.FC<EditorProps> = ({
+  executionLanguage = 'JAVA',
   readOnly = false,
-  initialCode = TEMPLATE_CODE,
+  initialCode,
   onCodeChange,
   onPasteInEditor,
   onCopyFromEditor,
@@ -61,6 +92,11 @@ const Editor: React.FC<EditorProps> = ({
   onToggleFullscreen,
   headerRightSlot,
 }) => {
+  const defaultTemplate = DEFAULT_TEMPLATES[executionLanguage];
+  const resolvedInitialCode = initialCode && initialCode.trim().length > 0 ? initialCode : defaultTemplate;
+  const editorTitle = EDITOR_TITLES[executionLanguage];
+  const sandboxLabel = SANDBOX_LABELS[executionLanguage];
+  const monacoLanguage = MONACO_LANGUAGE[executionLanguage];
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const editorMountRef = React.useRef<HTMLDivElement | null>(null);
   const defaultOutputPct = 35;
@@ -71,7 +107,7 @@ const Editor: React.FC<EditorProps> = ({
   const minOutputPx = 320;
 
   const [state, setState] = useState<EditorState>({
-    code: initialCode,
+    code: resolvedInitialCode,
     output: '',
     error: '',
     loading: false,
@@ -85,9 +121,9 @@ const Editor: React.FC<EditorProps> = ({
   useEffect(() => {
     setState((prev) => ({
       ...prev,
-      code: initialCode,
+      code: resolvedInitialCode,
     }));
-  }, [initialCode]);
+  }, [resolvedInitialCode]);
 
   useEffect(() => {
     const media = window.matchMedia('(max-width: 980px)');
@@ -127,6 +163,7 @@ const Editor: React.FC<EditorProps> = ({
     try {
       const request: ExecuteRequest = {
         sourceCode: state.code,
+        language: executionLanguage,
         timeoutMs: 5000,
         memoryLimitMb: 512,
       };
@@ -148,7 +185,7 @@ const Editor: React.FC<EditorProps> = ({
         error: errorMessage,
       }));
     }
-  }, [canRun, state.code]);
+  }, [canRun, executionLanguage, state.code]);
 
   useEffect(() => {
     runLatestRef.current = handleRun;
@@ -196,12 +233,12 @@ const Editor: React.FC<EditorProps> = ({
   const handleReset = () => {
     setState((prev) => ({
       ...prev,
-      code: TEMPLATE_CODE,
+      code: defaultTemplate,
       output: '',
       error: '',
       executionTime: 0,
     }));
-    onCodeChange?.(TEMPLATE_CODE);
+    onCodeChange?.(defaultTemplate);
   };
 
   const toggleTheme = () => {
@@ -251,8 +288,8 @@ const Editor: React.FC<EditorProps> = ({
       <div className="editor-panel">
         <div className="editor-header">
           <div className="editor-title">
-            <span>Java Code Editor</span>
-            <span className="editor-sandbox-label">{JAVA_SANDBOX_LABEL}</span>
+            <span>{editorTitle}</span>
+            <span className="editor-sandbox-label">{sandboxLabel}</span>
           </div>
           <div className="editor-actions">
             <button className="btn btn-secondary" onClick={toggleTheme} title="Toggle theme">
@@ -325,7 +362,7 @@ const Editor: React.FC<EditorProps> = ({
           >
             <MonacoEditor
               height="100%"
-              language="java"
+              language={monacoLanguage}
               value={state.code}
               onChange={handleCodeChange}
               theme={theme}

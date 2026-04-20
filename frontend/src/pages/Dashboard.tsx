@@ -291,6 +291,7 @@ const Dashboard: React.FC = () => {
                     </option>
                   ))}
                 </select>
+                <span className="filter-select-hint">Hold Ctrl while clicking to select multiple options.</span>
               </div>
             </div>
 
@@ -316,6 +317,7 @@ const Dashboard: React.FC = () => {
                     </option>
                   ))}
                 </select>
+                <span className="filter-select-hint">Hold Ctrl while clicking to select multiple options.</span>
               </div>
             </div>
           </div>

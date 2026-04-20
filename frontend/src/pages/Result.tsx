@@ -28,7 +28,7 @@ const Result: React.FC = () => {
   React.useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        navigate('/java');
+          navigate('/');
       }
     };
 
@@ -83,7 +83,7 @@ const Result: React.FC = () => {
             </div>
           </div>
         </div>
-        <Button onClick={() => navigate('/java')}>Close (Esc)</Button>
+        <Button onClick={() => navigate('/')}>Close (Esc)</Button>
       </div>
 
       <div className="result-summary-card result-summary-layout">

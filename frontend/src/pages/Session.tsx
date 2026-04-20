@@ -84,7 +84,7 @@ const Session: React.FC = () => {
   useBackGuard({
     enabled: true,
     message: 'Leave the interview session? You will be returned to the dashboard.',
-    redirectTo: '/java',
+    redirectTo: '/',
   });
 
   React.useEffect(() => {
@@ -820,6 +820,7 @@ const Session: React.FC = () => {
           )}
 
           <Editor
+            executionLanguage={session.technology === 'PYTHON' ? 'PYTHON' : 'JAVA'}
             readOnly={session.status !== 'ACTIVE'}
             canRun={session.status === 'ACTIVE'}
             showResetButton={isInterviewer}

@@ -22,7 +22,7 @@ const Join: React.FC = () => {
   useBackGuard({
     enabled: true,
     message: 'Leave this step? You will be returned to the dashboard.',
-    redirectTo: '/java',
+    redirectTo: '/',
   });
 
   const validateToken = useCallback(async () => {

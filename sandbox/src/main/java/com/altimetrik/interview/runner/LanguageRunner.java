@@ -8,6 +8,12 @@ public interface LanguageRunner {
 
     boolean supports(ExecutionLanguage language);
 
+    long defaultTimeoutMs();
+
+    long defaultMemoryMb();
+
+    long maxMemoryMb();
+
     RunnerCompileResult compile(String sourceCode);
 
     RunnerExecutionResult execute(String sourceCode, long timeoutMs, long memoryLimitMb);

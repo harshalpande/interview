@@ -41,7 +41,7 @@ const IdentityCapture: React.FC = () => {
   useBackGuard({
     enabled: true,
     message: 'Leave identity capture? You will be returned to the dashboard.',
-    redirectTo: '/java',
+    redirectTo: '/',
   });
 
   React.useEffect(() => {

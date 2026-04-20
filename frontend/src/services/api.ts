@@ -4,7 +4,7 @@ import { CompileRequest, CompileResponse, ExecuteRequest, ExecuteResponse } from
 const API_BASE_URL = process.env.REACT_APP_API_URL || '/api';
 
 /**
- * API client for communicating with the Java compiler backend.
+ * API client for communicating with the sandbox backend.
  * Handles all HTTP requests to the backend REST API.
  */
 class CompilerApiClient {
@@ -21,7 +21,7 @@ class CompilerApiClient {
   }
 
   /**
-   * Compile Java source code without execution.
+   * Compile source code without execution.
    */
   async compile(request: CompileRequest): Promise<CompileResponse> {
     try {
@@ -36,13 +36,14 @@ class CompilerApiClient {
   }
 
   /**
-   * Compile and execute Java source code.
+   * Compile and execute source code.
    */
   async execute(request: ExecuteRequest): Promise<ExecuteResponse> {
     try {
       // Set default values
       const executeRequest = {
         sourceCode: request.sourceCode,
+        language: request.language || 'JAVA',
         timeoutMs: request.timeoutMs || 5000,
         memoryLimitMb: request.memoryLimitMb || 512,
       };

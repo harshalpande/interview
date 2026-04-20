@@ -16,22 +16,22 @@ import './App.css';
 
 function LegacyDisclaimerRedirect() {
   const { role } = useParams();
-  return <Navigate to={role ? `/java/disclaimer/${role}` : '/java'} replace />;
+  return <Navigate to={role ? `/java/disclaimer/${role}` : '/'} replace />;
 }
 
 function LegacySessionRedirect() {
   const { sessionId } = useParams();
-  return <Navigate to={sessionId ? `/java/session/${sessionId}` : '/java'} replace />;
+  return <Navigate to={sessionId ? `/java/session/${sessionId}` : '/'} replace />;
 }
 
 function LegacyJoinRedirect() {
   const { token } = useParams();
-  return <Navigate to={token ? `/java/join/${token}` : '/java'} replace />;
+  return <Navigate to={token ? `/java/join/${token}` : '/'} replace />;
 }
 
 function LegacyResultRedirect() {
   const { sessionId } = useParams();
-  return <Navigate to={sessionId ? `/java/result/${sessionId}` : '/java'} replace />;
+  return <Navigate to={sessionId ? `/java/result/${sessionId}` : '/'} replace />;
 }
 
 function AppContent() {
@@ -47,7 +47,7 @@ function AppContent() {
       <main className="app-main">
         <Routes>
           <Route path="/" element={<Dashboard />} />
-          <Route path="/java" element={<Dashboard />} />
+          <Route path="/java" element={<Navigate to="/" replace />} />
           <Route path="/start" element={<TechnologySelection />} />
           <Route path="/java/start" element={<StartInterview />} />
           <Route path="/java/identity-capture/:sessionId" element={<IdentityCapture />} />
