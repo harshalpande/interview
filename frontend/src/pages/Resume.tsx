@@ -30,7 +30,7 @@ const Resume: React.FC = () => {
 
   React.useEffect(() => {
     if (!sessionId || !roleParam) {
-      navigate('/java', { replace: true });
+      navigate('/', { replace: true });
     }
   }, [navigate, roleParam, sessionId]);
 

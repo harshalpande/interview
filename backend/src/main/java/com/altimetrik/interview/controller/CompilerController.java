@@ -16,8 +16,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * REST API controller for Java code compilation and execution endpoints.
- * Provides endpoints for compiling and running Java code with sandboxing.
+ * REST API controller for sandboxed code compilation and execution endpoints.
  */
 @RestController
 @RequestMapping("/compile")
@@ -29,7 +28,7 @@ public class CompilerController {
 
     /**
      * POST /api/compile
-     * Compiles Java source code without execution.
+     * Compiles source code without execution.
      * 
      * @param request CompileRequest containing source code
      * @return CompileResponse with compilation status and errors (if any)
@@ -47,13 +46,13 @@ public class CompilerController {
         }
 
         CompileResponse response = sandboxClientService.compile(request);
-        log.info("Compile response: success={}", response.isSuccess());
+        log.info("Compile response: success={}, language={}", response.isSuccess(), request.getLanguage());
         return ResponseEntity.ok(response);
     }
 
     /**
      * POST /api/execute
-     * Compiles and executes Java source code in a sandboxed environment.
+     * Compiles and executes source code in a sandboxed environment.
      * 
      * @param request ExecuteRequest containing source code and execution constraints
      * @return ExecuteResponse with execution results, output, and errors
@@ -72,8 +71,8 @@ public class CompilerController {
         }
 
         ExecuteResponse response = sandboxClientService.execute(request);
-        log.info("Execute response: success={}, exitCode={}, executionTime={}ms",
-                response.isSuccess(), response.getExitCode(), response.getExecutionTimeMs());
+        log.info("Execute response: success={}, exitCode={}, executionTime={}ms, language={}",
+                response.isSuccess(), response.getExitCode(), response.getExecutionTimeMs(), request.getLanguage());
         return ResponseEntity.ok(response);
     }
 

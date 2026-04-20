@@ -36,8 +36,8 @@ const technologyOptions: TechnologyOption[] = [
     id: 'python',
     label: 'Python',
     value: 'PYTHON',
-    caption: 'Coming soon',
-    status: 'coming-soon',
+    caption: 'Live coding interviews',
+    status: 'available',
     icon: (
       <svg viewBox="0 0 64 64" aria-hidden="true">
         <rect x="14" y="14" width="22" height="18" rx="8" fill="currentColor" opacity="0.88" />
@@ -94,7 +94,7 @@ const technologyOptions: TechnologyOption[] = [
 
 const TechnologySelection: React.FC = () => {
   const navigate = useNavigate();
-  const [selectedTechnology, setSelectedTechnology] = React.useState<TechnologyKey | null>('java');
+  const [selectedTechnology, setSelectedTechnology] = React.useState<TechnologyKey | null>(null);
 
   const selectedOption = technologyOptions.find((option) => option.id === selectedTechnology) ?? null;
   const canProceed = selectedOption?.status === 'available';
@@ -105,7 +105,7 @@ const TechnologySelection: React.FC = () => {
         <div className="page-kicker">Technology Setup</div>
         <h2>Select the interview technology</h2>
         <p className="page-subtitle">
-          Choose the stack for this interview. Java is available now, and the remaining technologies are visible as upcoming options.
+          Choose the stack for this interview. Java and Python are available now, and the remaining technologies are visible as upcoming options.
         </p>
 
         <div className="tech-grid" role="list" aria-label="Available technologies">
@@ -139,8 +139,10 @@ const TechnologySelection: React.FC = () => {
             </p>
             <p>
               {canProceed
-                ? 'Proceed to create a Java interview session.'
-                : 'This technology is not enabled yet. Please select Java to continue.'}
+                ? `Proceed to create a ${selectedOption?.label ?? 'coding'} interview session.`
+                : selectedOption
+                  ? 'This technology is not enabled yet. Please select Java or Python to continue.'
+                  : 'Select Java or Python to continue.'}
             </p>
           </div>
           <div className="tech-selection-actions">

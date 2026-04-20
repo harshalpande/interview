@@ -29,6 +29,7 @@ import com.altimetrik.interview.entity.RunResult;
 import com.altimetrik.interview.entity.SessionActivityEvent;
 import com.altimetrik.interview.entity.SessionToken;
 import com.altimetrik.interview.enums.ActivityEventType;
+import com.altimetrik.interview.enums.ExecutionLanguage;
 import com.altimetrik.interview.enums.FeedbackRating;
 import com.altimetrik.interview.enums.IdentityCaptureFailureReason;
 import com.altimetrik.interview.enums.IdentityCaptureStatus;
@@ -98,7 +99,7 @@ public class SessionService {
             Map.entry(SCENARIO_DEVICE + "__" + SCENARIO_DEVICE,
                     "Candidate was disqualified because repeated recovery attempts from different devices could not be validated within the interview integrity policy.")
     );
-    private static final String DEFAULT_TEMPLATE = """
+    private static final String DEFAULT_JAVA_TEMPLATE = """
             import org.junit.Assert;
 
             public class Solution {
@@ -111,6 +112,19 @@ public class SessionService {
                     System.out.println("All assertions passed");
                 }
             }""";
+    private static final String DEFAULT_PYTHON_TEMPLATE = """
+            def add(a, b):
+                return a + b
+
+
+            def main():
+                assert add(2, 3) == 5
+                print("All assertions passed")
+
+
+            if __name__ == "__main__":
+                main()
+            """;
 
     private final SessionRepository sessionRepository;
     private final ParticipantRepository participantRepository;
@@ -138,7 +152,7 @@ public class SessionService {
 
         CodeState codeState = new CodeState();
         codeState.setSessionId(session.getId());
-        codeState.setLatestCode(DEFAULT_TEMPLATE);
+        codeState.setLatestCode(defaultTemplateFor(session.getTechnology()));
         codeState.setUpdatedAt(nowUtc());
         codeState.setUpdatedByRole(ParticipantRole.INTERVIEWER.name());
         codeState.setVersion(0L);
@@ -607,7 +621,7 @@ public class SessionService {
 
         upsertCodeState(sessionId, finalCode, ParticipantRole.INTERVIEWER);
 
-        ExecuteResponse executionResult = sandboxClientService.execute(new ExecuteRequest(finalCode));
+        ExecuteResponse executionResult = sandboxClientService.execute(buildExecuteRequest(finalCode, session.getTechnology()));
         RunResult runResult = runResultRepository.findTopBySessionIdOrderByCompiledAtDesc(sessionId).orElseGet(RunResult::new);
         runResult.setSessionId(sessionId);
         runResult.setStdout(executionResult.getStdout());
@@ -637,7 +651,7 @@ public class SessionService {
 
         upsertCodeState(sessionId, finalCode == null ? "" : finalCode, ParticipantRole.INTERVIEWER);
 
-        ExecuteResponse executionResult = sandboxClientService.execute(new ExecuteRequest(finalCode == null ? "" : finalCode));
+        ExecuteResponse executionResult = sandboxClientService.execute(buildExecuteRequest(finalCode == null ? "" : finalCode, session.getTechnology()));
         RunResult runResult = runResultRepository.findTopBySessionIdOrderByCompiledAtDesc(sessionId).orElseGet(RunResult::new);
         runResult.setSessionId(sessionId);
         runResult.setStdout(executionResult.getStdout());
@@ -1256,6 +1270,20 @@ public class SessionService {
 
     private String normalizeTimeZone(String timeZone) {
         return timeZone == null || timeZone.isBlank() ? null : timeZone.trim();
+    }
+
+    private ExecuteRequest buildExecuteRequest(String sourceCode, TechnologySkill technology) {
+        ExecuteRequest request = new ExecuteRequest(sourceCode);
+        request.setLanguage(toExecutionLanguage(technology));
+        return request;
+    }
+
+    private ExecutionLanguage toExecutionLanguage(TechnologySkill technology) {
+        return technology == TechnologySkill.PYTHON ? ExecutionLanguage.PYTHON : ExecutionLanguage.JAVA;
+    }
+
+    private String defaultTemplateFor(TechnologySkill technology) {
+        return technology == TechnologySkill.PYTHON ? DEFAULT_PYTHON_TEMPLATE : DEFAULT_JAVA_TEMPLATE;
     }
 
     private RecommendationDecision resolveRecommendationDecision(Feedback feedback) {

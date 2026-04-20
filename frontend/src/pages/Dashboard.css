@@ -233,6 +233,12 @@
   min-height: 74px;
 }
 
+.filter-select-hint {
+  color: #7a8a9a;
+  font-size: 0.68rem;
+  line-height: 1.2;
+}
+
 .filter-group .filter-field select[multiple] {
   width: 210px;
 }

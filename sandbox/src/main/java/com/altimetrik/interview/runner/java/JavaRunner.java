@@ -50,6 +50,21 @@ public class JavaRunner implements LanguageRunner {
     }
 
     @Override
+    public long defaultTimeoutMs() {
+        return DEFAULT_TIMEOUT_MS;
+    }
+
+    @Override
+    public long defaultMemoryMb() {
+        return DEFAULT_MEMORY_MB;
+    }
+
+    @Override
+    public long maxMemoryMb() {
+        return MAX_MEMORY_MB;
+    }
+
+    @Override
     public RunnerCompileResult compile(String sourceCode) {
         Path workDir = null;
         try {
@@ -88,18 +103,6 @@ public class JavaRunner implements LanguageRunner {
         } finally {
             cleanupWorkDir(workDir);
         }
-    }
-
-    public static long defaultTimeoutMs() {
-        return DEFAULT_TIMEOUT_MS;
-    }
-
-    public static long defaultMemoryMb() {
-        return DEFAULT_MEMORY_MB;
-    }
-
-    public static long maxMemoryMb() {
-        return MAX_MEMORY_MB;
     }
 
     private void cleanupWorkDir(Path workDir) {

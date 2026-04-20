@@ -6,7 +6,6 @@ import com.altimetrik.interview.dto.ExecuteRequest;
 import com.altimetrik.interview.dto.ExecuteResponse;
 import com.altimetrik.interview.enums.ExecutionLanguage;
 import com.altimetrik.interview.runner.LanguageRunner;
-import com.altimetrik.interview.runner.java.JavaRunner;
 import com.altimetrik.interview.runner.model.RunnerCompileResult;
 import com.altimetrik.interview.runner.model.RunnerExecutionResult;
 import lombok.RequiredArgsConstructor;
@@ -34,10 +33,10 @@ public class SandboxExecutionService {
         LanguageRunner runner = resolveRunner(request.getLanguage());
         long timeoutMs = request.getTimeoutMs() > 0
                 ? request.getTimeoutMs()
-                : JavaRunner.defaultTimeoutMs();
+                : runner.defaultTimeoutMs();
         long memoryMb = request.getMemoryLimitMb() > 0
-                ? Math.min(request.getMemoryLimitMb(), JavaRunner.maxMemoryMb())
-                : JavaRunner.defaultMemoryMb();
+                ? Math.min(request.getMemoryLimitMb(), runner.maxMemoryMb())
+                : runner.defaultMemoryMb();
 
         RunnerExecutionResult result = runner.execute(request.getSourceCode(), timeoutMs, memoryMb);
         return ExecuteResponse.builder()

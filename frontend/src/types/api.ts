@@ -2,8 +2,11 @@
  * API Request and Response types
  */
 
+export type ExecutionLanguage = 'JAVA' | 'PYTHON';
+
 export interface CompileRequest {
   sourceCode: string;
+  language?: ExecutionLanguage;
 }
 
 export interface CompileResponse {
@@ -15,6 +18,7 @@ export interface CompileResponse {
 
 export interface ExecuteRequest {
   sourceCode: string;
+  language?: ExecutionLanguage;
   timeoutMs?: number;
   memoryLimitMb?: number;
 }

@@ -48,7 +48,7 @@ const Disclaimer: React.FC = () => {
   useBackGuard({
     enabled: true,
     message: 'Leave this step? You will be returned to the dashboard.',
-    redirectTo: '/java',
+    redirectTo: '/',
   });
 
   const { data: fetchedSession, isLoading, error } = useQuery({
