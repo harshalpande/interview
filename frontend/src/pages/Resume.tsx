@@ -7,6 +7,8 @@ import type { Participant, ParticipantRole, ResumeReason, SessionResponse } from
 import { getBrowserTimeZone } from '../utils/dateTime';
 import { getOrCreateDeviceId } from '../utils/device';
 
+const ALTIMETRIK_REDIRECT_URL = process.env.REACT_APP_POST_INTERVIEW_REDIRECT_URL || 'https://www.altimetrik.com/';
+
 const Resume: React.FC = () => {
   const { sessionId } = useParams<{ sessionId: string }>();
   const [searchParams] = useSearchParams();
@@ -23,6 +25,8 @@ const Resume: React.FC = () => {
   const [info, setInfo] = React.useState('');
   const [loading, setLoading] = React.useState(false);
   const [pendingApproval, setPendingApproval] = React.useState(false);
+  const [rejectedMessage, setRejectedMessage] = React.useState('');
+  const [rejectedCountdown, setRejectedCountdown] = React.useState<number | null>(null);
 
   React.useEffect(() => {
     if (!sessionId || !roleParam) {
@@ -58,7 +62,13 @@ const Resume: React.FC = () => {
         if (rejectedAt && rejectedAt >= requestedAt) {
           setPendingApproval(false);
           setInfo('');
-          setError('The interviewer rejected this resume request.');
+          const interviewer = findParticipant(session, 'INTERVIEWER');
+          const interviewerName = firstName(interviewer?.name, 'The interviewer');
+          setRejectedMessage(
+            `${interviewerName} has rejected your request to join. Kindly connect with ${interviewerName} or the HR on the same.`
+          );
+          setRejectedCountdown(10);
+          setError('');
         }
       } catch {
         // best-effort polling only
@@ -67,6 +77,28 @@ const Resume: React.FC = () => {
 
     return () => window.clearInterval(interval);
   }, [appRole, navigate, pendingApproval, role, sessionId, setRole, setSession]);
+
+  React.useEffect(() => {
+    if (rejectedCountdown === null) {
+      return undefined;
+    }
+
+    const interval = window.setInterval(() => {
+      setRejectedCountdown((previous) => {
+        if (previous === null) {
+          return null;
+        }
+        if (previous <= 1) {
+          window.clearInterval(interval);
+          window.location.assign(ALTIMETRIK_REDIRECT_URL);
+          return 0;
+        }
+        return previous - 1;
+      });
+    }, 1000);
+
+    return () => window.clearInterval(interval);
+  }, [rejectedCountdown]);
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -78,6 +110,8 @@ const Resume: React.FC = () => {
       setLoading(true);
       setError('');
       setInfo('');
+      setRejectedMessage('');
+      setRejectedCountdown(null);
 
       const response = await sessionApi.requestResume(sessionId, {
         role,
@@ -131,6 +165,12 @@ const Resume: React.FC = () => {
         </p>
 
         {error && <div className="error-banner">{error}</div>}
+        {rejectedMessage && (
+          <div className="error-banner">
+            {rejectedMessage}
+            {typeof rejectedCountdown === 'number' ? ` Session will auto close in ${rejectedCountdown}.` : ''}
+          </div>
+        )}
         {info && <div className="success-banner">{info}</div>}
 
         <form onSubmit={handleSubmit} className="stack-form" autoComplete="off">
@@ -143,7 +183,7 @@ const Resume: React.FC = () => {
               value={name}
               onChange={(event) => setName(event.target.value)}
               required
-              disabled={pendingApproval}
+              disabled={pendingApproval || rejectedCountdown !== null}
             />
           </div>
           <div className="form-group">
@@ -156,10 +196,10 @@ const Resume: React.FC = () => {
               value={email}
               onChange={(event) => setEmail(event.target.value)}
               required
-              disabled={pendingApproval}
+              disabled={pendingApproval || rejectedCountdown !== null}
             />
           </div>
-          <Button type="submit" disabled={loading || pendingApproval}>
+          <Button type="submit" disabled={loading || pendingApproval || rejectedCountdown !== null}>
             {loading ? 'Verifying...' : pendingApproval ? 'Waiting for approval...' : 'Verify and Resume'}
           </Button>
         </form>
@@ -190,4 +230,12 @@ function nextPathFor(session: SessionResponse, role: ParticipantRole) {
 
 function findParticipant(session: SessionResponse, role: ParticipantRole): Participant | undefined {
   return session.participants.find((participant) => participant.role === role);
+}
+
+function firstName(value: string | undefined, fallback: string) {
+  const normalized = value?.trim();
+  if (!normalized) {
+    return fallback;
+  }
+  return normalized.split(/\s+/)[0] || fallback;
 }

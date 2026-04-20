@@ -358,6 +358,8 @@ public class SessionService {
                         .session(rejectedSession)
                         .build();
             }
+        } else {
+            validateInterviewerResumeWindow(session, participant);
         }
 
         boolean requiresApproval = request.getRole() == ParticipantRole.INTERVIEWEE
@@ -452,8 +454,24 @@ public class SessionService {
         interviewee.setResumeRejectedAt(nowUtc());
         interviewee.setConnectionStatus(ParticipantConnectionStatus.DISCONNECTED);
         participantRepository.save(interviewee);
-        saveSystemActivityEvent(sessionId, ParticipantRole.INTERVIEWER, ActivityEventType.TAB_HIDDEN,
-                "Interviewer rejected the interviewee resume request.");
+
+        String interviewerName = interviewer.getName() == null || interviewer.getName().isBlank()
+                ? "The interviewer"
+                : interviewer.getName().trim();
+        String reason = interviewerName + " rejected the interviewee resume request after the session was interrupted. "
+                + "The candidate has been disqualified because the required session recovery approval was not granted.";
+        session.setSuspiciousRejected(true);
+        session.setSuspiciousScenarioKey("RESUME_REJECTED_BY_INTERVIEWER");
+        session.setSuspiciousActivityReason(reason);
+        session.setFeedbackDraftRating(com.altimetrik.interview.enums.FeedbackRating.DISQUALIFIED);
+        session.setFeedbackDraftRecommendationDecision(RecommendationDecision.NO);
+        session.setFeedbackDraftComments("");
+        session.setEndedAt(nowUtc());
+        session.setStatus(SessionStatus.ENDED);
+        clearRecoveryWindow(session);
+        sessionRepository.save(session);
+
+        saveSystemActivityEvent(sessionId, ParticipantRole.INTERVIEWER, ActivityEventType.TAB_HIDDEN, reason);
         return toSessionResponse(session, true, getActiveJoinInfo(sessionId));
     }
 
@@ -487,9 +505,17 @@ public class SessionService {
         if (request.getRole() == ParticipantRole.INTERVIEWEE && request.getReason() == ResumeReason.TAB_OR_BROWSER_CLOSED) {
             session.setInterruptedAt(nowUtc());
             session.setRecoveryDeadlineAt(nowUtc().plusSeconds(RECOVERY_WINDOW_SEC));
+            session.setRecoveryRequiredRole(null);
             sessionRepository.save(session);
             saveSystemActivityEvent(sessionId, ParticipantRole.INTERVIEWEE, ActivityEventType.TAB_HIDDEN,
                     "Interviewee closed or refreshed the browser/tab during the interview. Resume now requires interviewer approval.");
+        } else if (request.getRole() == ParticipantRole.INTERVIEWER) {
+            session.setInterruptedAt(nowUtc());
+            session.setRecoveryDeadlineAt(nowUtc().plusSeconds(RECOVERY_WINDOW_SEC));
+            session.setRecoveryRequiredRole(ParticipantRole.INTERVIEWER);
+            sessionRepository.save(session);
+            saveSystemActivityEvent(sessionId, ParticipantRole.INTERVIEWER, ActivityEventType.TAB_HIDDEN,
+                    "Interviewer disconnected during the interview and must resume within the allowed recovery window.");
         }
 
         return toSessionResponse(session, true, getActiveJoinInfo(sessionId));
@@ -801,6 +827,18 @@ public class SessionService {
         return null;
     }
 
+    private void validateInterviewerResumeWindow(InterviewSession session, Participant participant) {
+        OffsetDateTime deadline = session.getRecoveryDeadlineAt();
+        if (session.getRecoveryRequiredRole() == ParticipantRole.INTERVIEWER && deadline != null && deadline.isBefore(nowUtc())) {
+            throw new ResponseStatusException(HttpStatus.GONE, "The interviewer recovery window has expired and the session can no longer be resumed.");
+        }
+
+        OffsetDateTime disconnectedAt = participant.getDisconnectedAt();
+        if (disconnectedAt != null && disconnectedAt.plusSeconds(RECOVERY_WINDOW_SEC).isBefore(nowUtc())) {
+            throw new ResponseStatusException(HttpStatus.GONE, "The interviewer recovery window has expired and the session can no longer be resumed.");
+        }
+    }
+
     private SessionResponse rejectIntervieweeForSuspiciousResume(InterviewSession session, Participant participant, String scenarioTag, String reason) {
         participant.setAwaitingResumeApproval(false);
         participant.setResumeRejectedAt(nowUtc());
@@ -880,13 +918,22 @@ public class SessionService {
     private void clearRecoveryWindow(InterviewSession session) {
         session.setInterruptedAt(null);
         session.setRecoveryDeadlineAt(null);
+        session.setRecoveryRequiredRole(null);
     }
 
     private SessionResponse autoCloseInterruptedSessionIfNeeded(InterviewSession session) {
         List<Participant> participants = participantRepository.findBySessionId(session.getId());
+        boolean interviewerConnected = participants.stream()
+                .anyMatch(participant -> participant.getRole() == ParticipantRole.INTERVIEWER
+                        && participant.getConnectionStatus() == ParticipantConnectionStatus.CONNECTED);
         boolean anyoneConnected = participants.stream()
                 .anyMatch(participant -> participant.getConnectionStatus() == ParticipantConnectionStatus.CONNECTED);
-        if (anyoneConnected) {
+
+        boolean recoverySatisfied = session.getRecoveryRequiredRole() == ParticipantRole.INTERVIEWER
+                ? interviewerConnected
+                : anyoneConnected;
+
+        if (recoverySatisfied) {
             clearRecoveryWindow(session);
             sessionRepository.save(session);
             return null;
@@ -895,8 +942,13 @@ public class SessionService {
         SessionResponse response = abandonSession(session.getId(), codeStateRepository.findBySessionId(session.getId())
                 .map(CodeState::getLatestCode)
                 .orElse(""));
-        saveSystemActivityEvent(session.getId(), ParticipantRole.INTERVIEWEE, ActivityEventType.TAB_HIDDEN,
-                "Session was marked incomplete because both participants remained disconnected for more than 120 seconds after the browser/tab interruption.");
+        String detail = session.getRecoveryRequiredRole() == ParticipantRole.INTERVIEWER
+                ? "Session was marked incomplete because the interviewer did not resume within the 120-second recovery window."
+                : "Session was marked incomplete because both participants remained disconnected for more than 120 seconds after the browser/tab interruption.";
+        saveSystemActivityEvent(session.getId(),
+                session.getRecoveryRequiredRole() == ParticipantRole.INTERVIEWER ? ParticipantRole.INTERVIEWER : ParticipantRole.INTERVIEWEE,
+                ActivityEventType.TAB_HIDDEN,
+                detail);
         return response;
     }
 
@@ -1090,6 +1142,7 @@ public class SessionService {
                 .endedAt(session.getEndedAt())
                 .interruptedAt(session.getInterruptedAt())
                 .recoveryDeadlineAt(session.getRecoveryDeadlineAt())
+                .recoveryRequiredRole(session.getRecoveryRequiredRole())
                 .durationSec(session.getDurationSec())
                 .remainingSec(calculateRemainingSec(session))
                 .extensionUsed(Boolean.TRUE.equals(session.getExtensionUsed()))
@@ -1191,6 +1244,8 @@ public class SessionService {
             case TAB_HIDDEN -> "Interviewee switched away from the interview tab or window.";
             case EXTERNAL_DROP_BLOCKED -> "Interviewee tried to drag text into the editor.";
             case CAMERA_STREAM_LOST -> "Interviewee's camera stream was interrupted.";
+            case MICROPHONE_DISABLED_MANUALLY -> "Interviewee manually turned off the microphone during the interview.";
+            case CAMERA_DISABLED_MANUALLY -> "Interviewee manually turned off the camera during the interview.";
             case NO_FACE_DETECTED -> "Interviewee's face was not visible in the camera frame.";
             case MULTIPLE_FACES_DETECTED -> "Multiple faces were detected in the interviewee's camera frame.";
             case PASTE_IN_EDITOR -> "Interviewee pasted content into the editor.";

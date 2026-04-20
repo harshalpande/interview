@@ -56,28 +56,33 @@ const ToastStack: React.FC<ToastStackProps> = ({ toasts, onDismiss }) => {
         const remainingMs = expiresAt ? Math.max(0, expiresAt - now) : null;
         const showCountdown = remainingMs !== null && remainingMs <= 5000;
         const countdownValue = remainingMs !== null ? Math.max(1, Math.ceil(remainingMs / 1000)) : null;
+        const { title, body } = splitToastMessage(toast.message);
 
         return (
         <div key={toast.id} className={`toast-card ${toast.tone ?? 'info'}`}>
           <div className="toast-content">
             <div className="toast-message-group">
-              <span>{toast.message}</span>
-              {showCountdown && countdownValue !== null ? (
-                <span className="toast-countdown" aria-label={`Notification closes in ${countdownValue} seconds`}>
-                  {countdownValue}
-                </span>
-              ) : null}
+              <span className="toast-title">{title}</span>
+              <span className="toast-message">{body}</span>
             </div>
-            {onDismiss ? (
-              <button
-                type="button"
-                className="toast-close"
-                onClick={() => onDismiss(toast.id)}
-                aria-label="Dismiss notification"
+            <div className="toast-actions">
+              {onDismiss ? (
+                <button
+                  type="button"
+                  className="toast-close"
+                  onClick={() => onDismiss(toast.id)}
+                  aria-label="Dismiss notification"
+                >
+                  X
+                </button>
+              ) : null}
+              <span
+                className={`toast-countdown ${showCountdown && countdownValue !== null ? 'is-visible' : 'is-hidden'}`}
+                aria-label={showCountdown && countdownValue !== null ? `Notification closes in ${countdownValue} seconds` : undefined}
               >
-                X
-              </button>
-            ) : null}
+                {showCountdown && countdownValue !== null ? countdownValue : ''}
+              </span>
+            </div>
           </div>
         </div>
       )})}
@@ -92,4 +97,19 @@ function getToastExpiresAt(toast: ToastItem) {
     return null;
   }
   return toast.createdAt + toast.autoCloseMs;
+}
+
+function splitToastMessage(message: string) {
+  const prefix = 'Suspicious Alert :';
+  if (!message.startsWith(prefix)) {
+    return {
+      title: 'Alert',
+      body: message,
+    };
+  }
+
+  return {
+    title: prefix,
+    body: message.slice(prefix.length).trim(),
+  };
 }

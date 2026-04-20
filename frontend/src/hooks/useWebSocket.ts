@@ -19,6 +19,8 @@ interface SignalPayload {
   candidate?: string;
   sdpMid?: string | null;
   sdpMLineIndex?: number | null;
+  cameraEnabled?: boolean | null;
+  microphoneEnabled?: boolean | null;
 }
 
 export const useWebSocket = (

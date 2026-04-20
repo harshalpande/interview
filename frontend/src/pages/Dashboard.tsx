@@ -350,7 +350,7 @@ const Dashboard: React.FC = () => {
                 <th>Interviewee</th>
                 <th>
                   <button type="button" className="sort-button" onClick={() => toggleSort('status', sortBy, direction, setSortBy, setDirection)}>
-                    Status{renderSortIndicator('status', sortBy, direction)}
+                    State{renderSortIndicator('status', sortBy, direction)}
                   </button>
                 </th>
                 <th>

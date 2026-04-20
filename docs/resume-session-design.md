@@ -9,6 +9,7 @@ Allow active interview sessions to survive backend/frontend redeploys, refreshes
 - Session continuity is restored from persisted session, participant, and code state.
 - Interviewee resume always requires registered name and email verification.
 - Interviewer resume requires registered name and email verification.
+- Interviewer may disconnect and rejoin multiple times, but each interviewer recovery must happen within the allowed 120-second recovery window.
 - Interviewee can resume at most once during the entire interview.
 - Interviewee resume requires interviewer approval when:
   - the resume follows a browser/tab close or refresh interruption
@@ -58,6 +59,9 @@ Allow active interview sessions to survive backend/frontend redeploys, refreshes
 
 - Interviewer can resume after verifying registered name and email.
 - No second-party approval is required.
+- Interviewer rejoin count is not capped.
+- Each interviewer recovery must happen within 120 seconds of the interruption.
+- If the interviewer does not return within 120 seconds, the session is marked `INCOMPLETE`.
 
 ## Implementation Summary
 

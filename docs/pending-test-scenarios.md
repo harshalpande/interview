@@ -42,6 +42,7 @@ This document tracks scenarios that are still pending validation because the cur
 - Validate:
   - interviewer audio/video stream quality
   - interviewee audio/video stream quality
+  - one participant unmuted while the other participant remains muted, and confirm the muted side can still hear the unmuted speaker correctly
   - mute/unmute behavior
   - camera enable/disable behavior
   - reconnect behavior after temporary disruptions

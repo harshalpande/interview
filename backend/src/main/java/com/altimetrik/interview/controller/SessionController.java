@@ -282,6 +282,8 @@ public class SessionController {
                 .candidate(request.getCandidate())
                 .sdpMid(request.getSdpMid())
                 .sdpMLineIndex(request.getSdpMLineIndex())
+                .cameraEnabled(request.getCameraEnabled())
+                .microphoneEnabled(request.getMicrophoneEnabled())
                 .message("Realtime signal relayed")
                 .build());
     }

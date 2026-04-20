@@ -2,6 +2,10 @@
   max-width: 1020px;
 }
 
+.identity-capture-card {
+  --capture-stage-height: 366px;
+}
+
 .identity-capture-layout {
   display: grid;
   grid-template-columns: minmax(0, 1.55fr) minmax(250px, 0.7fr);
@@ -15,7 +19,9 @@
 
 .capture-frame-shell {
   position: relative;
-  min-height: 372px;
+  min-height: var(--capture-stage-height);
+  height: var(--capture-stage-height);
+  max-height: var(--capture-stage-height);
   overflow: hidden;
   border-radius: 20px;
   background: radial-gradient(circle at top, rgba(255,255,255,0.08), transparent 38%), #102542;
@@ -35,7 +41,8 @@
 
 .capture-preview {
   position: relative;
-  min-height: 372px;
+  min-height: var(--capture-stage-height);
+  height: 100%;
 }
 
 .capture-overlay {
@@ -48,7 +55,9 @@
 }
 
 .capture-face-frame {
-  width: min(68%, 340px);
+  height: min(88%, 322px);
+  width: auto;
+  max-width: min(64%, 340px);
   aspect-ratio: 0.84;
   border: 4px solid rgba(255, 255, 255, 0.92);
   border-radius: 999px;
@@ -83,7 +92,8 @@
 
 .capture-placeholder,
 .capture-issue {
-  min-height: 372px;
+  min-height: var(--capture-stage-height);
+  height: 100%;
   display: grid;
   place-items: center;
   padding: 22px;
@@ -136,6 +146,10 @@
 @media (max-width: 900px) {
   .identity-capture-layout {
     grid-template-columns: 1fr;
+  }
+
+  .identity-capture-card {
+    --capture-stage-height: 320px;
   }
 
   .identity-capture-panel-actions > * {

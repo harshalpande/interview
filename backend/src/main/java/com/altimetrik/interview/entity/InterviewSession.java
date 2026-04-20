@@ -3,6 +3,7 @@ package com.altimetrik.interview.entity;
 import com.altimetrik.interview.enums.SessionStatus;
 import com.altimetrik.interview.enums.TechnologySkill;
 import com.altimetrik.interview.enums.FeedbackRating;
+import com.altimetrik.interview.enums.ParticipantRole;
 import com.altimetrik.interview.enums.RecommendationDecision;
 import jakarta.persistence.*;
 import lombok.Data;
@@ -29,6 +30,9 @@ public class InterviewSession {
     private OffsetDateTime interruptedAt;
 
     private OffsetDateTime recoveryDeadlineAt;
+
+    @Enumerated(EnumType.STRING)
+    private ParticipantRole recoveryRequiredRole;
 
     private Boolean suspiciousRejected = false;
 

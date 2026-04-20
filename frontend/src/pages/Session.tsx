@@ -53,9 +53,12 @@ const Session: React.FC = () => {
   const [closeCountdown, setCloseCountdown] = React.useState<number | null>(null);
   const deviceId = React.useMemo(() => getOrCreateDeviceId(), []);
   const suspiciousRejectionNoticeShownRef = React.useRef(false);
+  const interviewerRecoveryTimeoutNoticeShownRef = React.useRef(false);
   const lastTabHiddenAtRef = React.useRef(0);
   const lastBlockedDropAtRef = React.useRef(0);
   const lastCameraStreamIssueRef = React.useRef('');
+  const previousMuteStateRef = React.useRef<boolean | null>(null);
+  const previousCameraStateRef = React.useRef<boolean | null>(null);
   const internalClipboardTextsRef = React.useRef<Map<string, number>>(new Map());
 
   const { data: session, isLoading, error } = useQuery({
@@ -116,6 +119,7 @@ const Session: React.FC = () => {
 
   React.useEffect(() => {
     suspiciousRejectionNoticeShownRef.current = false;
+    interviewerRecoveryTimeoutNoticeShownRef.current = false;
   }, [sessionId]);
 
   React.useEffect(() => {
@@ -156,6 +160,32 @@ const Session: React.FC = () => {
     window.alert(message);
     navigate(`/java/session/${sessionId}?role=interviewer&view=feedback`, { replace: true });
   }, [navigate, role, session, sessionId]);
+
+  React.useEffect(() => {
+    if (
+      role !== 'interviewee' ||
+      !session ||
+      session.status !== 'ENDED' ||
+      session.summary !== 'INCOMPLETE' ||
+      interviewerRecoveryTimeoutNoticeShownRef.current
+    ) {
+      return;
+    }
+
+    const interviewerTimeoutEvent = session.activityEvents?.find((event) =>
+      event.detail.includes('the interviewer did not resume within the 120-second recovery window')
+    );
+    if (!interviewerTimeoutEvent) {
+      return;
+    }
+
+    interviewerRecoveryTimeoutNoticeShownRef.current = true;
+    const interviewerName = interviewer?.name?.trim() || 'the interviewer';
+    window.alert(
+      `${interviewerName} is facing network-associated challenges and could not reconnect within the allowed recovery window. This interview session will now close and be marked as incomplete. Kindly reach out to HR or ${interviewerName} to schedule it again.`
+    );
+    window.location.assign(ALTIMETRIK_REDIRECT_URL);
+  }, [interviewer?.name, role, session]);
 
   const refreshSession = React.useCallback(
     (nextSession: SessionResponse) => {
@@ -265,7 +295,7 @@ const Session: React.FC = () => {
   );
 
   const { isReconnecting, isConnected, sendCode, sendSignal } = useWebSocket(sessionId || '', handleSocketMessage);
-  const isCameraSessionActive = session?.status === 'ACTIVE';
+  const isCameraSessionActive = session?.status === 'CREATED' || session?.status === 'ACTIVE';
   const handleCameraStreamLost = React.useCallback(() => {
     void recordActivityEvent('CAMERA_STREAM_LOST', `${formatPossessiveLabel(intervieweeName)} camera stream was interrupted.`);
   }, [intervieweeName, recordActivityEvent]);
@@ -279,6 +309,9 @@ const Session: React.FC = () => {
     connectionState: cameraConnectionState,
     localStream,
     remoteStream,
+    hasRemoteVideo,
+    isRemoteCameraEnabled,
+    isRemoteMicrophoneEnabled,
     streamError,
     isMuted,
     isCameraEnabled,
@@ -292,7 +325,7 @@ const Session: React.FC = () => {
     incomingSignal,
     sendSignal,
   });
-  const { status: cameraMonitorStatus } = useCameraMonitor({
+  useCameraMonitor({
     enabled: role === 'interviewee' && isCameraSessionActive,
     stream: localStream,
     onStreamLost: handleCameraStreamLost,
@@ -345,7 +378,7 @@ const Session: React.FC = () => {
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
-      navigate('/java');
+      navigate('/');
     },
   });
 
@@ -480,6 +513,37 @@ const Session: React.FC = () => {
     );
   }, [intervieweeName, recordActivityEvent, role, session?.status, streamError]);
 
+  React.useEffect(() => {
+    if (role !== 'interviewee') {
+      previousMuteStateRef.current = isMuted;
+      previousCameraStateRef.current = isCameraEnabled;
+      return;
+    }
+
+    if (session?.status !== 'ACTIVE') {
+      previousMuteStateRef.current = isMuted;
+      previousCameraStateRef.current = isCameraEnabled;
+      return;
+    }
+
+    if (previousMuteStateRef.current === false && isMuted) {
+      void recordActivityEvent(
+        'MICROPHONE_DISABLED_MANUALLY',
+        `${intervieweeName} manually turned off the microphone during the interview.`
+      );
+    }
+
+    if (previousCameraStateRef.current === true && !isCameraEnabled) {
+      void recordActivityEvent(
+        'CAMERA_DISABLED_MANUALLY',
+        `${intervieweeName} manually turned off the camera during the interview.`
+      );
+    }
+
+    previousMuteStateRef.current = isMuted;
+    previousCameraStateRef.current = isCameraEnabled;
+  }, [intervieweeName, isCameraEnabled, isMuted, recordActivityEvent, role, session?.status]);
+
   if (isLoading) {
     return <div className="page-shell"><div className="page-card">Loading session...</div></div>;
   }
@@ -498,6 +562,10 @@ const Session: React.FC = () => {
   const showEditor = session.status !== 'ENDED' && session.status !== 'EXPIRED';
   const showPreStartState = showEditor && session.status !== 'ACTIVE';
   const waitingForFeedback = isInterviewer && session.status === 'ENDED' && !session.feedback;
+  const lockDisqualificationOutcome = waitingForFeedback && Boolean(session.suspiciousRejected);
+  const suspiciousActivityEvents = (session.activityEvents || []).filter((event) =>
+    ['TAB_HIDDEN', 'PASTE_IN_EDITOR', 'EXTERNAL_DROP_BLOCKED', 'CAMERA_STREAM_LOST', 'MICROPHONE_DISABLED_MANUALLY', 'CAMERA_DISABLED_MANUALLY', 'NO_FACE_DETECTED', 'MULTIPLE_FACES_DETECTED'].includes(event.eventType)
+  );
   const waitingJoinLabel = `Waiting for ${interviewee?.name || 'Interviewee'} to join`;
   const hasCompleteFeedback = Boolean(feedback.rating && feedback.recommendationDecision && feedback.comments.trim());
 
@@ -517,42 +585,42 @@ const Session: React.FC = () => {
     : isInterviewer
       ? 'Waiting for the interviewee media stream'
       : 'Waiting for the interviewer media stream';
-  const localMediaStatus = streamError
-    ? streamError
-    : isInterviewer
-      ? `${isMuted ? 'Mic muted' : 'Mic live'} • ${isCameraEnabled ? 'Camera live' : 'Camera off'}`
-      : cameraMonitorStatus === 'multiple-faces'
-        ? 'Mic live • Multiple faces detected'
-        : cameraMonitorStatus === 'no-face'
-          ? 'Mic live • Face not visible'
-          : cameraMonitorStatus === 'stream-lost'
-            ? 'Mic live • Camera interrupted'
-            : cameraMonitorStatus === 'face-checks-unavailable'
-              ? `${isMuted ? 'Mic muted' : 'Mic live'} • Camera active`
-              : `${isMuted ? 'Mic muted' : 'Mic live'} • Camera live`;
   const activeStageClassName = `interviewer-stage ${session.status === 'ACTIVE' ? 'active' : ''}`;
   const activeBannerClassName = `session-banner session-banner-interviewer ${session.status === 'ACTIVE' ? 'active' : ''}`;
+  const counterpart = isInterviewer ? interviewee : interviewer;
+  const counterpartFirstName = isInterviewer ? intervieweeFirstName : interviewerFirstName;
+  const counterpartConnectionStatus = counterpart?.connectionStatus;
+  const hasRtcPresence =
+    cameraConnectionState === 'connected' ||
+    Boolean(remoteStream && (remoteStream.getAudioTracks().length > 0 || remoteStream.getVideoTracks().length > 0));
+  const counterpartDisconnected =
+    session.status === 'ACTIVE' &&
+    Boolean(counterpart) &&
+    counterpartConnectionStatus !== 'CONNECTED' &&
+    !hasRtcPresence;
   const remotePanelTitle = isInterviewer
     ? `${intervieweeFirstName} live stream`
     : `${interviewerFirstName} live stream`;
-  const remoteEmptyMessage = isInterviewer
-    ? 'Waiting for the interviewee audio and camera stream to connect.'
-    : 'Waiting for the interviewer stream to connect.';
-  const remoteVideoStream = remoteStream && remoteStream.getVideoTracks().length > 0 ? remoteStream : null;
+  const remoteEmptyMessage = counterpartDisconnected
+    ? `${counterpartFirstName} is temporarily disconnected. The live stream will resume when they reconnect.`
+    : isInterviewer
+      ? `Waiting for ${intervieweeFirstName} audio and camera stream to connect.`
+      : `Waiting for ${interviewerFirstName} stream to connect.`;
+  const remoteVideoStream = remoteStream && hasRemoteVideo && isRemoteCameraEnabled ? remoteStream : null;
   const localVideoStream = localStream && localStream.getVideoTracks().length > 0 ? localStream : null;
-  const displayedPanelStream =
-    remoteVideoStream ?? localVideoStream;
-  const panelStatus = remoteStream
-    ? interviewerCameraStatus
-    : localStream
-      ? localMediaStatus
-      : streamError || 'Preparing local media';
+  const displayedPanelStream = counterpartDisconnected ? null : remoteVideoStream;
+  const remotePanelAudioStream = counterpartDisconnected || !isRemoteMicrophoneEnabled ? null : remoteStream;
+  const panelStatus = counterpartDisconnected
+    ? `${counterpartFirstName} disconnected`
+    : remoteStream
+      ? interviewerCameraStatus
+      : streamError || `Waiting for ${counterpartFirstName}`;
 
   return (
     <div className={`session-page polished-page ${isFullscreen ? 'fullscreen' : ''}`}>
       {isReconnecting && <div className="reconnecting">Reconnecting to the live session...</div>}
 
-      {!isFullscreen && session.status === 'ACTIVE' ? (
+      {!isFullscreen && showEditor ? (
         <div className={activeStageClassName}>
           <div className={activeBannerClassName}>
             <div className="banner-participants">
@@ -606,7 +674,7 @@ const Session: React.FC = () => {
           <VideoPanel
             title={remotePanelTitle}
             stream={displayedPanelStream}
-            audioStream={remoteStream}
+            audioStream={remotePanelAudioStream}
             status={panelStatus}
             emptyMessage={remoteEmptyMessage}
             mirror={!remoteVideoStream && Boolean(localVideoStream)}
@@ -837,12 +905,29 @@ const Session: React.FC = () => {
                 : 'The editor has been frozen, final code/output have been saved, and your feedback is required before returning to the dashboard.'
               : session.suspiciousRejected
                 ? `${session.suspiciousActivityReason || 'This interview session could not be recovered within the allowed integrity controls.'} You will be redirected shortly.${typeof closeCountdown === 'number' ? ` This page will close in ${closeCountdown}.` : ''}`
-                : `The coding test is now complete. ${interviewer?.name || 'The interviewer'} is submitting the feedback. You can check the results with ${interviewer?.name || 'the interviewer'} or the HR.${typeof closeCountdown === 'number' ? ` This tab will automatically close in ${closeCountdown}.` : ''}`}
+                : session.summary === 'INCOMPLETE'
+                  ? `${interviewer?.name || 'The interviewer'} could not reconnect because of a network or session continuity issue, so this interview has been marked incomplete. Please reach out to HR or ${interviewer?.name || 'the interviewer'} to schedule it again.${typeof closeCountdown === 'number' ? ` This tab will automatically close in ${closeCountdown}.` : ''}`
+                  : `The coding test is now complete. ${interviewer?.name || 'The interviewer'} is submitting the feedback. You can check the results with ${interviewer?.name || 'the interviewer'} or the HR.${typeof closeCountdown === 'number' ? ` This tab will automatically close in ${closeCountdown}.` : ''}`}
           </p>
 
           {waitingForFeedback ? (
             <div className="feedback-section end-screen">
               <div className="feedback-form">
+                {(session.suspiciousActivityReason || suspiciousActivityEvents.length > 0) && (
+                  <div className="feedback-warning-panel">
+                    <div className="feedback-warning-title">Suspicious Activity Signals</div>
+                    {session.suspiciousActivityReason ? <p>{session.suspiciousActivityReason}</p> : null}
+                    {suspiciousActivityEvents.length > 0 ? (
+                      <div className="feedback-warning-events">
+                        {suspiciousActivityEvents.map((event) => (
+                          <div key={event.id} className="feedback-warning-event">
+                            <strong>{formatActivityEventLabel(event.eventType)}:</strong> {event.detail}
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                )}
                 <div className="feedback-field">
                   <label htmlFor="rating">Rating</label>
                   <select
@@ -856,6 +941,7 @@ const Session: React.FC = () => {
                           event.target.value === 'BAD' || event.target.value === 'DISQUALIFIED' ? 'NO' : prev.recommendationDecision,
                       }))
                     }
+                    disabled={lockDisqualificationOutcome}
                   >
                     <option value="">Select rating</option>
                     <option value="EXCELLENT">Excellent</option>
@@ -889,7 +975,7 @@ const Session: React.FC = () => {
                     id="recommendation"
                     value={feedback.recommendationDecision}
                     onChange={(event) => setFeedback((prev) => ({ ...prev, recommendationDecision: event.target.value as RecommendationDecision | '' }))}
-                    disabled={feedback.rating === 'BAD' || feedback.rating === 'DISQUALIFIED'}
+                    disabled={lockDisqualificationOutcome || feedback.rating === 'BAD' || feedback.rating === 'DISQUALIFIED'}
                   >
                     <option value="">Select recommendation</option>
                     <option value="YES">Next round yes</option>
@@ -911,7 +997,7 @@ const Session: React.FC = () => {
           ) : (
             isInterviewer ? (
               <div className="feedback-actions">
-                <button className="control-btn btn-start" onClick={() => navigate('/java')}>
+                <button className="control-btn btn-start" onClick={() => navigate('/')}>
                   Back to Dashboard
                 </button>
               </div>
@@ -967,6 +1053,14 @@ function formatCaptureReason(reason: string) {
 
 function formatResumeReason(reason: string) {
   return reason
+    .toLowerCase()
+    .split('_')
+    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+    .join(' ');
+}
+
+function formatActivityEventLabel(eventType: ActivityEventType) {
+  return eventType
     .toLowerCase()
     .split('_')
     .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))

@@ -7,13 +7,15 @@ export type ActivityEventType =
   | 'PASTE_IN_EDITOR'
   | 'EXTERNAL_DROP_BLOCKED'
   | 'CAMERA_STREAM_LOST'
+  | 'MICROPHONE_DISABLED_MANUALLY'
+  | 'CAMERA_DISABLED_MANUALLY'
   | 'NO_FACE_DETECTED'
   | 'MULTIPLE_FACES_DETECTED';
 export type TechnologySkill = 'JAVA' | 'PYTHON' | 'ANGULAR' | 'REACT' | 'SQL';
 export type RecommendationDecision = 'YES' | 'NO' | 'REEVALUATION';
 export type IdentityCaptureStatus = 'PENDING' | 'SUCCESS' | 'FAILED' | 'SKIPPED';
 export type IdentityCaptureFailureReason = 'NO_CAMERA' | 'PERMISSION_DENIED' | 'CAMERA_IN_USE' | 'UNSUPPORTED' | 'DEVICE_ERROR' | 'USER_SKIPPED' | 'UNKNOWN';
-export type WebRtcSignalType = 'READY' | 'OFFER' | 'ANSWER' | 'ICE_CANDIDATE';
+export type WebRtcSignalType = 'READY' | 'OFFER' | 'ANSWER' | 'ICE_CANDIDATE' | 'MEDIA_STATE';
 export type ResumeReason =
   | 'CONNECTION_RECOVERY'
   | 'BACKEND_REDEPLOY'
@@ -84,6 +86,7 @@ export interface SessionResponse {
   endedAt?: string | null;
   interruptedAt?: string | null;
   recoveryDeadlineAt?: string | null;
+  recoveryRequiredRole?: ParticipantRole | null;
   durationSec: number;
   remainingSec: number;
   extensionUsed: boolean;
@@ -118,6 +121,8 @@ export interface SessionSocketMessage {
   candidate?: string;
   sdpMid?: string | null;
   sdpMLineIndex?: number | null;
+  cameraEnabled?: boolean | null;
+  microphoneEnabled?: boolean | null;
 }
 
 export interface CreateSessionRequest {

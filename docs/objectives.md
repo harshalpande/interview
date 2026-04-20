@@ -12,6 +12,7 @@
 ## Key Features
 
 - Monaco editor with Run/Reset, theme toggle, and `Ctrl+Enter` run shortcut.
+- Two-way live audio/video session controls with pre-start media readiness, interviewer/interviewee toggles, explicit no-video states, and interviewer-visible suspicious activity signals during feedback.
 - Suspicious external drag attempts into the editor are blocked and surfaced as interviewer-visible monitoring activity.
 - Session dashboard with status + summary.
 - Persistent session resume for active interviews, including reconnect/redeploy recovery, interviewer approval for high-risk interviewee resumes, and automatic incomplete handling after interruption timeout.
@@ -32,6 +33,7 @@
 
 ## Future Enhancements
 
+- Shift the next product phase toward performance analysis and future-scope enhancements now that the core AV workflow is complete.
 - Add a program-evaluation engine that compares the interviewee solution with an ideal/reference solution.
   - Phase 1 metrics should focus on:
     - correctness / passed tests

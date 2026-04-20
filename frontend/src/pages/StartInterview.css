@@ -1,0 +1,21 @@
+.start-interview-form {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 16px;
+}
+
+.start-interview-form .form-group {
+  gap: 6px;
+}
+
+.start-interview-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-start;
+  margin-top: 2px;
+}
+
+@media (max-width: 768px) {
+  .start-interview-form {
+    grid-template-columns: 1fr;
+  }
+}

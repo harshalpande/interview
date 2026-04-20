@@ -384,6 +384,30 @@
   gap: 16px;
 }
 
+.feedback-warning-panel {
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid rgba(195, 137, 24, 0.28);
+  background: #fff8e8;
+}
+
+.feedback-warning-title {
+  font-weight: 700;
+  color: #7d5f17;
+  margin-bottom: 8px;
+}
+
+.feedback-warning-events {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.feedback-warning-event {
+  color: #6d5a2a;
+  line-height: 1.55;
+}
+
 .feedback-field {
   display: grid;
   gap: 8px;
