@@ -4,9 +4,7 @@ import com.altimetrik.interview.dto.CompileRequest;
 import com.altimetrik.interview.dto.CompileResponse;
 import com.altimetrik.interview.dto.ExecuteRequest;
 import com.altimetrik.interview.dto.ExecuteResponse;
-import com.altimetrik.interview.service.JavaCompilerService;
-import com.altimetrik.interview.service.JavaCompilerService.CompileResult;
-import com.altimetrik.interview.service.JavaCompilerService.ExecutionResult;
+import com.altimetrik.interview.service.SandboxExecutionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -21,7 +19,7 @@ import org.springframework.web.bind.annotation.RestController;
 @Slf4j
 public class CompilerController {
 
-    private final JavaCompilerService compilerService;
+    private final SandboxExecutionService sandboxExecutionService;
 
     @PostMapping
     public ResponseEntity<CompileResponse> compile(@RequestBody CompileRequest request) {
@@ -35,15 +33,9 @@ public class CompilerController {
                             .build());
         }
 
-        CompileResult result = compilerService.compile(request.getSourceCode());
+        CompileResponse response = sandboxExecutionService.compile(request);
 
-        CompileResponse response = CompileResponse.builder()
-                .success(result.isSuccess())
-                .compileErrors(result.getErrors())
-                .message(result.isSuccess() ? "Compilation successful" : "Compilation failed")
-                .build();
-
-        log.info("Compile response: success={}", result.isSuccess());
+        log.info("Compile response: success={}, language={}", response.isSuccess(), request.getLanguage());
         return ResponseEntity.ok(response);
     }
 
@@ -60,45 +52,15 @@ public class CompilerController {
                             .build());
         }
 
-        long timeoutMs = request.getTimeoutMs() > 0
-                ? request.getTimeoutMs()
-                : JavaCompilerService.defaultTimeoutMs();
-        long memoryMb = request.getMemoryLimitMb() > 0
-                ? Math.min(request.getMemoryLimitMb(), JavaCompilerService.maxMemoryMb())
-                : JavaCompilerService.defaultMemoryMb();
+        ExecuteResponse response = sandboxExecutionService.execute(request);
 
-        ExecutionResult result = compilerService.execute(request.getSourceCode(), timeoutMs, memoryMb);
-
-        ExecuteResponse response = ExecuteResponse.builder()
-                .success(result.isSuccess())
-                .stdout(result.getStdout())
-                .stderr(result.getStderr())
-                .compileErrors(result.getCompileErrors())
-                .exitCode(result.getExitCode())
-                .executionTimeMs(result.getExecutionTimeMs())
-                .message(buildMessage(result))
-                .build();
-
-        log.info("Execute response: success={}, exitCode={}, executionTime={}ms",
-                result.isSuccess(), result.getExitCode(), result.getExecutionTimeMs());
+        log.info("Execute response: success={}, exitCode={}, executionTime={}ms, language={}",
+                response.isSuccess(), response.getExitCode(), response.getExecutionTimeMs(), request.getLanguage());
         return ResponseEntity.ok(response);
     }
 
     @PostMapping("/execute")
     public ResponseEntity<ExecuteResponse> executeAlias(@RequestBody ExecuteRequest request) {
         return execute(request);
-    }
-
-    private String buildMessage(ExecutionResult result) {
-        if (!result.getCompileErrors().isEmpty()) {
-            return "Compilation failed";
-        }
-        if (!result.isSuccess()) {
-            return result.getErrorMessage();
-        }
-        if (result.getExitCode() != 0) {
-            return "Execution completed with exit code: " + result.getExitCode();
-        }
-        return "Execution successful";
     }
 }

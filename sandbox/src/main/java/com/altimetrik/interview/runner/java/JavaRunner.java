@@ -1,8 +1,12 @@
-package com.altimetrik.interview.service;
+package com.altimetrik.interview.runner.java;
 
+import com.altimetrik.interview.enums.ExecutionLanguage;
+import com.altimetrik.interview.runner.LanguageRunner;
+import com.altimetrik.interview.runner.model.RunnerCompileResult;
+import com.altimetrik.interview.runner.model.RunnerExecutionResult;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.io.FileUtils;
-import org.springframework.stereotype.Service;
+import org.springframework.stereotype.Component;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -13,7 +17,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -24,9 +27,9 @@ import java.util.concurrent.TimeoutException;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-@Service
+@Component
 @Slf4j
-public class JavaCompilerService {
+public class JavaRunner implements LanguageRunner {
 
     private static final String TEMP_DIR_PREFIX = "java-compiler-";
     private static final long DEFAULT_MEMORY_MB = 512;
@@ -41,7 +44,13 @@ public class JavaCompilerService {
 
     private record EntryPoint(String runClassName, Path sourceFile, Path classFile) {}
 
-    public CompileResult compile(String sourceCode) {
+    @Override
+    public boolean supports(ExecutionLanguage language) {
+        return language == ExecutionLanguage.JAVA;
+    }
+
+    @Override
+    public RunnerCompileResult compile(String sourceCode) {
         Path workDir = null;
         try {
             workDir = Files.createTempDirectory(TEMP_DIR_PREFIX);
@@ -51,13 +60,14 @@ public class JavaCompilerService {
             return compileWithJavac(workDir, entryPoint.sourceFile());
         } catch (Exception e) {
             log.error("Compilation error", e);
-            return CompileResult.failure(List.of(e.getMessage()));
+            return RunnerCompileResult.failure(List.of(e.getMessage()));
         } finally {
             cleanupWorkDir(workDir);
         }
     }
 
-    public ExecutionResult execute(String sourceCode, long timeoutMs, long memoryLimitMb) {
+    @Override
+    public RunnerExecutionResult execute(String sourceCode, long timeoutMs, long memoryLimitMb) {
         long effectiveTimeoutMs = sanitizeTimeoutMs(timeoutMs);
         long effectiveMemoryLimitMb = sanitizeMemoryLimitMb(memoryLimitMb);
         Path workDir = null;
@@ -66,18 +76,30 @@ public class JavaCompilerService {
             log.debug("Created temp directory: {}", workDir);
 
             EntryPoint entryPoint = writeSourceFile(workDir, sourceCode);
-            CompileResult compileResult = compileWithJavac(workDir, entryPoint.sourceFile());
+            RunnerCompileResult compileResult = compileWithJavac(workDir, entryPoint.sourceFile());
             if (!compileResult.isSuccess()) {
-                return ExecutionResult.compilationFailed(compileResult.getErrors());
+                return RunnerExecutionResult.compilationFailed(compileResult.getErrors());
             }
 
             return executeCompiledClass(workDir, effectiveTimeoutMs, effectiveMemoryLimitMb, entryPoint.runClassName(), entryPoint.classFile());
         } catch (Exception e) {
             log.error("Execution error", e);
-            return ExecutionResult.error(e.getMessage());
+            return RunnerExecutionResult.error(e.getMessage());
         } finally {
             cleanupWorkDir(workDir);
         }
+    }
+
+    public static long defaultTimeoutMs() {
+        return DEFAULT_TIMEOUT_MS;
+    }
+
+    public static long defaultMemoryMb() {
+        return DEFAULT_MEMORY_MB;
+    }
+
+    public static long maxMemoryMb() {
+        return MAX_MEMORY_MB;
     }
 
     private void cleanupWorkDir(Path workDir) {
@@ -126,7 +148,7 @@ public class JavaCompilerService {
         return null;
     }
 
-    private CompileResult compileWithJavac(Path workDir, Path sourceFile) throws IOException {
+    private RunnerCompileResult compileWithJavac(Path workDir, Path sourceFile) throws IOException {
         String cp = buildClasspath(workDir);
         log.debug("Classpath: {}", cp);
 
@@ -149,27 +171,27 @@ public class JavaCompilerService {
             int exitCode = process.waitFor();
             if (exitCode == 0) {
                 log.debug("Compilation successful");
-                return CompileResult.success();
+                return RunnerCompileResult.success();
             }
 
             List<String> errors = parseCompilationErrors(output);
             log.warn("Compilation failed with errors: {}", errors);
-            return CompileResult.failure(errors);
+            return RunnerCompileResult.failure(errors);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             log.error("Compilation interrupted", e);
-            return CompileResult.failure(List.of("Compilation timeout"));
+            return RunnerCompileResult.failure(List.of("Compilation timeout"));
         }
     }
 
-    private ExecutionResult executeCompiledClass(Path workDir, long timeoutMs, long memoryLimitMb, String runClassName, Path classFile)
+    private RunnerExecutionResult executeCompiledClass(Path workDir, long timeoutMs, long memoryLimitMb, String runClassName, Path classFile)
             throws IOException {
         if (runClassName == null || runClassName.isBlank()) {
-            return ExecutionResult.error("Main class name is missing");
+            return RunnerExecutionResult.error("Main class name is missing");
         }
 
         if (classFile == null || !classFile.toFile().exists()) {
-            return ExecutionResult.error("Compiled class file not found");
+            return RunnerExecutionResult.error("Compiled class file not found");
         }
 
         List<String> command = buildJavaCommand(workDir, memoryLimitMb, runClassName);
@@ -192,7 +214,7 @@ public class JavaCompilerService {
                 process.destroyForcibly();
                 executor.shutdownNow();
                 log.warn("Execution timeout after {}ms", timeoutMs);
-                return ExecutionResult.timeout(timeoutMs);
+                return RunnerExecutionResult.timeout(timeoutMs);
             }
 
             String stdout = stdoutFuture.get(1, TimeUnit.SECONDS);
@@ -202,17 +224,17 @@ public class JavaCompilerService {
             executor.shutdown();
 
             log.debug("Execution completed with exit code: {}", exitCode);
-            return ExecutionResult.success(stdout, stderr, exitCode, executionTime);
+            return RunnerExecutionResult.success(stdout, stderr, exitCode, executionTime);
         } catch (ExecutionException e) {
             log.error("Task execution failed", e);
-            return ExecutionResult.error("Failed during output reading: " + e.getCause().getMessage());
+            return RunnerExecutionResult.error("Failed during output reading: " + e.getCause().getMessage());
         } catch (TimeoutException e) {
             log.error("Output reading timeout", e);
-            return ExecutionResult.error("Failed to read execution output");
+            return RunnerExecutionResult.error("Failed to read execution output");
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             log.error("Execution interrupted", e);
-            return ExecutionResult.error("Execution interrupted");
+            return RunnerExecutionResult.error("Execution interrupted");
         }
     }
 
@@ -225,18 +247,6 @@ public class JavaCompilerService {
         command.add(buildClasspath(workDir));
         command.add(className);
         return command;
-    }
-
-    public static long defaultTimeoutMs() {
-        return DEFAULT_TIMEOUT_MS;
-    }
-
-    public static long defaultMemoryMb() {
-        return DEFAULT_MEMORY_MB;
-    }
-
-    public static long maxMemoryMb() {
-        return MAX_MEMORY_MB;
     }
 
     private long sanitizeTimeoutMs(long timeoutMs) {
@@ -316,97 +326,5 @@ public class JavaCompilerService {
             }
         }
         return errors.isEmpty() ? List.of(output) : errors;
-    }
-
-    public static class CompileResult {
-        private final boolean success;
-        private final List<String> errors;
-
-        private CompileResult(boolean success, List<String> errors) {
-            this.success = success;
-            this.errors = errors != null ? errors : Collections.emptyList();
-        }
-
-        public static CompileResult success() {
-            return new CompileResult(true, Collections.emptyList());
-        }
-
-        public static CompileResult failure(List<String> errors) {
-            return new CompileResult(false, errors);
-        }
-
-        public boolean isSuccess() {
-            return success;
-        }
-
-        public List<String> getErrors() {
-            return errors;
-        }
-    }
-
-    public static class ExecutionResult {
-        private final boolean success;
-        private final String stdout;
-        private final String stderr;
-        private final List<String> compileErrors;
-        private final int exitCode;
-        private final long executionTimeMs;
-        private final String errorMessage;
-
-        private ExecutionResult(boolean success, String stdout, String stderr,
-                                List<String> compileErrors, int exitCode,
-                                long executionTimeMs, String errorMessage) {
-            this.success = success;
-            this.stdout = stdout != null ? stdout : "";
-            this.stderr = stderr != null ? stderr : "";
-            this.compileErrors = compileErrors != null ? compileErrors : Collections.emptyList();
-            this.exitCode = exitCode;
-            this.executionTimeMs = executionTimeMs;
-            this.errorMessage = errorMessage != null ? errorMessage : "";
-        }
-
-        public static ExecutionResult success(String stdout, String stderr, int exitCode, long executionTimeMs) {
-            return new ExecutionResult(true, stdout, stderr, Collections.emptyList(), exitCode, executionTimeMs, "");
-        }
-
-        public static ExecutionResult compilationFailed(List<String> errors) {
-            return new ExecutionResult(false, "", "", errors, -1, 0, "Compilation failed");
-        }
-
-        public static ExecutionResult timeout(long timeoutMs) {
-            return new ExecutionResult(false, "", "", Collections.emptyList(), -1, timeoutMs, "Execution timeout");
-        }
-
-        public static ExecutionResult error(String message) {
-            return new ExecutionResult(false, "", "", Collections.emptyList(), -1, 0, message);
-        }
-
-        public boolean isSuccess() {
-            return success;
-        }
-
-        public String getStdout() {
-            return stdout;
-        }
-
-        public String getStderr() {
-            return stderr;
-        }
-
-        public List<String> getCompileErrors() {
-            return compileErrors;
-        }
-
-        public int getExitCode() {
-            return exitCode;
-        }
-
-        public long getExecutionTimeMs() {
-            return executionTimeMs;
-        }
-
-        public String getErrorMessage() {
-            return errorMessage;
-        }
     }
 }

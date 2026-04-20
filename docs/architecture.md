@@ -33,7 +33,8 @@ flowchart LR
 ### Compile & Run
 - Frontend posts Java source to the main backend using the existing `/api/compile` contract.
 - Backend proxies compile/run requests to the dedicated sandbox service.
-- Sandbox writes the source to a temp directory, compiles via `javac`, and executes via `java`.
+- Sandbox routes execution through `SandboxExecutionService -> LanguageRunner -> JavaRunner`.
+- The Java runner writes the source to a temp directory, compiles via `javac`, and executes via `java`.
 - Sandbox captures stdout/stderr/compile errors and returns them to the backend.
 
 ## Persistence
