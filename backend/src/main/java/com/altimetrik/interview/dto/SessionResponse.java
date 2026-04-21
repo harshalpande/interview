@@ -24,6 +24,7 @@ public class SessionResponse {
     private Boolean readOnly;
     private List<ParticipantDto> participants;
     private String latestCode;
+    private List<EditableCodeFileDto> codeFiles;
     private Long codeVersion;
     private RunResultDto finalRunResult;
     private FeedbackDto feedback;
@@ -37,4 +38,6 @@ public class SessionResponse {
     private Boolean suspiciousRejected;
     private String suspiciousScenarioKey;
     private String suspiciousActivityReason;
+    private FrontendWorkspaceDto frontendWorkspace;
+    private String finalPreviewUrl;
 }

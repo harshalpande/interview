@@ -5,7 +5,8 @@
 This repo contains a small interview platform:
 - `frontend/`: React + TypeScript (Monaco editor UI)
 - `backend/`: Spring Boot (REST + WebSocket + H2 persistence)
-- `sandbox/`: Spring Boot compile/run service for execution isolation
+- `sandbox-backend/`: Spring Boot compile/run service for Java and Python execution isolation
+- `sandbox-frontend/`: Spring Boot persistent frontend sandbox for Angular/React workspaces, preview hosting, and warm builds
 
 ## Run With Docker (Recommended)
 
@@ -29,14 +30,17 @@ docker compose up -d --build
 ```
 
 3) URLs (Docker):
-- UI: `http://localhost/`
+- UI: `http://localhost:3000/`
 - Backend API: `http://localhost:8081/api`
-- Sandbox API: `http://localhost:8082/api`
+- Sandbox Backend API: `http://localhost:8082/api`
+- Sandbox Frontend API: `http://localhost:8083/api`
 - H2 Console: `http://localhost:8081/api/h2-console`
 - Backend Swagger: `http://localhost:8081/api/swagger-ui.html`
-- Sandbox Swagger: `http://localhost:8082/api/swagger-ui.html`
+- Sandbox Backend Swagger: `http://localhost:8082/api/swagger-ui.html`
+- Sandbox Frontend Swagger: `http://localhost:8083/api/swagger-ui.html`
 - Backend Health: `http://localhost:8081/api/actuator/health`
-- Sandbox Health: `http://localhost:8082/api/actuator/health`
+- Sandbox Backend Health: `http://localhost:8082/api/actuator/health`
+- Sandbox Frontend Health: `http://localhost:8083/api/actuator/health`
 
 Backend runs with Spring profile `docker` (file-based H2 DB stored at `/data/interviewdb` inside the container, bind-mounted to the Windows folder above).
 
@@ -50,9 +54,9 @@ cd backend
 mvn spring-boot:run
 ```
 
-Sandbox (port 8082):
+Sandbox Backend (port 8082):
 ```powershell
-cd sandbox
+cd sandbox-backend
 mvn spring-boot:run "-Dspring-boot.run.arguments=--server.port=8082"
 ```
 
@@ -63,15 +67,24 @@ npm install
 npm start
 ```
 
+Sandbox Frontend (port 8083):
+```powershell
+cd sandbox-frontend
+mvn spring-boot:run "-Dspring-boot.run.arguments=--server.port=8083"
+```
+
 URLs (Local):
 - UI: `http://localhost:3000`
 - Backend API: `http://localhost:8080/api`
-- Sandbox API: `http://localhost:8082/api`
+- Sandbox Backend API: `http://localhost:8082/api`
+- Sandbox Frontend API: `http://localhost:8083/api`
 - H2 Console: `http://localhost:8080/api/h2-console`
 - Backend Swagger: `http://localhost:8080/api/swagger-ui.html`
-- Sandbox Swagger: `http://localhost:8082/api/swagger-ui.html`
+- Sandbox Backend Swagger: `http://localhost:8082/api/swagger-ui.html`
+- Sandbox Frontend Swagger: `http://localhost:8083/api/swagger-ui.html`
 - Backend Health: `http://localhost:8080/api/actuator/health`
-- Sandbox Health: `http://localhost:8082/api/actuator/health`
+- Sandbox Backend Health: `http://localhost:8082/api/actuator/health`
+- Sandbox Frontend Health: `http://localhost:8083/api/actuator/health`
 
 ## Database Profiles
 
@@ -113,3 +126,4 @@ REACT_APP_PUBLIC_ORIGIN=http://alti-karat.com:3000
 
 - `docker compose up -d --build` rebuilds images and recreates containers if needed.
 - Your bind-mounted DB files are only deleted if you delete the Windows folder contents (or change the mount path).
+- Frontend result previews are stored as final immutable artifacts under the bind-mounted storage root before the live frontend workspace is cleaned up.

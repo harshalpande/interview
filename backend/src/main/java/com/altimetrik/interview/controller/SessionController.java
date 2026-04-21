@@ -256,6 +256,21 @@ public class SessionController {
                 .body(resource.resource());
     }
 
+    @GetMapping({"/{id}/final-preview", "/{id}/final-preview/", "/{id}/final-preview/**"})
+    public ResponseEntity<org.springframework.core.io.Resource> getFinalPreview(@PathVariable String id,
+                                                                                 HttpServletRequest request) {
+        String assetPath = extractFinalPreviewAssetPath(request, id);
+        SessionService.ResourceWithMetadata resource = sessionService.getFinalPreviewResource(id, assetPath);
+        MediaType contentType = resource.contentType() == null || resource.contentType().isBlank()
+                ? MediaType.APPLICATION_OCTET_STREAM
+                : MediaType.parseMediaType(resource.contentType());
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CACHE_CONTROL, "no-store")
+                .header("X-Content-Type-Options", "nosniff")
+                .contentType(contentType)
+                .body(resource.resource());
+    }
+
     @MessageMapping("/session/{id}/code")
     public void handleCodeUpdate(@DestinationVariable String id, @Valid CodeUpdateRequest request) {
         SessionResponse response = sessionService.updateCodeState(id, request);
@@ -306,5 +321,20 @@ public class SessionController {
             return forwardedFor.split(",")[0].trim();
         }
         return request.getRemoteAddr();
+    }
+
+    private String extractFinalPreviewAssetPath(HttpServletRequest request, String sessionId) {
+        String requestUri = request.getRequestURI();
+        String marker = "/sessions/" + sessionId + "/final-preview";
+        int markerIndex = requestUri.indexOf(marker);
+        if (markerIndex < 0) {
+            return "";
+        }
+
+        String suffix = requestUri.substring(markerIndex + marker.length());
+        if (suffix.startsWith("/")) {
+            suffix = suffix.substring(1);
+        }
+        return suffix;
     }
 }

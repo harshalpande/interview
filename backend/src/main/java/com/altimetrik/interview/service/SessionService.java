@@ -5,11 +5,15 @@ import com.altimetrik.interview.dto.ActivityEventDto;
 import com.altimetrik.interview.dto.ActivityEventRequest;
 import com.altimetrik.interview.dto.CreateSessionRequest;
 import com.altimetrik.interview.dto.CodeUpdateRequest;
+import com.altimetrik.interview.dto.EditableCodeFileDto;
 import com.altimetrik.interview.dto.EndSessionRequest;
 import com.altimetrik.interview.dto.ExecuteRequest;
 import com.altimetrik.interview.dto.ExecuteResponse;
 import com.altimetrik.interview.dto.FeedbackDto;
 import com.altimetrik.interview.dto.FeedbackRequest;
+import com.altimetrik.interview.dto.FrontendWorkspaceDto;
+import com.altimetrik.interview.dto.FrontendWorkspaceRequest;
+import com.altimetrik.interview.dto.FrontendWorkspaceResponse;
 import com.altimetrik.interview.dto.HeartbeatRequest;
 import com.altimetrik.interview.dto.JoinSessionRequest;
 import com.altimetrik.interview.dto.JoinTokenResponse;
@@ -22,15 +26,19 @@ import com.altimetrik.interview.dto.RunResultDto;
 import com.altimetrik.interview.dto.SessionResponse;
 import com.altimetrik.interview.dto.ValidateTokenResponse;
 import com.altimetrik.interview.entity.CodeState;
+import com.altimetrik.interview.entity.CodeFile;
 import com.altimetrik.interview.entity.Feedback;
+import com.altimetrik.interview.entity.FrontendWorkspace;
 import com.altimetrik.interview.entity.InterviewSession;
 import com.altimetrik.interview.entity.Participant;
 import com.altimetrik.interview.entity.RunResult;
 import com.altimetrik.interview.entity.SessionActivityEvent;
 import com.altimetrik.interview.entity.SessionToken;
 import com.altimetrik.interview.enums.ActivityEventType;
+import com.altimetrik.interview.enums.CodeStorageMode;
 import com.altimetrik.interview.enums.ExecutionLanguage;
 import com.altimetrik.interview.enums.FeedbackRating;
+import com.altimetrik.interview.enums.FrontendWorkspaceStatus;
 import com.altimetrik.interview.enums.IdentityCaptureFailureReason;
 import com.altimetrik.interview.enums.IdentityCaptureStatus;
 import com.altimetrik.interview.enums.ParticipantConnectionStatus;
@@ -39,8 +47,10 @@ import com.altimetrik.interview.enums.RecommendationDecision;
 import com.altimetrik.interview.enums.ResumeReason;
 import com.altimetrik.interview.enums.SessionStatus;
 import com.altimetrik.interview.enums.TechnologySkill;
+import com.altimetrik.interview.repository.CodeFileRepository;
 import com.altimetrik.interview.repository.CodeStateRepository;
 import com.altimetrik.interview.repository.FeedbackRepository;
+import com.altimetrik.interview.repository.FrontendWorkspaceRepository;
 import com.altimetrik.interview.repository.ParticipantRepository;
 import com.altimetrik.interview.repository.RunResultRepository;
 import com.altimetrik.interview.repository.SessionActivityEventRepository;
@@ -48,10 +58,13 @@ import com.altimetrik.interview.repository.SessionRepository;
 import com.altimetrik.interview.repository.SessionTokenRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -79,12 +92,18 @@ import java.util.UUID;
 @Slf4j
 public class SessionService {
 
+    @PersistenceContext
+    private EntityManager entityManager;
+
     private static final int DEFAULT_DURATION_SEC = 60 * 60;
     private static final int MAX_DURATION_SEC = 75 * 60;
     private static final int EXTENSION_SEC = 15 * 60;
     private static final int EXTENSION_THRESHOLD_SEC = 15 * 60;
     private static final int RECOVERY_WINDOW_SEC = 120;
     private static final int TOKEN_EXPIRY_MINUTES = 5;
+    private static final int MAX_WORKSPACE_FILE_COUNT = 20;
+    private static final int MAX_WORKSPACE_TOTAL_CHARS = 300_000;
+    private static final int MAX_WORKSPACE_FILE_CHARS = 100_000;
     private static final String SCENARIO_REFRESH = "REFRESH_OR_REOPEN";
     private static final String SCENARIO_CONNECTION = "CONNECTION_RECOVERY";
     private static final String SCENARIO_NETWORK = "NETWORK_CHANGE";
@@ -125,16 +144,101 @@ public class SessionService {
             if __name__ == "__main__":
                 main()
             """;
+    private static final String DEFAULT_ANGULAR_COMPONENT_TS = """
+            import { Component } from '@angular/core';
+            import { CommonModule } from '@angular/common';
+
+            @Component({
+              selector: 'app-root',
+              standalone: true,
+              imports: [CommonModule],
+              templateUrl: './app.component.html',
+              styleUrl: './app.component.css'
+            })
+            export class AppComponent {
+              title = 'Angular interview sandbox';
+            }
+            """;
+    private static final String DEFAULT_ANGULAR_COMPONENT_HTML = """
+            <main class="app-shell">
+              <h1>{{ title }}</h1>
+              <p>Start building your Angular solution here.</p>
+            </main>
+            """;
+    private static final String DEFAULT_ANGULAR_COMPONENT_CSS = """
+            .app-shell {
+              display: grid;
+              gap: 12px;
+              padding: 24px;
+              font-family: Arial, sans-serif;
+            }
+
+            h1 {
+              margin: 0;
+              color: #0f3d59;
+            }
+
+            p {
+              margin: 0;
+              color: #4f6474;
+            }
+            """;
+    private static final String DEFAULT_REACT_APP_TSX = """
+            import './App.css';
+
+            export default function App() {
+              return (
+                <main className="app-shell">
+                  <h1>React interview sandbox</h1>
+                  <p>Start building your React solution here.</p>
+                </main>
+              );
+            }
+            """;
+    private static final String DEFAULT_REACT_APP_CSS = """
+            .app-shell {
+              display: grid;
+              gap: 12px;
+              padding: 24px;
+              font-family: Arial, sans-serif;
+            }
+
+            h1 {
+              margin: 0;
+              color: #0f3d59;
+            }
+
+            p {
+              margin: 0;
+              color: #4f6474;
+            }
+            """;
+    private static final String DEFAULT_REACT_MAIN_TSX = """
+            import React from 'react';
+            import ReactDOM from 'react-dom/client';
+            import App from './App';
+            import './index.css';
+
+            ReactDOM.createRoot(document.getElementById('root')!).render(
+              <React.StrictMode>
+                <App />
+              </React.StrictMode>
+            );
+            """;
 
     private final SessionRepository sessionRepository;
     private final ParticipantRepository participantRepository;
     private final SessionTokenRepository sessionTokenRepository;
+    private final CodeFileRepository codeFileRepository;
     private final CodeStateRepository codeStateRepository;
     private final RunResultRepository runResultRepository;
     private final FeedbackRepository feedbackRepository;
+    private final FrontendWorkspaceRepository frontendWorkspaceRepository;
     private final SessionActivityEventRepository sessionActivityEventRepository;
     private final SandboxClientService sandboxClientService;
+    private final FrontendSandboxClientService frontendSandboxClientService;
     private final IdentitySnapshotStorageService identitySnapshotStorageService;
+    private final FinalPreviewStorageService finalPreviewStorageService;
 
     @Transactional
     public SessionResponse createSession(CreateSessionRequest request) {
@@ -153,10 +257,12 @@ public class SessionService {
         CodeState codeState = new CodeState();
         codeState.setSessionId(session.getId());
         codeState.setLatestCode(defaultTemplateFor(session.getTechnology()));
+        codeState.setStorageMode(storageModeFor(session.getTechnology()));
         codeState.setUpdatedAt(nowUtc());
         codeState.setUpdatedByRole(ParticipantRole.INTERVIEWER.name());
         codeState.setVersion(0L);
         codeStateRepository.save(codeState);
+        replaceCodeFiles(session.getId(), buildDefaultEditableFiles(session.getTechnology()));
 
         JoinTokenResponse joinInfo = createJoinToken(session.getId());
 
@@ -166,9 +272,10 @@ public class SessionService {
         return toSessionResponse(persisted, true, joinInfo);
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public SessionResponse getSession(String id) {
         InterviewSession session = getRequiredSession(id);
+        ensureFrontendWorkspaceIfNeeded(session);
         return toSessionResponse(session, true, getActiveJoinInfo(id));
     }
 
@@ -446,6 +553,7 @@ public class SessionService {
         participantRepository.save(interviewee);
         clearRecoveryWindow(session);
         sessionRepository.save(session);
+        ensureFrontendWorkspaceIfNeeded(session);
         saveSystemActivityEvent(sessionId, ParticipantRole.INTERVIEWER, ActivityEventType.TAB_HIDDEN,
                 "Interviewer approved the interviewee resume request.");
         return toSessionResponse(session, true, getActiveJoinInfo(sessionId));
@@ -500,6 +608,7 @@ public class SessionService {
             clearRecoveryWindow(session);
             sessionRepository.save(session);
         }
+        ensureFrontendWorkspaceIfNeeded(session);
         return toSessionResponse(session, true, getActiveJoinInfo(sessionId));
     }
 
@@ -562,6 +671,7 @@ public class SessionService {
 
         clearRecoveryWindow(session);
         sessionRepository.save(session);
+        ensureFrontendWorkspaceIfNeeded(session);
         return toSessionResponse(session, true, null);
     }
 
@@ -609,19 +719,29 @@ public class SessionService {
 
     @Transactional
     public SessionResponse endSession(String sessionId, EndSessionRequest request) {
-        return endSession(sessionId, request.getFinalCode(), null);
+        return endSession(sessionId, request.getFinalCode(), request.getCodeFiles(), null);
     }
 
     @Transactional
     public SessionResponse endSession(String sessionId, String finalCode, FeedbackRequest feedbackRequest) {
+        return endSession(sessionId, finalCode, null, feedbackRequest);
+    }
+
+    @Transactional
+    public SessionResponse endSession(String sessionId, String finalCode, List<EditableCodeFileDto> codeFiles, FeedbackRequest feedbackRequest) {
         InterviewSession session = getRequiredSession(sessionId);
         if (session.getStatus() == SessionStatus.ENDED) {
             throw new IllegalArgumentException("Session is already ended");
         }
+        validateWorkspaceFiles(session.getTechnology(), codeFiles);
 
-        upsertCodeState(sessionId, finalCode, ParticipantRole.INTERVIEWER);
+        CodeUpdateRequest codeUpdateRequest = new CodeUpdateRequest();
+        codeUpdateRequest.setCode(finalCode);
+        codeUpdateRequest.setCodeFiles(codeFiles);
+        codeUpdateRequest.setUpdatedByRole(ParticipantRole.INTERVIEWER);
+        upsertCodeState(sessionId, codeUpdateRequest);
 
-        ExecuteResponse executionResult = sandboxClientService.execute(buildExecuteRequest(finalCode, session.getTechnology()));
+        ExecuteResponse executionResult = sandboxClientService.execute(buildExecuteRequest(sessionId, finalCode, codeFiles, session.getTechnology()));
         RunResult runResult = runResultRepository.findTopBySessionIdOrderByCompiledAtDesc(sessionId).orElseGet(RunResult::new);
         runResult.setSessionId(sessionId);
         runResult.setStdout(executionResult.getStdout());
@@ -630,6 +750,7 @@ public class SessionService {
                 : executionResult.getStderr());
         runResult.setExitStatus(executionResult.getExitCode());
         runResultRepository.save(runResult);
+        captureFinalPreviewIfAvailable(session, executionResult);
 
         if (feedbackRequest != null) {
             submitFeedback(sessionId, feedbackRequest);
@@ -639,6 +760,7 @@ public class SessionService {
         session.setStatus(SessionStatus.ENDED);
         clearRecoveryWindow(session);
         sessionRepository.save(session);
+        cleanupFrontendWorkspaceIfNeeded(session);
         return toSessionResponse(session, true, null);
     }
 
@@ -651,7 +773,7 @@ public class SessionService {
 
         upsertCodeState(sessionId, finalCode == null ? "" : finalCode, ParticipantRole.INTERVIEWER);
 
-        ExecuteResponse executionResult = sandboxClientService.execute(buildExecuteRequest(finalCode == null ? "" : finalCode, session.getTechnology()));
+        ExecuteResponse executionResult = sandboxClientService.execute(buildExecuteRequest(sessionId, finalCode == null ? "" : finalCode, null, session.getTechnology()));
         RunResult runResult = runResultRepository.findTopBySessionIdOrderByCompiledAtDesc(sessionId).orElseGet(RunResult::new);
         runResult.setSessionId(sessionId);
         runResult.setStdout(executionResult.getStdout());
@@ -660,12 +782,14 @@ public class SessionService {
                 : executionResult.getStderr());
         runResult.setExitStatus(executionResult.getExitCode());
         runResultRepository.save(runResult);
+        captureFinalPreviewIfAvailable(session, executionResult);
 
         session.setIncomplete(true);
         session.setEndedAt(nowUtc());
         session.setStatus(SessionStatus.ENDED);
         clearRecoveryWindow(session);
         sessionRepository.save(session);
+        cleanupFrontendWorkspaceIfNeeded(session);
 
         return toSessionResponse(session, true, null);
     }
@@ -684,6 +808,7 @@ public class SessionService {
         if (session.getStatus() == SessionStatus.ENDED || session.getStatus() == SessionStatus.EXPIRED) {
             throw new IllegalArgumentException("Session is read-only");
         }
+        validateWorkspaceFiles(session.getTechnology(), request.getCodeFiles());
         upsertCodeState(sessionId, request);
         return toSessionResponse(session, true, getActiveJoinInfo(sessionId));
     }
@@ -1040,6 +1165,28 @@ public class SessionService {
         return new ResourceWithMetadata(resource, participant.getIdentitySnapshotMimeType());
     }
 
+    @Transactional(readOnly = true)
+    public ResourceWithMetadata getFinalPreviewResource(String sessionId, String assetPath) {
+        InterviewSession session = getRequiredSession(sessionId);
+        log.info("Loading final preview resource for session {} finalPreviewPath={} assetPath={}",
+                sessionId,
+                session.getFinalPreviewPath(),
+                assetPath);
+        var resource = finalPreviewStorageService.loadPreviewResource(
+                session.getFinalPreviewPath(),
+                assetPath == null ? "" : assetPath.replaceFirst("^/", "")
+        );
+        if (resource == null || !resource.exists()) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Final preview not found");
+        }
+
+        try {
+            return new ResourceWithMetadata(resource, finalPreviewStorageService.detectContentType(resource));
+        } catch (IOException exception) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Final preview could not be loaded", exception);
+        }
+    }
+
     private JoinTokenResponse createJoinToken(String sessionId) {
         SessionToken token = new SessionToken();
         token.setSessionId(sessionId);
@@ -1117,12 +1264,16 @@ public class SessionService {
         if (request.getVersion() != null && codeState.getVersion() != null && request.getVersion() < codeState.getVersion()) {
             throw new IllegalArgumentException("Code version is stale");
         }
+        CodeStorageMode storageMode = resolveStorageMode(codeState, request);
+        List<EditableCodeFileDto> editableFiles = resolveEditableFilesForUpdate(sessionId, request, storageMode, codeState);
         codeState.setSessionId(sessionId);
-        codeState.setLatestCode(request.getCode());
+        codeState.setLatestCode(resolvePrimaryCode(editableFiles, request.getCode()));
+        codeState.setStorageMode(storageMode);
         codeState.setUpdatedAt(nowUtc());
         codeState.setUpdatedByRole(request.getUpdatedByRole().name());
         codeState.setVersion(codeState.getVersion() == null ? 1L : codeState.getVersion() + 1);
         codeStateRepository.save(codeState);
+        replaceCodeFiles(sessionId, editableFiles);
     }
 
     private SessionResponse toSessionResponse(InterviewSession session, boolean includeDetails, JoinTokenResponse joinInfo) {
@@ -1131,8 +1282,10 @@ public class SessionService {
                 .toList();
 
         CodeState codeState = codeStateRepository.findBySessionId(session.getId()).orElse(null);
+        List<EditableCodeFileDto> editableFiles = includeDetails ? resolveEditableFiles(session, codeState) : List.of();
         RunResult runResult = runResultRepository.findTopBySessionIdOrderByCompiledAtDesc(session.getId()).orElse(null);
         Feedback feedback = feedbackRepository.findBySessionId(session.getId()).orElse(null);
+        FrontendWorkspace frontendWorkspace = frontendWorkspaceRepository.findById(session.getId()).orElse(null);
         List<ActivityEventDto> activityEvents = includeDetails
                 ? sessionActivityEventRepository.findBySessionIdOrderByCreatedAtAsc(session.getId()).stream()
                         .map(this::toActivityEventDto)
@@ -1155,6 +1308,7 @@ public class SessionService {
                 .readOnly(session.getStatus() == SessionStatus.ENDED || session.getStatus() == SessionStatus.EXPIRED)
                 .participants(participants)
                 .latestCode(includeDetails && codeState != null ? codeState.getLatestCode() : null)
+                .codeFiles(editableFiles)
                 .codeVersion(codeState != null ? codeState.getVersion() : 0L)
                 .finalRunResult(runResult == null ? null : RunResultDto.builder()
                         .compiledAt(runResult.getCompiledAt())
@@ -1180,6 +1334,8 @@ public class SessionService {
                 .suspiciousRejected(Boolean.TRUE.equals(session.getSuspiciousRejected()))
                 .suspiciousScenarioKey(session.getSuspiciousScenarioKey())
                 .suspiciousActivityReason(session.getSuspiciousActivityReason())
+                .frontendWorkspace(frontendWorkspace == null ? null : toFrontendWorkspaceDto(frontendWorkspace))
+                .finalPreviewUrl(resolveFinalPreviewUrl(session))
                 .build();
     }
 
@@ -1272,18 +1428,401 @@ public class SessionService {
         return timeZone == null || timeZone.isBlank() ? null : timeZone.trim();
     }
 
-    private ExecuteRequest buildExecuteRequest(String sourceCode, TechnologySkill technology) {
+    private void ensureFrontendWorkspaceIfNeeded(InterviewSession session) {
+        if (!supportsPersistentFrontendWorkspace(session.getTechnology())) {
+            return;
+        }
+        if (session.getStatus() == SessionStatus.ENDED || session.getStatus() == SessionStatus.EXPIRED) {
+            return;
+        }
+
+        List<EditableCodeFileDto> editableFiles = resolveEditableFiles(session, codeStateRepository.findBySessionId(session.getId()).orElse(null));
+        try {
+            FrontendWorkspaceResponse response = frontendSandboxClientService.getWorkspaceBySessionId(session.getId());
+            if (response == null) {
+                response = frontendSandboxClientService.createWorkspace(FrontendWorkspaceRequest.builder()
+                        .sessionId(session.getId())
+                        .language(toExecutionLanguage(session.getTechnology()))
+                        .files(editableFiles)
+                        .build());
+            }
+            upsertFrontendWorkspace(session, response);
+        } catch (ResponseStatusException exception) {
+            log.warn("Frontend workspace could not be created for session {} technology={}. Falling back to cold-build flow for now.",
+                    session.getId(), session.getTechnology(), exception);
+        }
+    }
+
+    private void cleanupFrontendWorkspaceIfNeeded(InterviewSession session) {
+        if (!supportsPersistentFrontendWorkspace(session.getTechnology())) {
+            return;
+        }
+
+        frontendWorkspaceRepository.findById(session.getId()).ifPresent(workspace -> {
+            try {
+                frontendSandboxClientService.deleteWorkspace(workspace.getWorkspaceId());
+            } catch (ResponseStatusException exception) {
+                log.warn("Frontend workspace {} could not be deleted cleanly for session {}", workspace.getWorkspaceId(), session.getId(), exception);
+            }
+
+            workspace.setStatus(FrontendWorkspaceStatus.STOPPED);
+            workspace.setUpdatedAt(nowUtc());
+            frontendWorkspaceRepository.save(workspace);
+        });
+    }
+
+    private void captureFinalPreviewIfAvailable(InterviewSession session, ExecuteResponse executionResult) {
+        if (!supportsFinalPreview(session.getTechnology())) {
+            log.info("Skipping final preview capture for session {} because technology {} does not support it",
+                    session.getId(), session.getTechnology());
+            session.setFinalPreviewPath(null);
+            return;
+        }
+        if (!hasDurableFrontendPreview(executionResult)) {
+            log.info("Skipping final preview capture for session {} because the final build result is not durable: success={} exitCode={} previewUrl={} stderrLength={} compileErrorCount={}",
+                    session.getId(),
+                    executionResult != null && executionResult.isSuccess(),
+                    executionResult == null ? null : executionResult.getExitCode(),
+                    executionResult == null ? null : executionResult.getPreviewUrl(),
+                    executionResult == null || executionResult.getStderr() == null ? 0 : executionResult.getStderr().length(),
+                    executionResult == null || executionResult.getCompileErrors() == null ? 0 : executionResult.getCompileErrors().size());
+            session.setFinalPreviewPath(null);
+            return;
+        }
+
+        try {
+            log.info("Capturing final {} preview for session {} from previewUrl={}",
+                    session.getTechnology(),
+                    session.getId(),
+                    executionResult.getPreviewUrl());
+            byte[] archive = frontendSandboxClientService.downloadPreviewArchive(executionResult.getPreviewUrl());
+            if (archive == null || archive.length == 0) {
+                log.warn("Final frontend preview archive was unavailable for session {}", session.getId());
+                session.setFinalPreviewPath(null);
+                return;
+            }
+
+            String storedPath = finalPreviewStorageService.storePreviewArchive(session.getId(), archive);
+            session.setFinalPreviewPath(storedPath);
+            log.info("Stored final {} preview snapshot for session {} at {}", session.getTechnology(), session.getId(), storedPath);
+        } catch (IOException | ResponseStatusException exception) {
+            log.warn("Final frontend preview could not be stored for session {}", session.getId(), exception);
+            session.setFinalPreviewPath(null);
+        }
+    }
+
+    private boolean hasDurableFrontendPreview(ExecuteResponse executionResult) {
+        if (executionResult == null || !executionResult.isSuccess() || executionResult.getExitCode() != 0) {
+            return false;
+        }
+        if (executionResult.getPreviewUrl() == null || executionResult.getPreviewUrl().isBlank()) {
+            return false;
+        }
+        if (executionResult.getStderr() != null && !executionResult.getStderr().isBlank()) {
+            return false;
+        }
+        return executionResult.getCompileErrors() == null || executionResult.getCompileErrors().isEmpty();
+    }
+
+    private String resolveFinalPreviewUrl(InterviewSession session) {
+        if (session.getFinalPreviewPath() == null || session.getFinalPreviewPath().isBlank()) {
+            log.info("Final preview URL unavailable for session {} because finalPreviewPath is empty", session.getId());
+            return null;
+        }
+        String finalPreviewUrl = "/api/sessions/" + session.getId() + "/final-preview/";
+        log.info("Resolved final preview URL for session {} finalPreviewPath={} finalPreviewUrl={}",
+                session.getId(),
+                session.getFinalPreviewPath(),
+                finalPreviewUrl);
+        return finalPreviewUrl;
+    }
+
+    private void upsertFrontendWorkspace(InterviewSession session, FrontendWorkspaceResponse response) {
+        OffsetDateTime now = nowUtc();
+        FrontendWorkspace workspace = frontendWorkspaceRepository.findById(session.getId()).orElseGet(FrontendWorkspace::new);
+        applyFrontendWorkspaceState(workspace, session, response, now);
+        try {
+            frontendWorkspaceRepository.saveAndFlush(workspace);
+        } catch (DataIntegrityViolationException exception) {
+            // Another concurrent request created the row first; reload and converge on that row.
+            log.debug("Retrying frontend workspace upsert after duplicate insert for session {}", session.getId(), exception);
+            entityManager.clear();
+            FrontendWorkspace existing = frontendWorkspaceRepository.findById(session.getId()).orElseGet(FrontendWorkspace::new);
+            applyFrontendWorkspaceState(existing, session, response, now);
+            frontendWorkspaceRepository.saveAndFlush(existing);
+        }
+    }
+
+    private void applyFrontendWorkspaceState(FrontendWorkspace workspace,
+                                             InterviewSession session,
+                                             FrontendWorkspaceResponse response,
+                                             OffsetDateTime now) {
+        workspace.setSessionId(session.getId());
+        workspace.setWorkspaceId(response.getWorkspaceId());
+        workspace.setTechnology(session.getTechnology());
+        workspace.setStatus(resolveFrontendWorkspaceStatus(response.getStatus()));
+        workspace.setPreviewUrl(response.getPreviewPath());
+        workspace.setSandboxInstance("sandbox-frontend");
+        workspace.setCreatedAt(response.getCreatedAt() == null ? (workspace.getCreatedAt() == null ? now : workspace.getCreatedAt()) : response.getCreatedAt());
+        workspace.setUpdatedAt(response.getUpdatedAt() == null ? now : response.getUpdatedAt());
+        workspace.setLastHeartbeatAt(response.getLastHeartbeatAt());
+    }
+
+    private FrontendWorkspaceDto toFrontendWorkspaceDto(FrontendWorkspace workspace) {
+        return FrontendWorkspaceDto.builder()
+                .sessionId(workspace.getSessionId())
+                .workspaceId(workspace.getWorkspaceId())
+                .technology(workspace.getTechnology())
+                .status(workspace.getStatus())
+                .previewUrl(workspace.getPreviewUrl())
+                .createdAt(workspace.getCreatedAt())
+                .updatedAt(workspace.getUpdatedAt())
+                .lastHeartbeatAt(workspace.getLastHeartbeatAt())
+                .build();
+    }
+
+    private FrontendWorkspaceStatus resolveFrontendWorkspaceStatus(String status) {
+        if (status == null || status.isBlank()) {
+            return FrontendWorkspaceStatus.READY;
+        }
+        try {
+            return FrontendWorkspaceStatus.valueOf(status.toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException ignored) {
+            return FrontendWorkspaceStatus.READY;
+        }
+    }
+
+    private ExecuteRequest buildExecuteRequest(String sessionId,
+                                              String sourceCode,
+                                              List<EditableCodeFileDto> codeFiles,
+                                              TechnologySkill technology) {
         ExecuteRequest request = new ExecuteRequest(sourceCode);
+        request.setSessionId(sessionId);
         request.setLanguage(toExecutionLanguage(technology));
+        if (supportsPersistentFrontendWorkspace(technology)) {
+            request.setCodeFiles(codeFiles != null && !codeFiles.isEmpty()
+                    ? codeFiles
+                    : codeFileRepository.findBySessionIdOrderBySortOrderAscCreatedAtAsc(sessionId).stream()
+                            .map(this::toEditableCodeFileDto)
+                            .toList());
+        }
         return request;
     }
 
     private ExecutionLanguage toExecutionLanguage(TechnologySkill technology) {
-        return technology == TechnologySkill.PYTHON ? ExecutionLanguage.PYTHON : ExecutionLanguage.JAVA;
+        return switch (technology) {
+            case PYTHON -> ExecutionLanguage.PYTHON;
+            case ANGULAR -> ExecutionLanguage.ANGULAR;
+            case REACT -> ExecutionLanguage.REACT;
+            default -> ExecutionLanguage.JAVA;
+        };
     }
 
     private String defaultTemplateFor(TechnologySkill technology) {
-        return technology == TechnologySkill.PYTHON ? DEFAULT_PYTHON_TEMPLATE : DEFAULT_JAVA_TEMPLATE;
+        return switch (technology) {
+            case PYTHON -> DEFAULT_PYTHON_TEMPLATE;
+            case ANGULAR -> DEFAULT_ANGULAR_COMPONENT_TS;
+            case REACT -> DEFAULT_REACT_APP_TSX;
+            default -> DEFAULT_JAVA_TEMPLATE;
+        };
+    }
+
+    private CodeStorageMode storageModeFor(TechnologySkill technology) {
+        return switch (technology) {
+            case ANGULAR, REACT -> CodeStorageMode.MULTI_FILE;
+            default -> CodeStorageMode.SINGLE_FILE;
+        };
+    }
+
+    private List<EditableCodeFileDto> buildDefaultEditableFiles(TechnologySkill technology) {
+        return switch (technology) {
+            case PYTHON -> List.of(buildEditableFile("main.py", "main.py", DEFAULT_PYTHON_TEMPLATE, 0));
+            case ANGULAR -> List.of(
+                    buildEditableFile("src/app/app.component.ts", "app.component.ts", DEFAULT_ANGULAR_COMPONENT_TS, 0),
+                    buildEditableFile("src/app/app.component.html", "app.component.html", DEFAULT_ANGULAR_COMPONENT_HTML, 1),
+                    buildEditableFile("src/app/app.component.css", "app.component.css", DEFAULT_ANGULAR_COMPONENT_CSS, 2)
+            );
+            case REACT -> List.of(
+                    buildEditableFile("src/App.tsx", "App.tsx", DEFAULT_REACT_APP_TSX, 0),
+                    buildEditableFile("src/App.css", "App.css", DEFAULT_REACT_APP_CSS, 1),
+                    buildEditableFile("src/main.tsx", "main.tsx", DEFAULT_REACT_MAIN_TSX, 2)
+            );
+            default -> List.of(buildEditableFile("Solution.java", "Solution.java", DEFAULT_JAVA_TEMPLATE, 0));
+        };
+    }
+
+    private EditableCodeFileDto buildEditableFile(String path, String displayName, String content, int sortOrder) {
+        return EditableCodeFileDto.builder()
+                .path(path)
+                .displayName(displayName)
+                .content(content)
+                .editable(true)
+                .sortOrder(sortOrder)
+                .build();
+    }
+
+    private CodeStorageMode resolveStorageMode(CodeState codeState, CodeUpdateRequest request) {
+        if (request.getCodeFiles() != null && !request.getCodeFiles().isEmpty()) {
+            return CodeStorageMode.MULTI_FILE;
+        }
+        if (codeState.getStorageMode() != null) {
+            return codeState.getStorageMode();
+        }
+        return CodeStorageMode.SINGLE_FILE;
+    }
+
+    private List<EditableCodeFileDto> resolveEditableFilesForUpdate(String sessionId,
+                                                                    CodeUpdateRequest request,
+                                                                    CodeStorageMode storageMode,
+                                                                    CodeState codeState) {
+        if (request.getCodeFiles() != null && !request.getCodeFiles().isEmpty()) {
+            return request.getCodeFiles().stream()
+                    .map(this::normalizeEditableFile)
+                    .toList();
+        }
+        if (storageMode == CodeStorageMode.MULTI_FILE) {
+            List<EditableCodeFileDto> existingFiles = codeFileRepository.findBySessionIdOrderBySortOrderAscCreatedAtAsc(sessionId).stream()
+                    .map(this::toEditableCodeFileDto)
+                    .toList();
+            if (!existingFiles.isEmpty()) {
+                return existingFiles;
+            }
+        }
+        return List.of(buildEditableFile(resolveDefaultFilePath(codeState), resolveDefaultFileName(codeState), request.getCode() == null ? "" : request.getCode(), 0));
+    }
+
+    private String resolveDefaultFilePath(CodeState codeState) {
+        return codeState.getStorageMode() == CodeStorageMode.MULTI_FILE ? "src/app/app.component.ts" : "main.txt";
+    }
+
+    private String resolveDefaultFileName(CodeState codeState) {
+        return codeState.getStorageMode() == CodeStorageMode.MULTI_FILE ? "app.component.ts" : "main.txt";
+    }
+
+    private EditableCodeFileDto normalizeEditableFile(EditableCodeFileDto file) {
+        return EditableCodeFileDto.builder()
+                .path(file.getPath())
+                .displayName(file.getDisplayName() == null || file.getDisplayName().isBlank() ? file.getPath() : file.getDisplayName())
+                .content(file.getContent() == null ? "" : file.getContent())
+                .editable(file.getEditable() == null ? true : file.getEditable())
+                .sortOrder(file.getSortOrder() == null ? 0 : file.getSortOrder())
+                .build();
+    }
+
+    private void validateWorkspaceFiles(TechnologySkill technology, List<EditableCodeFileDto> files) {
+        if (files == null || files.isEmpty()) {
+            return;
+        }
+
+        if (files.size() > MAX_WORKSPACE_FILE_COUNT) {
+            throw new IllegalArgumentException("Too many editable files in the workspace");
+        }
+
+        LinkedHashSet<String> seenPaths = new LinkedHashSet<>();
+        int totalChars = 0;
+        for (EditableCodeFileDto file : files) {
+            String path = file.getPath() == null ? "" : file.getPath().replace('\\', '/').trim();
+            if (path.isBlank()) {
+                throw new IllegalArgumentException("Each editable file must include a valid path");
+            }
+            if (!seenPaths.add(path)) {
+                throw new IllegalArgumentException("Duplicate file path detected: " + path);
+            }
+
+            String content = file.getContent() == null ? "" : file.getContent();
+            if (content.length() > MAX_WORKSPACE_FILE_CHARS) {
+                throw new IllegalArgumentException("File is too large: " + path);
+            }
+            totalChars += content.length();
+
+            if (technology == TechnologySkill.ANGULAR) {
+                if (!path.startsWith("src/app/")) {
+                    throw new IllegalArgumentException("Only src/app files are editable for Angular interviews");
+                }
+                if (!(path.endsWith(".ts") || path.endsWith(".html") || path.endsWith(".css"))) {
+                    throw new IllegalArgumentException("Only .ts, .html, and .css files are supported for Angular interviews");
+                }
+            } else if (technology == TechnologySkill.REACT) {
+                if (!path.startsWith("src/")) {
+                    throw new IllegalArgumentException("Only src files are editable for React interviews");
+                }
+                if (!(path.endsWith(".tsx") || path.endsWith(".ts") || path.endsWith(".css"))) {
+                    throw new IllegalArgumentException("Only .tsx, .ts, and .css files are supported for React interviews");
+                }
+            }
+        }
+
+        if (totalChars > MAX_WORKSPACE_TOTAL_CHARS) {
+            throw new IllegalArgumentException("Workspace content is too large");
+        }
+    }
+
+    private String resolvePrimaryCode(List<EditableCodeFileDto> editableFiles, String fallbackCode) {
+        if (editableFiles != null && !editableFiles.isEmpty()) {
+            return editableFiles.get(0).getContent();
+        }
+        return fallbackCode;
+    }
+
+    private boolean supportsPersistentFrontendWorkspace(TechnologySkill technology) {
+        return technology == TechnologySkill.ANGULAR || technology == TechnologySkill.REACT;
+    }
+
+    private boolean supportsFinalPreview(TechnologySkill technology) {
+        return supportsPersistentFrontendWorkspace(technology);
+    }
+
+    private void replaceCodeFiles(String sessionId, List<EditableCodeFileDto> editableFiles) {
+        codeFileRepository.deleteAllBySessionId(sessionId);
+        codeFileRepository.flush();
+        List<CodeFile> persistedFiles = editableFiles.stream()
+                .map(file -> {
+                    CodeFile codeFile = new CodeFile();
+                    codeFile.setSessionId(sessionId);
+                    codeFile.setFilePath(file.getPath());
+                    codeFile.setDisplayName(file.getDisplayName());
+                    codeFile.setContent(file.getContent());
+                    codeFile.setSortOrder(file.getSortOrder());
+                    codeFile.setEditable(Boolean.TRUE.equals(file.getEditable()));
+                    return codeFile;
+                })
+                .toList();
+        codeFileRepository.saveAll(persistedFiles);
+    }
+
+    private List<EditableCodeFileDto> resolveEditableFiles(InterviewSession session, CodeState codeState) {
+        List<EditableCodeFileDto> persistedFiles = codeFileRepository.findBySessionIdOrderBySortOrderAscCreatedAtAsc(session.getId()).stream()
+                .map(this::toEditableCodeFileDto)
+                .toList();
+        if (!persistedFiles.isEmpty()) {
+            return persistedFiles;
+        }
+        if (codeState == null || codeState.getLatestCode() == null) {
+            return List.of();
+        }
+        List<EditableCodeFileDto> defaults = buildDefaultEditableFiles(session.getTechnology());
+        if (defaults.isEmpty()) {
+            return List.of();
+        }
+        List<EditableCodeFileDto> legacyFiles = new ArrayList<>();
+        for (EditableCodeFileDto file : defaults) {
+            if (file.getSortOrder() != null && file.getSortOrder() == 0) {
+                legacyFiles.add(buildEditableFile(file.getPath(), file.getDisplayName(), codeState.getLatestCode(), 0));
+            } else {
+                legacyFiles.add(file);
+            }
+        }
+        return legacyFiles;
+    }
+
+    private EditableCodeFileDto toEditableCodeFileDto(CodeFile file) {
+        return EditableCodeFileDto.builder()
+                .path(file.getFilePath())
+                .displayName(file.getDisplayName())
+                .content(file.getContent())
+                .editable(file.getEditable())
+                .sortOrder(file.getSortOrder())
+                .build();
     }
 
     private RecommendationDecision resolveRecommendationDecision(Feedback feedback) {

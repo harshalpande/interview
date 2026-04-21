@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { sessionApi } from '../services/sessionApi';
 import { Button } from '../components/Button';
 import { formatDateTime } from '../utils/dateTime';
+import type { EditableCodeFile } from '../types/session';
 
 import './Result.css';
 
@@ -15,15 +16,73 @@ const STATUS_LABELS: Record<string, string> = {
   EXPIRED: 'Expired',
 };
 
+const ANGULAR_PACKAGE_JSON = `{
+  "name": "interview-angular-sandbox",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "build": "ng build"
+  },
+  "dependencies": {
+    "@angular/common": "~21.2.0",
+    "@angular/compiler": "~21.2.0",
+    "@angular/core": "~21.2.0",
+    "@angular/platform-browser": "~21.2.0",
+    "rxjs": "^7.8.0",
+    "tslib": "^2.8.0",
+    "zone.js": "~0.15.0"
+  },
+  "devDependencies": {
+    "@angular/build": "~21.2.0",
+    "@angular/cli": "~21.2.0",
+    "@angular/compiler-cli": "~21.2.0",
+    "typescript": "~5.9.0"
+  }
+}
+`;
+
+const REACT_PACKAGE_JSON = `{
+  "name": "interview-react-sandbox",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "build": "vite build"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.1",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10"
+  }
+}
+`;
+
 const Result: React.FC = () => {
   const { sessionId } = useParams<{ sessionId: string }>();
   const navigate = useNavigate();
+  const [activeCodePath, setActiveCodePath] = React.useState<string>('');
 
   const { data: session, isLoading } = useQuery({
     queryKey: ['session', sessionId],
     queryFn: () => sessionApi.getSession(sessionId!),
     enabled: !!sessionId,
   });
+  const isFrontendWorkspaceSession = session?.technology === 'ANGULAR' || session?.technology === 'REACT';
+  const hasSuccessfulFrontendPreview = Boolean(isFrontendWorkspaceSession && session?.finalPreviewUrl);
+  const resultCodeFiles = React.useMemo(
+    () => buildResultCodeFiles(session?.technology || '', session?.codeFiles, session?.latestCode || ''),
+    [session?.codeFiles, session?.latestCode, session?.technology]
+  );
+  const activeCodeFile = React.useMemo(
+    () => resultCodeFiles.find((file) => file.path === activeCodePath) ?? resultCodeFiles[0] ?? null,
+    [activeCodePath, resultCodeFiles]
+  );
 
   React.useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -35,6 +94,17 @@ const Result: React.FC = () => {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [navigate]);
+
+  React.useEffect(() => {
+    if (!resultCodeFiles.length) {
+      setActiveCodePath('');
+      return;
+    }
+
+    setActiveCodePath((previous) => (
+      resultCodeFiles.some((file) => file.path === previous) ? previous : resultCodeFiles[0].path
+    ));
+  }, [resultCodeFiles]);
 
   if (isLoading) return <div className="page-shell"><div className="page-card">Loading result...</div></div>;
   if (!session) return <div className="page-shell"><div className="page-card">Session not found</div></div>;
@@ -172,7 +242,31 @@ const Result: React.FC = () => {
 
           <section className="result-panel">
             <h3>Final Code</h3>
-            <pre className="result-pre code-pre">{session.latestCode || '(no code captured)'}</pre>
+            {isFrontendWorkspaceSession && resultCodeFiles.length > 0 ? (
+              <div className="result-code-workspace">
+                <div className="result-code-tabs" role="tablist" aria-label={`Final ${session.technology} workspace files`}>
+                  {resultCodeFiles.map((file) => {
+                    const isActive = file.path === activeCodePath;
+                    return (
+                      <button
+                        key={file.path}
+                        type="button"
+                        role="tab"
+                        aria-selected={isActive}
+                        className={`result-code-tab ${isActive ? 'is-active' : ''} ${file.editable ? '' : 'is-readonly'}`}
+                        onClick={() => setActiveCodePath(file.path)}
+                      >
+                        <span>{file.displayName}</span>
+                        {!file.editable ? <span className="result-code-tab-meta">Read only</span> : null}
+                      </button>
+                    );
+                  })}
+                </div>
+                <pre className="result-pre code-pre workspace-code-pre">{activeCodeFile?.content || '(no code captured)'}</pre>
+              </div>
+            ) : (
+              <pre className="result-pre code-pre">{session.latestCode || '(no code captured)'}</pre>
+            )}
           </section>
 
           <section className="result-panel">
@@ -184,6 +278,19 @@ const Result: React.FC = () => {
             <h3>Final Errors</h3>
             <pre className="result-pre">{session.finalRunResult?.stderr || '(no errors)'}</pre>
           </section>
+
+          {hasSuccessfulFrontendPreview && (
+            <section className="result-panel">
+              <h3>Final Preview</h3>
+              <div className="result-preview">
+                <iframe
+                  title={`Final ${session.technology} Preview`}
+                  src={session.finalPreviewUrl!}
+                  className="result-preview-frame"
+                />
+              </div>
+            </section>
+          )}
         </div>
       )}
     </div>
@@ -191,6 +298,39 @@ const Result: React.FC = () => {
 };
 
 export default Result;
+
+function buildResultCodeFiles(technology: string, codeFiles: EditableCodeFile[] | undefined, latestCode: string) {
+  if (technology !== 'ANGULAR' && technology !== 'REACT') {
+    return [];
+  }
+
+  const persistedFiles = (codeFiles || []).map((file) => ({ ...file }));
+  const files = persistedFiles.length > 0
+    ? persistedFiles
+    : [{
+        path: technology === 'REACT' ? 'src/App.tsx' : 'src/app/app.component.ts',
+        displayName: technology === 'REACT' ? 'App.tsx' : 'app.component.ts',
+        content: latestCode || '',
+        editable: true,
+        sortOrder: 0,
+      }];
+
+  if (!files.some((file) => file.path === 'package.json')) {
+    files.push({
+      path: 'package.json',
+      displayName: 'package.json',
+      content: technology === 'REACT' ? REACT_PACKAGE_JSON : ANGULAR_PACKAGE_JSON,
+      editable: false,
+      sortOrder: 999,
+    });
+  }
+
+  return [...files].sort((left, right) => {
+    if (left.path === 'package.json') return -1;
+    if (right.path === 'package.json') return 1;
+    return (left.sortOrder ?? 0) - (right.sortOrder ?? 0);
+  });
+}
 
 function formatRecommendation(value: string) {
   return value === 'REEVALUATION'

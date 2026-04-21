@@ -43,7 +43,9 @@ class CompilerApiClient {
       // Set default values
       const executeRequest = {
         sourceCode: request.sourceCode,
+        sessionId: request.sessionId,
         language: request.language || 'JAVA',
+        codeFiles: request.codeFiles,
         timeoutMs: request.timeoutMs || 5000,
         memoryLimitMb: request.memoryLimitMb || 512,
       };

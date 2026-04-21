@@ -2,7 +2,8 @@ HELP.md
 
 # Backend (Maven & Java)
 backend/target/
-sandbox/target/
+sandbox-backend/target/
+sandbox-frontend/target/
 backend/.mvn/wrapper/maven-wrapper.jar
 backend/.apt_generated
 backend/.classpath

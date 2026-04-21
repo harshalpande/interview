@@ -4,24 +4,47 @@ import './Console.css';
 interface ConsoleProps {
   stdout: string;
   stderr: string;
+  previewUrl?: string | null;
 }
 
-const Console: React.FC<ConsoleProps> = ({ stdout, stderr }) => {
-  const [activeTab, setActiveTab] = React.useState<'output' | 'error'>(() => {
+const Console: React.FC<ConsoleProps> = ({ stdout, stderr, previewUrl }) => {
+  const hasOutput = stdout.trim().length > 0;
+  const hasError = stderr.trim().length > 0;
+  const hasPreview = Boolean(previewUrl);
+  const [activeTab, setActiveTab] = React.useState<'output' | 'error' | 'preview'>(() => {
     if (stderr) return 'error';
+    if (previewUrl) return 'preview';
     return 'output';
+  });
+  const previousFlagsRef = React.useRef({
+    hasError,
+    hasPreview,
   });
 
   React.useEffect(() => {
-    if (stderr && activeTab === 'output') {
-      setActiveTab('error');
-    } else if (!stderr && activeTab === 'error') {
-      setActiveTab('output');
-    }
-  }, [activeTab, stderr]);
+    const previousFlags = previousFlagsRef.current;
 
-  const hasOutput = stdout.trim().length > 0;
-  const hasError = stderr.trim().length > 0;
+    if (hasError && !previousFlags.hasError) {
+      setActiveTab('error');
+    } else if (hasPreview && !previousFlags.hasPreview && !hasError) {
+      setActiveTab('preview');
+    } else if (activeTab === 'preview' && !hasPreview) {
+      setActiveTab(hasError ? 'error' : 'output');
+    } else if (activeTab === 'error' && !hasError) {
+      setActiveTab(hasPreview ? 'preview' : 'output');
+    }
+
+    previousFlagsRef.current = {
+      hasError,
+      hasPreview,
+    };
+  }, [activeTab, hasError, hasPreview]);
+
+  React.useEffect(() => {
+    if (previewUrl) {
+      console.info('[angular-preview] preview url', previewUrl);
+    }
+  }, [previewUrl]);
 
   return (
     <div className="console">
@@ -44,6 +67,17 @@ const Console: React.FC<ConsoleProps> = ({ stdout, stderr }) => {
             {hasError && <span className="tab-indicator error">&#9679;</span>}
           </span>
         </button>
+        {hasPreview && (
+          <button
+            className={`console-tab ${activeTab === 'preview' ? 'active' : ''}`}
+            onClick={() => setActiveTab('preview')}
+          >
+            <span className="tab-label">
+              Preview
+              <span className="tab-indicator preview">&#9679;</span>
+            </span>
+          </button>
+        )}
       </div>
 
       <div className="console-content">
@@ -56,6 +90,16 @@ const Console: React.FC<ConsoleProps> = ({ stdout, stderr }) => {
           <pre className={`console-text error-text ${hasError ? '' : 'empty'}`}>
             {hasError ? stderr.replace(/\\n/g, '\n') : '(no errors)'}
           </pre>
+        )}
+        {activeTab === 'preview' && hasPreview && (
+          <div className="console-preview">
+            <iframe
+              title="Frontend Preview"
+              src={previewUrl!}
+              className="console-preview-frame"
+              onLoad={() => console.info('[frontend-preview] iframe loaded', previewUrl)}
+            />
+          </div>
         )}
       </div>
     </div>

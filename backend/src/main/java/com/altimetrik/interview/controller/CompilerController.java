@@ -10,6 +10,7 @@ import com.altimetrik.interview.dto.CompileRequest;
 import com.altimetrik.interview.dto.CompileResponse;
 import com.altimetrik.interview.dto.ExecuteRequest;
 import com.altimetrik.interview.dto.ExecuteResponse;
+import com.altimetrik.interview.enums.ExecutionLanguage;
 import com.altimetrik.interview.service.SandboxClientService;
 
 import lombok.RequiredArgsConstructor;
@@ -62,11 +63,11 @@ public class CompilerController {
         log.info("Received execute request with timeout={}ms, memory={}MB", 
                  request.getTimeoutMs(), request.getMemoryLimitMb());
         
-        if (request.getSourceCode() == null || request.getSourceCode().trim().isEmpty()) {
+        if (!hasExecutablePayload(request)) {
             return ResponseEntity.badRequest()
                     .body(ExecuteResponse.builder()
                             .success(false)
-                            .message("Source code cannot be empty")
+                            .message("Source code or editable files are required")
                             .build());
         }
 
@@ -83,6 +84,13 @@ public class CompilerController {
     @PostMapping("/execute")
     public ResponseEntity<ExecuteResponse> executeAlias(@RequestBody ExecuteRequest request) {
         return execute(request);
+    }
+
+    private boolean hasExecutablePayload(ExecuteRequest request) {
+        if (request.getLanguage() == ExecutionLanguage.ANGULAR || request.getLanguage() == ExecutionLanguage.REACT) {
+            return request.getCodeFiles() != null && !request.getCodeFiles().isEmpty();
+        }
+        return request.getSourceCode() != null && !request.getSourceCode().trim().isEmpty();
     }
 
 }

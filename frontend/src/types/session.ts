@@ -24,6 +24,7 @@ export type ResumeReason =
   | 'DEVICE_CHANGE'
   | 'TAB_OR_BROWSER_CLOSED'
   | 'MANUAL_RESUME';
+export type FrontendWorkspaceStatus = 'READY' | 'FAILED' | 'STOPPED';
 
 export interface Participant {
   role: ParticipantRole;
@@ -62,6 +63,17 @@ export interface RunResult {
   exitStatus: number;
 }
 
+export interface FrontendWorkspace {
+  sessionId: string;
+  workspaceId: string;
+  technology: TechnologySkill;
+  status: FrontendWorkspaceStatus;
+  previewUrl?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  lastHeartbeatAt?: string | null;
+}
+
 export interface Feedback {
   rating: FeedbackRating;
   comments: string;
@@ -75,6 +87,14 @@ export interface ActivityEvent {
   eventType: ActivityEventType;
   detail: string;
   createdAt: string;
+}
+
+export interface EditableCodeFile {
+  path: string;
+  displayName: string;
+  content: string;
+  editable: boolean;
+  sortOrder: number;
 }
 
 export interface SessionResponse {
@@ -93,6 +113,7 @@ export interface SessionResponse {
   readOnly: boolean;
   participants: Participant[];
   latestCode?: string | null;
+  codeFiles?: EditableCodeFile[];
   codeVersion: number;
   finalRunResult?: RunResult | null;
   feedback?: Feedback | null;
@@ -100,6 +121,8 @@ export interface SessionResponse {
   activityEvents?: ActivityEvent[];
   joinInfo?: JoinInfo | null;
   summary?: string | null;
+  frontendWorkspace?: FrontendWorkspace | null;
+  finalPreviewUrl?: string | null;
   suspiciousRejected?: boolean;
   suspiciousScenarioKey?: string | null;
   suspiciousActivityReason?: string | null;
@@ -185,6 +208,7 @@ export interface DisconnectParticipantRequest {
   deviceId: string;
   reason: ResumeReason;
   finalCode?: string;
+  codeFiles?: EditableCodeFile[];
 }
 
 export interface FeedbackRequest {
@@ -195,6 +219,7 @@ export interface FeedbackRequest {
 
 export interface EndSessionRequest {
   finalCode: string;
+  codeFiles?: EditableCodeFile[];
 }
 
 export interface ActivityEventRequest {

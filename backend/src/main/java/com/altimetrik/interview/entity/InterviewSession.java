@@ -64,4 +64,6 @@ public class InterviewSession {
     
     @Enumerated(EnumType.STRING)
     private SessionStatus status = SessionStatus.CREATED;
+
+    private String finalPreviewPath;
 }

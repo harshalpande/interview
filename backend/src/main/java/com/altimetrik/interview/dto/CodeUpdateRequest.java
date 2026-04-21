@@ -1,13 +1,13 @@
 package com.altimetrik.interview.dto;
 
 import com.altimetrik.interview.enums.ParticipantRole;
-import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 
+import java.util.List;
+
 @Data
 public class CodeUpdateRequest {
-    @NotBlank
     private String code;
 
     @NotNull
@@ -15,4 +15,6 @@ public class CodeUpdateRequest {
 
     @NotNull
     private ParticipantRole updatedByRole;
+
+    private List<EditableCodeFileDto> codeFiles;
 }

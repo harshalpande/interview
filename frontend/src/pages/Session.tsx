@@ -11,7 +11,7 @@ import { sessionApi } from '../services/sessionApi';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useWebRtcSession } from '../hooks/useWebRtcSession';
 import { useBackGuard } from '../hooks/useBackGuard';
-import type { ActivityEventType, FeedbackRating, ParticipantRole, RecommendationDecision, SessionResponse, SessionSocketMessage, SessionStatus } from '../types/session';
+import type { ActivityEventType, EditableCodeFile, FeedbackRating, ParticipantRole, RecommendationDecision, SessionResponse, SessionSocketMessage, SessionStatus } from '../types/session';
 import { formatDateTime, formatTimeZoneLabel } from '../utils/dateTime';
 import { getOrCreateDeviceId } from '../utils/device';
 
@@ -41,6 +41,8 @@ const Session: React.FC = () => {
   const setRole = useSessionStore((state) => state.setRole);
   const currentCode = useSessionStore((state) => state.currentCode);
   const setCurrentCode = useSessionStore((state) => state.setCurrentCode);
+  const currentCodeFiles = useSessionStore((state) => state.currentCodeFiles);
+  const setCurrentCodeFiles = useSessionStore((state) => state.setCurrentCodeFiles);
   const [timeLeft, setTimeLeft] = React.useState<number | null>(null);
   const [isFullscreen, setIsFullscreen] = React.useState(false);
   const [toastItems, setToastItems] = React.useState<ToastItem[]>([]);
@@ -51,6 +53,7 @@ const Session: React.FC = () => {
     recommendationDecision: '' as RecommendationDecision | '',
   });
   const [closeCountdown, setCloseCountdown] = React.useState<number | null>(null);
+  const [loadingMessageIndex, setLoadingMessageIndex] = React.useState(0);
   const deviceId = React.useMemo(() => getOrCreateDeviceId(), []);
   const suspiciousRejectionNoticeShownRef = React.useRef(false);
   const interviewerRecoveryTimeoutNoticeShownRef = React.useRef(false);
@@ -77,6 +80,7 @@ const Session: React.FC = () => {
 
   const interviewer = session?.participants.find((participant) => participant.role === 'INTERVIEWER');
   const interviewee = session?.participants.find((participant) => participant.role === 'INTERVIEWEE');
+  const isFrontendWorkspaceSession = session?.technology === 'ANGULAR' || session?.technology === 'REACT';
   const intervieweeName = interviewee?.name?.trim() || 'Interviewee';
   const interviewerFirstName = firstName(interviewer?.name, 'Interviewer');
   const intervieweeFirstName = firstName(interviewee?.name, 'Interviewee');
@@ -121,6 +125,19 @@ const Session: React.FC = () => {
     suspiciousRejectionNoticeShownRef.current = false;
     interviewerRecoveryTimeoutNoticeShownRef.current = false;
   }, [sessionId]);
+
+  React.useEffect(() => {
+    if (!isLoading) {
+      setLoadingMessageIndex(0);
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      setLoadingMessageIndex((previous) => (previous + 1) % SESSION_LOADING_MESSAGES.length);
+    }, 1400);
+
+    return () => window.clearInterval(interval);
+  }, [isLoading]);
 
   React.useEffect(() => {
     if (!sessionId || !session || !role) {
@@ -255,6 +272,15 @@ const Session: React.FC = () => {
     [role, session?.status, sessionId]
   );
 
+  const resolvedCodeFiles = React.useMemo(
+    () => (currentCodeFiles.length > 0 ? currentCodeFiles : session?.codeFiles || []),
+    [currentCodeFiles, session?.codeFiles]
+  );
+  const resolvedLatestCode = React.useMemo(
+    () => (isFrontendWorkspaceSession ? resolvePrimaryCodeFromFiles(session?.technology, resolvedCodeFiles) : (currentCode || session?.latestCode || '')),
+    [currentCode, isFrontendWorkspaceSession, resolvedCodeFiles, session?.latestCode, session?.technology]
+  );
+
   React.useEffect(() => {
     if (!sessionId || !role || session?.status !== 'ACTIVE' || !hadStoredSession) {
       return undefined;
@@ -278,7 +304,7 @@ const Session: React.FC = () => {
       if (message.session) {
         refreshSession(message.session);
       }
-      if (message.type === 'CODE_UPDATE' && message.code) {
+      if (message.type === 'CODE_UPDATE' && typeof message.code === 'string') {
         setCurrentCode(message.code);
       }
       if (typeof message.timeLeft === 'number') {
@@ -346,7 +372,8 @@ const Session: React.FC = () => {
   const endMutation = useMutation({
     mutationFn: () =>
       sessionApi.endSession(sessionId!, {
-        finalCode: currentCode || currentSession?.latestCode || '',
+        finalCode: resolvedLatestCode,
+        codeFiles: isFrontendWorkspaceSession ? resolvedCodeFiles : undefined,
       }),
     onSuccess: refreshSession,
   });
@@ -426,7 +453,8 @@ const Session: React.FC = () => {
           role: role === 'interviewer' ? 'INTERVIEWER' : 'INTERVIEWEE',
           deviceId,
           reason: role === 'interviewee' ? 'TAB_OR_BROWSER_CLOSED' : 'MANUAL_RESUME',
-          finalCode: currentCode || session.latestCode || '',
+          finalCode: resolvedLatestCode,
+          codeFiles: isFrontendWorkspaceSession ? resolvedCodeFiles : undefined,
         });
         const blob = new Blob([payload], { type: 'application/json' });
         navigator.sendBeacon(url, blob);
@@ -445,7 +473,7 @@ const Session: React.FC = () => {
       window.removeEventListener('beforeunload', beforeUnload);
       window.removeEventListener('pagehide', pageHide);
     };
-  }, [currentCode, deviceId, role, session, sessionId]);
+  }, [deviceId, isFrontendWorkspaceSession, resolvedCodeFiles, resolvedLatestCode, role, session, sessionId]);
 
   React.useEffect(() => {
     if (role !== 'interviewee' || !sessionId || session?.status !== 'ACTIVE') {
@@ -545,7 +573,18 @@ const Session: React.FC = () => {
   }, [intervieweeName, isCameraEnabled, isMuted, recordActivityEvent, role, session?.status]);
 
   if (isLoading) {
-    return <div className="page-shell"><div className="page-card">Loading session...</div></div>;
+    return (
+      <div className="page-shell">
+        <div className="page-card session-loading-card">
+          <div className="session-loading-kicker">Preparing Interview</div>
+          <h2>Setting up the session workspace</h2>
+          <p>{SESSION_LOADING_MESSAGES[loadingMessageIndex]}</p>
+          <div className="session-loading-track" aria-hidden="true">
+            <div className="session-loading-bar" />
+          </div>
+        </div>
+      </div>
+    );
   }
 
   if (error || !session || !role) {
@@ -568,6 +607,8 @@ const Session: React.FC = () => {
   );
   const waitingJoinLabel = `Waiting for ${interviewee?.name || 'Interviewee'} to join`;
   const hasCompleteFeedback = Boolean(feedback.rating && feedback.recommendationDecision && feedback.comments.trim());
+  const isFinalizingSession =
+    endMutation.isPending || (showEditor && session.status === 'ACTIVE' && displayedTimeLeft <= 0);
 
   const timerLabel =
     session.status === 'ACTIVE'
@@ -619,6 +660,18 @@ const Session: React.FC = () => {
   return (
     <div className={`session-page polished-page ${isFullscreen ? 'fullscreen' : ''}`}>
       {isReconnecting && <div className="reconnecting">Reconnecting to the live session...</div>}
+      {isFinalizingSession && (
+        <div className="session-finalizing-overlay" role="status" aria-live="polite">
+          <div className="page-card session-loading-card session-finalizing-card">
+            <div className="session-loading-kicker">Wrapping Up</div>
+            <h2>Finalizing the interview session</h2>
+            <p>Saving the final code, preserving the latest preview, and closing the live workspace.</p>
+            <div className="session-loading-track" aria-hidden="true">
+              <div className="session-loading-bar" />
+            </div>
+          </div>
+        </div>
+      )}
 
       {!isFullscreen && showEditor ? (
         <div className={activeStageClassName}>
@@ -752,6 +805,15 @@ const Session: React.FC = () => {
                   {endMutation.isPending ? 'Ending...' : 'End Interview'}
                 </button>
               )}
+              {canExtend && (
+                <button
+                  className="control-btn btn-extend session-status-inline-action"
+                  onClick={() => extendMutation.mutate()}
+                  disabled={extendMutation.isPending}
+                >
+                  {extendMutation.isPending ? 'Extending...' : 'Extend Once by 15 Minutes'}
+                </button>
+              )}
             </div>
             <div className="status-meta">{statusTimestampLabel}: {statusTimestampValue}</div>
           </div>
@@ -801,14 +863,6 @@ const Session: React.FC = () => {
 
       {showEditor ? (
         <>
-          {canExtend && (
-            <div className="session-controls">
-              <button className="control-btn btn-extend" onClick={() => extendMutation.mutate()} disabled={extendMutation.isPending}>
-                {extendMutation.isPending ? 'Extending...' : 'Extend Once by 15 Minutes'}
-              </button>
-            </div>
-          )}
-
           {showPreStartState && (
             <div className="waiting-panel">
               <h3>{session.status === 'WAITING_JOIN' ? waitingJoinLabel : 'Interview is ready to start'}</h3>
@@ -820,7 +874,16 @@ const Session: React.FC = () => {
           )}
 
           <Editor
-            executionLanguage={session.technology === 'PYTHON' ? 'PYTHON' : 'JAVA'}
+            sessionId={sessionId}
+            executionLanguage={
+              session.technology === 'PYTHON'
+                ? 'PYTHON'
+                : session.technology === 'ANGULAR'
+                  ? 'ANGULAR'
+                  : session.technology === 'REACT'
+                    ? 'REACT'
+                  : 'JAVA'
+            }
             readOnly={session.status !== 'ACTIVE'}
             canRun={session.status === 'ACTIVE'}
             showResetButton={isInterviewer}
@@ -852,9 +915,9 @@ const Session: React.FC = () => {
                 return true;
               }
 
-              const normalizedCurrentCode = normalizeClipboardText(currentCode || session.latestCode || '');
+              const normalizedCurrentCode = normalizeClipboardText(resolvedLatestCode);
               const normalizedWithoutIndent = normalizeClipboardShape(text);
-              const currentCodeWithoutIndent = normalizeClipboardShape(currentCode || session.latestCode || '');
+              const currentCodeWithoutIndent = normalizeClipboardShape(resolvedLatestCode);
               if (
                 normalized &&
                 normalized.includes('\n') &&
@@ -876,7 +939,8 @@ const Session: React.FC = () => {
                 ? 'Editing and code execution are disabled until the interviewer starts the interview.'
                 : undefined
             }
-            initialCode={currentCode || session.latestCode || ''}
+            initialCodeFiles={resolvedCodeFiles}
+            initialCode={resolvedLatestCode}
             showFullscreenToggle={canFullscreen}
             isFullscreen={isFullscreen}
             onToggleFullscreen={toggleFullscreen}
@@ -891,6 +955,22 @@ const Session: React.FC = () => {
                 };
                 refreshSession(nextSession);
                 sendCode(code, nextVersion, wsRole);
+              }
+            }}
+            onCodeFilesChange={(files) => {
+              setCurrentCodeFiles(files);
+              if (session.status === 'ACTIVE') {
+                const nextVersion = ((currentSession?.codeVersion ?? session.codeVersion) || 0) + 1;
+                const nextCode = resolvePrimaryCodeFromFiles(session.technology, files);
+                const nextSession = {
+                  ...session,
+                  latestCode: nextCode,
+                  codeFiles: files,
+                  codeVersion: nextVersion,
+                };
+                setCurrentCode(nextCode);
+                refreshSession(nextSession);
+                sendCode(nextCode, nextVersion, wsRole, files);
               }
             }}
           />
@@ -1013,6 +1093,12 @@ const Session: React.FC = () => {
 
 export default Session;
 
+const SESSION_LOADING_MESSAGES = [
+  'Loading the interview session details.',
+  'Connecting real-time collaboration and video signals.',
+  'Preparing the editor and sandbox workspace.',
+];
+
 function normalizeClipboardText(value: string) {
   return value
     .replace(/\r\n/g, '\n')
@@ -1078,6 +1164,19 @@ function firstName(value: string | undefined, fallback: string) {
     return fallback;
   }
   return normalized.split(/\s+/)[0] || fallback;
+}
+
+function resolvePrimaryCodeFromFiles(technology: SessionResponse['technology'] | undefined, files: EditableCodeFile[]) {
+  if (!files.length) {
+    return '';
+  }
+
+  return (technology === 'REACT'
+    ? files.find((file) => file.path === 'src/App.tsx')?.content
+    : files.find((file) => file.path === 'src/app/app.component.ts')?.content)
+    || files.find((file) => file.editable)?.content
+    || files[0]?.content
+    || '';
 }
 
 function MicrophoneIcon({ muted }: { muted: boolean }) {

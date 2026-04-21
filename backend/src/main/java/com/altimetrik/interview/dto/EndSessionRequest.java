@@ -1,10 +1,11 @@
 package com.altimetrik.interview.dto;
 
-import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
+
+import java.util.List;
 
 @Data
 public class EndSessionRequest {
-    @NotBlank
     private String finalCode;
+    private List<EditableCodeFileDto> codeFiles;
 }

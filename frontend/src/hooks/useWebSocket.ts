@@ -2,13 +2,14 @@ import { Client, IMessage } from '@stomp/stompjs';
 import SockJS from 'sockjs-client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { debounce } from 'lodash';
-import type { ParticipantRole, SessionSocketMessage, WebRtcSignalType } from '../types/session';
+import type { EditableCodeFile, ParticipantRole, SessionSocketMessage, WebRtcSignalType } from '../types/session';
 import { buildSocketUrlFromApiBase, resolveApiBaseUrl } from '../utils/apiUrls';
 
 interface CodePayload {
   code: string;
   version: number;
   updatedByRole: ParticipantRole;
+  codeFiles?: EditableCodeFile[];
 }
 
 interface SignalPayload {
@@ -94,8 +95,8 @@ export const useWebSocket = (
     };
   }, [debouncedSendCode, sessionId]);
 
-  const sendCode = useCallback((code: string, version: number, updatedByRole: ParticipantRole) => {
-    debouncedSendCode({ code, version, updatedByRole });
+  const sendCode = useCallback((code: string, version: number, updatedByRole: ParticipantRole, codeFiles?: EditableCodeFile[]) => {
+    debouncedSendCode({ code, version, updatedByRole, codeFiles });
   }, [debouncedSendCode]);
 
   const sendSignal = useCallback((payload: SignalPayload) => {
