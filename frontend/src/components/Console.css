@@ -53,6 +53,10 @@
   background-color: #f48771;
 }
 
+.tab-indicator.preview {
+  background-color: #58b4c3;
+}
+
 @keyframes pulse {
   0%, 100% {
     opacity: 1;
@@ -67,6 +71,22 @@
   overflow: auto;
   background-color: #0f2238;
   padding: 14px;
+}
+
+.console-preview {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.console-preview-frame {
+  flex: 1;
+  min-height: 360px;
+  width: 100%;
+  border: 1px solid #1d3d5d;
+  border-radius: 12px;
+  background: #ffffff;
 }
 
 .console-text {

@@ -1,5 +1,6 @@
 package com.altimetrik.interview.entity;
 
+import com.altimetrik.interview.enums.CodeStorageMode;
 import jakarta.persistence.*;
 import lombok.Data;
 import org.hibernate.annotations.CreationTimestamp;
@@ -20,6 +21,9 @@ public class CodeState {
     
     @Column(columnDefinition = "TEXT")
     private String latestCode;
+
+    @Enumerated(EnumType.STRING)
+    private CodeStorageMode storageMode;
     
     private OffsetDateTime updatedAt;
     

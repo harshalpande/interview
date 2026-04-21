@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
-import type { SessionResponse } from '../types/session';
+import type { EditableCodeFile, SessionResponse } from '../types/session';
 
 type AppRole = 'interviewer' | 'interviewee' | null;
 
@@ -9,11 +9,13 @@ interface SessionState {
   role: AppRole;
   currentSession: SessionResponse | null;
   currentCode: string;
+  currentCodeFiles: EditableCodeFile[];
   showReconnecting: boolean;
 
   setSession: (session: SessionResponse | null) => void;
   setRole: (role: AppRole) => void;
   setCurrentCode: (code: string) => void;
+  setCurrentCodeFiles: (files: EditableCodeFile[]) => void;
   setReconnecting: (show: boolean) => void;
   reset: () => void;
 }
@@ -25,6 +27,7 @@ export const useSessionStore = create<SessionState>()(
       role: null,
       currentSession: null,
       currentCode: '',
+      currentCodeFiles: [],
       showReconnecting: false,
 
       setSession: (session) =>
@@ -32,9 +35,11 @@ export const useSessionStore = create<SessionState>()(
           sessionId: session?.id ?? null,
           currentSession: session,
           currentCode: session?.latestCode ?? '',
+          currentCodeFiles: session?.codeFiles ?? [],
         }),
       setRole: (role) => set({ role }),
       setCurrentCode: (code) => set({ currentCode: code }),
+      setCurrentCodeFiles: (files) => set({ currentCodeFiles: files }),
       setReconnecting: (show) => set({ showReconnecting: show }),
       reset: () =>
         set({
@@ -42,6 +47,7 @@ export const useSessionStore = create<SessionState>()(
           role: null,
           currentSession: null,
           currentCode: '',
+          currentCodeFiles: [],
           showReconnecting: false,
         }),
     }),

@@ -1,0 +1,15 @@
+:root {
+  color: #0f172a;
+  background: #f8fafc;
+  font-family: Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+}
+
+body {
+  margin: 0;
+}
+
+* {
+  box-sizing: border-box;
+}

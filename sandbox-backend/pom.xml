@@ -9,10 +9,10 @@
 		<relativePath/>
 	</parent>
 	<groupId>com.altimetrik</groupId>
-	<artifactId>java-compiler-sandbox</artifactId>
+	<artifactId>sandbox-backend</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
-	<name>Java Compiler Sandbox</name>
-	<description>Sandbox service for code compilation and execution</description>
+	<name>Sandbox Backend</name>
+	<description>Backend sandbox service for code compilation and execution</description>
 	<properties>
 		<java.version>17</java.version>
 	</properties>

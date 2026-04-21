@@ -2,7 +2,9 @@
  * API Request and Response types
  */
 
-export type ExecutionLanguage = 'JAVA' | 'PYTHON';
+import type { EditableCodeFile } from './session';
+
+export type ExecutionLanguage = 'JAVA' | 'PYTHON' | 'ANGULAR' | 'REACT';
 
 export interface CompileRequest {
   sourceCode: string;
@@ -18,7 +20,9 @@ export interface CompileResponse {
 
 export interface ExecuteRequest {
   sourceCode: string;
+  sessionId?: string;
   language?: ExecutionLanguage;
+  codeFiles?: EditableCodeFile[];
   timeoutMs?: number;
   memoryLimitMb?: number;
 }
@@ -31,4 +35,5 @@ export interface ExecuteResponse {
   exitCode?: number;
   executionTimeMs?: number;
   message: string;
+  previewUrl?: string | null;
 }

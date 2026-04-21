@@ -19,4 +19,14 @@ public class SandboxClientConfig {
                 .defaultHeaders(headers -> headers.setContentType(MediaType.APPLICATION_JSON))
                 .build();
     }
+
+    @Bean
+    @Qualifier("sandboxFrontendRestClient")
+    public RestClient sandboxFrontendRestClient(RestClient.Builder restClientBuilder,
+                                                @Value("${sandbox.frontend-base-url:http://localhost:8083/api}") String sandboxFrontendBaseUrl) {
+        return restClientBuilder
+                .baseUrl(sandboxFrontendBaseUrl)
+                .defaultHeaders(headers -> headers.setContentType(MediaType.APPLICATION_JSON))
+                .build();
+    }
 }

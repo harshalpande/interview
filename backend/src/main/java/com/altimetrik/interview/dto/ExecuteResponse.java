@@ -23,4 +23,5 @@ public class ExecuteResponse {
     private int exitCode;
     private long executionTimeMs;
     private String message;
+    private String previewUrl;
 }

@@ -51,8 +51,8 @@ const technologyOptions: TechnologyOption[] = [
     id: 'angular',
     label: 'Angular',
     value: 'ANGULAR',
-    caption: 'Coming soon',
-    status: 'coming-soon',
+    caption: 'Build and preview interviews',
+    status: 'available',
     icon: (
       <svg viewBox="0 0 64 64" aria-hidden="true">
         <path d="M32 10 48 16l-3 28-13 8-13-8-3-28 16-6Z" fill="currentColor" opacity="0.2" />
@@ -105,7 +105,7 @@ const TechnologySelection: React.FC = () => {
         <div className="page-kicker">Technology Setup</div>
         <h2>Select the interview technology</h2>
         <p className="page-subtitle">
-          Choose the stack for this interview. Java and Python are available now, and the remaining technologies are visible as upcoming options.
+          Choose the stack for this interview. Java, Python, and Angular are available now, and the remaining technologies are visible as upcoming options.
         </p>
 
         <div className="tech-grid" role="list" aria-label="Available technologies">
@@ -141,8 +141,8 @@ const TechnologySelection: React.FC = () => {
               {canProceed
                 ? `Proceed to create a ${selectedOption?.label ?? 'coding'} interview session.`
                 : selectedOption
-                  ? 'This technology is not enabled yet. Please select Java or Python to continue.'
-                  : 'Select Java or Python to continue.'}
+                  ? 'This technology is not enabled yet. Please select Java, Python, or Angular to continue.'
+                  : 'Select Java, Python, or Angular to continue.'}
             </p>
           </div>
           <div className="tech-selection-actions">

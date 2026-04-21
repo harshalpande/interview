@@ -1,0 +1,16 @@
+.app-shell {
+  display: grid;
+  gap: 12px;
+  padding: 24px;
+  font-family: Arial, sans-serif;
+}
+
+h1 {
+  margin: 0;
+  color: #0f3d59;
+}
+
+p {
+  margin: 0;
+  color: #4f6474;
+}

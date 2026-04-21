@@ -6,6 +6,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.List;
+
 /**
  * Request DTO for Java code execution.
  * Contains the Java source code to be compiled and executed in one step.
@@ -19,8 +21,10 @@ public class ExecuteRequest {
     private static final long DEFAULT_MEMORY_LIMIT_MB = 512;
 
     private String sourceCode;
+    private String sessionId;
     @Builder.Default
     private ExecutionLanguage language = ExecutionLanguage.JAVA;
+    private List<EditableCodeFileDto> codeFiles;
     private long timeoutMs;
     private long memoryLimitMb;
 

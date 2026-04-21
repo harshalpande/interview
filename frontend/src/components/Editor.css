@@ -126,6 +126,98 @@
   background: #0f2238;
 }
 
+.workspace-tabs-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: #f5f9fc;
+  border-bottom: 1px solid var(--line);
+}
+
+.workspace-tabs {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  flex: 1;
+  min-width: 0;
+}
+
+.workspace-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid #d3e0ea;
+  border-radius: 12px;
+  background: #fff;
+  color: #35516b;
+  font: inherit;
+  font-size: 0.84rem;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.workspace-tab span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.workspace-tab.is-active {
+  background: #e6f1f7;
+  border-color: #8fb4c8;
+  color: #153a52;
+}
+
+.workspace-tab.is-readonly {
+  background: #fbfcfd;
+  color: #617488;
+}
+
+.workspace-tab-meta {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #7f90a2;
+}
+
+.workspace-tab-delete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  color: #7f90a2;
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+.workspace-tab-delete:hover {
+  background: rgba(127, 144, 162, 0.16);
+  color: #153a52;
+}
+
+.workspace-add-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid #8fb4c8;
+  border-radius: 50%;
+  background: #ffffff;
+  color: #0f6980;
+  font-size: 1.4rem;
+  font-weight: 700;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.workspace-add-button:hover {
+  background: #e6f1f7;
+}
+
 .editor-mount {
   height: 100%;
 }
@@ -145,6 +237,65 @@
 .editor-empty-state p {
   margin: 0;
   line-height: 1.6;
+}
+
+.workspace-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(15, 34, 56, 0.46);
+}
+
+.workspace-modal {
+  width: min(460px, 100%);
+  display: grid;
+  gap: 14px;
+  padding: 24px;
+  border-radius: 20px;
+  background: #ffffff;
+  box-shadow: 0 24px 80px rgba(15, 34, 56, 0.24);
+}
+
+.workspace-modal h3 {
+  margin: 0;
+  color: #153a52;
+}
+
+.workspace-modal-copy {
+  margin: 0;
+  color: #5a7287;
+  line-height: 1.5;
+}
+
+.workspace-modal-input {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid #c8d7e3;
+  border-radius: 12px;
+  font: inherit;
+  color: #153a52;
+}
+
+.workspace-modal-input:focus {
+  outline: none;
+  border-color: #58b4c3;
+  box-shadow: 0 0 0 3px rgba(88, 180, 195, 0.16);
+}
+
+.workspace-modal-error {
+  color: #b54d43;
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+
+.workspace-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
 }
 
 .output-panel {
@@ -177,6 +328,16 @@
   .editor-container {
     grid-template-columns: 1fr;
     min-height: auto;
+  }
+
+  .workspace-tabs {
+    width: 100%;
+  }
+
+  .workspace-tabs-bar {
+    align-items: stretch;
+    flex-wrap: wrap;
+    padding: 10px 12px;
   }
 
   .native-resize-handle {

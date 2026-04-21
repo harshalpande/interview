@@ -1,11 +1,31 @@
 
 
 services:
-  sandbox:
+  sandbox-frontend:
     build:
       context: .
-      dockerfile: sandbox/Dockerfile
-    container_name: java-compiler-sandbox
+      dockerfile: sandbox-frontend/Dockerfile
+    container_name: sandbox-frontend
+    ports:
+      - "8083:8080"
+    environment:
+      - JAVA_OPTS=-Xmx512m -Xms256m
+      - LOGGING_LEVEL_COM_ALTIMETRIK=DEBUG
+    networks:
+      - java-compiler-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  sandbox-backend:
+    build:
+      context: .
+      dockerfile: sandbox-backend/Dockerfile
+    container_name: sandbox-backend
     ports:
       - "8082:8080"
     environment:
@@ -32,7 +52,9 @@ services:
       - "8081:8080"
     environment:
       - SPRING_PROFILES_ACTIVE=docker
-      - SANDBOX_BASE_URL=http://sandbox:8080/api
+      - SANDBOX_BASE_URL=http://sandbox-backend:8080/api
+      - SANDBOX_FRONTEND_BASE_URL=http://sandbox-frontend:8080/api
+      - SANDBOX_FRONTEND_PUBLIC_BASE_URL=http://localhost:8083/api
       - JAVA_OPTS=-Xmx512m -Xms256m
       - LOGGING_LEVEL_COM_ALTIMETRIK=DEBUG
     volumes:
@@ -40,7 +62,7 @@ services:
     networks:
       - java-compiler-network
     depends_on:
-      - sandbox
+      - sandbox-backend
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/api/actuator/health"]
@@ -60,7 +82,7 @@ services:
     networks:
       - java-compiler-network
     depends_on:
-      - sandbox
+      - sandbox-backend
       - backend
     restart: unless-stopped
 
