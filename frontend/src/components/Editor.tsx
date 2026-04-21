@@ -95,7 +95,8 @@ const ANGULAR_PACKAGE_JSON = `{
 }
 `;
 
-const REACT_APP_TSX = `import './App.css';
+const REACT_APP_TSX = `import React from 'react';
+import './App.css';
 
 export default function App() {
   return (
@@ -126,11 +127,17 @@ p {
 `;
 
 const REACT_MAIN_TSX = `import React from 'react';
-import ReactDOM from 'react-dom/client';
+import { createRoot } from 'react-dom/client';
 import App from './App';
 import './index.css';
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
+const container = document.getElementById('root');
+
+if (!container) {
+  throw new Error('React root container was not found.');
+}
+
+createRoot(container).render(
   <React.StrictMode>
     <App />
   </React.StrictMode>
@@ -203,6 +210,63 @@ declare module 'rxjs' {
     subscribe(next: (value: T) => void): { unsubscribe(): void };
   }
 }
+  `,
+};
+
+const REACT_MONACO_SHIMS = {
+  react: `
+declare module 'react' {
+  export type ReactNode = any;
+  export type JSXElementConstructor<P> = (props: P) => ReactNode;
+  export const Fragment: any;
+  export interface FC<P = {}> {
+    (props: P): ReactNode;
+  }
+  export interface StrictModeProps {
+    children?: ReactNode;
+  }
+  export const StrictMode: FC<StrictModeProps>;
+  export function createElement(type: any, props?: any, ...children: any[]): any;
+  const React: {
+    StrictMode: FC<StrictModeProps>;
+    Fragment: any;
+    createElement(type: any, props?: any, ...children: any[]): any;
+  };
+  export default React;
+}
+
+declare global {
+  namespace JSX {
+    type Element = any;
+    interface ElementClass {}
+    interface ElementAttributesProperty {
+      props: {};
+    }
+    interface ElementChildrenAttribute {
+      children: {};
+    }
+    interface IntrinsicAttributes {
+      key?: string | number;
+    }
+    interface IntrinsicElements {
+      [elemName: string]: any;
+    }
+  }
+}
+  `,
+  reactDomClient: `
+declare module 'react-dom/client' {
+  export interface Root {
+    render(children: any): void;
+  }
+  export function createRoot(container: Element | DocumentFragment): Root;
+}
+  `,
+  css: `
+declare module '*.css' {
+  const content: string;
+  export default content;
+}
 `,
 };
 
@@ -216,6 +280,10 @@ type MonacoTypeScriptApi = {
   ScriptTarget: {
     ES2022: number;
   };
+    JsxEmit: {
+      React: number;
+      ReactJSX: number;
+    };
   typescriptDefaults: {
     setCompilerOptions(options: Record<string, unknown>): void;
     setDiagnosticsOptions(options: Record<string, unknown>): void;
@@ -231,7 +299,7 @@ const SANDBOX_LABELS: Record<ExecutionLanguage, string> = {
   JAVA: 'Sandbox: Eclipse Temurin JDK 17',
   PYTHON: 'Sandbox: CPython 3.12',
   ANGULAR: 'Sandbox: Angular 21 build workspace',
-  REACT: 'Sandbox: React build workspace',
+  REACT: 'Sandbox: React 18.3 + Vite 5 build workspace (.tsx, .ts, .css)',
 };
 
 const EDITOR_TITLES: Record<ExecutionLanguage, string> = {
@@ -450,7 +518,7 @@ const Editor: React.FC<EditorProps> = ({
   }, [activeFilePath]);
 
   useEffect(() => {
-    if (executionLanguage !== 'ANGULAR' || !monacoTypeDefaultsRef.current) {
+    if ((executionLanguage !== 'ANGULAR' && executionLanguage !== 'REACT') || !monacoTypeDefaultsRef.current) {
       workspaceExtraLibsRef.current.forEach((disposable) => disposable.dispose());
       workspaceExtraLibsRef.current = [];
       return;
@@ -458,7 +526,7 @@ const Editor: React.FC<EditorProps> = ({
 
     workspaceExtraLibsRef.current.forEach((disposable) => disposable.dispose());
     workspaceExtraLibsRef.current = workspaceFiles
-      .filter((file) => file.editable && file.path.startsWith('src/app/'))
+      .filter((file) => file.editable && editableWorkspacePath(executionLanguage, file.path))
       .map((file) => monacoTypeDefaultsRef.current!.addExtraLib(
         file.content,
         `file:///${file.path.replace(/^\/+/, '')}`
@@ -984,14 +1052,14 @@ const Editor: React.FC<EditorProps> = ({
               onChange={handleCodeChange}
               theme={theme}
               beforeMount={(monaco) => {
-                if (executionLanguage !== 'ANGULAR') {
+                if (executionLanguage !== 'ANGULAR' && executionLanguage !== 'REACT') {
                   monacoTypeDefaultsRef.current = null;
                   return;
                 }
 
                 const tsApi = (monaco.languages as unknown as { typescript?: MonacoTypeScriptApi }).typescript;
                 if (!tsApi) {
-                  console.warn('[angular-monaco] TypeScript API unavailable on monaco.languages');
+                  console.warn(`[${executionLanguage.toLowerCase()}-monaco] TypeScript API unavailable on monaco.languages`);
                   return;
                 }
 
@@ -1000,7 +1068,7 @@ const Editor: React.FC<EditorProps> = ({
                   setDiagnosticsOptions?: (options: Record<string, unknown>) => void;
                   addExtraLib?: (content: string, filePath?: string) => IDisposable;
                 };
-                console.info('[angular-monaco] defaults capabilities', {
+                console.info(`[${executionLanguage.toLowerCase()}-monaco] defaults capabilities`, {
                   hasTypescriptApi: Boolean(tsApi),
                   hasCompilerOptions: typeof defaults?.setCompilerOptions === 'function',
                   hasDiagnosticsOptions: typeof defaults?.setDiagnosticsOptions === 'function',
@@ -1013,26 +1081,45 @@ const Editor: React.FC<EditorProps> = ({
                   typeof defaults?.setDiagnosticsOptions !== 'function' ||
                   typeof defaults?.addExtraLib !== 'function'
                 ) {
-                  console.warn('[angular-monaco] Skipping Angular Monaco typing setup because required defaults APIs are unavailable');
+                  console.warn(`[${executionLanguage.toLowerCase()}-monaco] Skipping Monaco typing setup because required defaults APIs are unavailable`);
                   return;
                 }
 
-                defaults.setCompilerOptions({
-                  target: tsApi.ScriptTarget.ES2022,
-                  allowNonTsExtensions: true,
-                  module: tsApi.ModuleKind.ESNext,
-                  moduleResolution: tsApi.ModuleResolutionKind.NodeJs,
-                  experimentalDecorators: true,
-                  useDefineForClassFields: false,
-                  noEmit: true,
-                  strict: false,
-                  baseUrl: 'file:///',
-                  paths: {
-                    '@angular/core': ['file:///node_modules/@angular/core/index.d.ts'],
-                    '@angular/common': ['file:///node_modules/@angular/common/index.d.ts'],
-                    rxjs: ['file:///node_modules/rxjs/index.d.ts'],
-                  },
-                });
+                defaults.setCompilerOptions(
+                  executionLanguage === 'ANGULAR'
+                    ? {
+                        target: tsApi.ScriptTarget.ES2022,
+                        allowNonTsExtensions: true,
+                        module: tsApi.ModuleKind.ESNext,
+                        moduleResolution: tsApi.ModuleResolutionKind.NodeJs,
+                        experimentalDecorators: true,
+                        useDefineForClassFields: false,
+                        noEmit: true,
+                        strict: false,
+                        baseUrl: 'file:///',
+                        paths: {
+                          '@angular/core': ['file:///node_modules/@angular/core/index.d.ts'],
+                          '@angular/common': ['file:///node_modules/@angular/common/index.d.ts'],
+                          rxjs: ['file:///node_modules/rxjs/index.d.ts'],
+                        },
+                      }
+                    : {
+                        target: tsApi.ScriptTarget.ES2022,
+                        allowNonTsExtensions: true,
+                        module: tsApi.ModuleKind.ESNext,
+                        moduleResolution: tsApi.ModuleResolutionKind.NodeJs,
+                        noEmit: true,
+                        strict: false,
+                        jsx: tsApi.JsxEmit.React,
+                        allowSyntheticDefaultImports: true,
+                        esModuleInterop: true,
+                        baseUrl: 'file:///',
+                        paths: {
+                          react: ['file:///node_modules/react/index.d.ts'],
+                          'react-dom/client': ['file:///node_modules/react-dom/client.d.ts'],
+                        },
+                      }
+                );
                 defaults.setDiagnosticsOptions({
                   noSemanticValidation: false,
                   noSyntaxValidation: false,
@@ -1042,26 +1129,44 @@ const Editor: React.FC<EditorProps> = ({
                 const addExtraLib = defaults.addExtraLib;
 
                 angularExtraLibsRef.current.forEach((disposable) => disposable.dispose());
-                angularExtraLibsRef.current = [
-                  addExtraLib.call(
-                    defaults,
-                    ANGULAR_MONACO_SHIMS.core,
-                    'file:///node_modules/@angular/core/index.d.ts'
-                  ),
-                  addExtraLib.call(
-                    defaults,
-                    ANGULAR_MONACO_SHIMS.common,
-                    'file:///node_modules/@angular/common/index.d.ts'
-                  ),
-                  addExtraLib.call(
-                    defaults,
-                    ANGULAR_MONACO_SHIMS.rxjs,
-                    'file:///node_modules/rxjs/index.d.ts'
-                  ),
-                ];
+                angularExtraLibsRef.current = executionLanguage === 'ANGULAR'
+                  ? [
+                      addExtraLib.call(
+                        defaults,
+                        ANGULAR_MONACO_SHIMS.core,
+                        'file:///node_modules/@angular/core/index.d.ts'
+                      ),
+                      addExtraLib.call(
+                        defaults,
+                        ANGULAR_MONACO_SHIMS.common,
+                        'file:///node_modules/@angular/common/index.d.ts'
+                      ),
+                      addExtraLib.call(
+                        defaults,
+                        ANGULAR_MONACO_SHIMS.rxjs,
+                        'file:///node_modules/rxjs/index.d.ts'
+                      ),
+                    ]
+                  : [
+                        addExtraLib.call(
+                          defaults,
+                          REACT_MONACO_SHIMS.react,
+                          'file:///node_modules/react/index.d.ts'
+                        ),
+                        addExtraLib.call(
+                          defaults,
+                          REACT_MONACO_SHIMS.reactDomClient,
+                          'file:///node_modules/react-dom/client.d.ts'
+                      ),
+                      addExtraLib.call(
+                        defaults,
+                        REACT_MONACO_SHIMS.css,
+                        'file:///node_modules/css/index.d.ts'
+                      ),
+                    ];
                 workspaceExtraLibsRef.current.forEach((disposable) => disposable.dispose());
                 workspaceExtraLibsRef.current = workspaceFilesRef.current
-                  .filter((file) => file.editable && file.path.startsWith('src/app/'))
+                  .filter((file) => file.editable && editableWorkspacePath(executionLanguage, file.path))
                   .map((file) => addExtraLib.call(
                     defaults,
                     file.content,
@@ -1166,10 +1271,10 @@ const Editor: React.FC<EditorProps> = ({
           >
             <h3 id="workspace-modal-title">Create New File</h3>
             <p className="workspace-modal-copy">
-              {executionLanguage === 'REACT'
-                ? 'Add a file inside src, for example components/SimpleCard.tsx.'
-                : 'Add a file inside src/app, for example simple-card.component.ts.'}
-            </p>
+                {executionLanguage === 'REACT'
+                  ? 'Add a file inside src. React sandbox supports only .tsx, .ts, and .css files, for example components/SimpleCard.tsx.'
+                  : 'Add a file inside src/app, for example simple-card.component.ts.'}
+              </p>
             <input
               className="workspace-modal-input"
               autoFocus

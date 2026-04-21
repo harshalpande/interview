@@ -8,6 +8,16 @@ This repo contains a small interview platform:
 - `sandbox-backend/`: Spring Boot compile/run service for Java and Python execution isolation
 - `sandbox-frontend/`: Spring Boot persistent frontend sandbox for Angular/React workspaces, preview hosting, and warm builds
 
+## Frontend Interview Sandboxes
+
+- Angular sandbox: Angular 21 build workspace
+- React sandbox: React 18.3 + Vite 5 build workspace
+
+React workspace constraints:
+- editable files are limited to `src/**/*.tsx`, `src/**/*.ts`, and `src/**/*.css`
+- `package.json` is visible in the editor but read-only
+- builds use the persistent `sandbox-frontend` workspace path, with watcher-first warm builds and direct-build fallback when clearer diagnostics are needed
+
 ## Run With Docker (Recommended)
 
 Prereqs: Docker + Docker Compose.

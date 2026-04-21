@@ -42,7 +42,7 @@ const Console: React.FC<ConsoleProps> = ({ stdout, stderr, previewUrl }) => {
 
   React.useEffect(() => {
     if (previewUrl) {
-      console.info('[angular-preview] preview url', previewUrl);
+      console.info('[frontend-preview] preview url', previewUrl);
     }
   }, [previewUrl]);
 

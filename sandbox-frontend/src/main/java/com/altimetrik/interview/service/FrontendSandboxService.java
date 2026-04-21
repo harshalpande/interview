@@ -1,5 +1,20 @@
 package com.altimetrik.interview.service;
 
+import java.io.BufferedReader;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+
+import org.springframework.stereotype.Service;
+
 import com.altimetrik.interview.dto.BuildRequest;
 import com.altimetrik.interview.dto.BuildResponse;
 import com.altimetrik.interview.dto.CreateWorkspaceRequest;
@@ -9,26 +24,10 @@ import com.altimetrik.interview.enums.ExecutionLanguage;
 import com.altimetrik.interview.runner.FrontendRunner;
 import com.altimetrik.interview.runner.PersistentFrontendRunner;
 import com.altimetrik.interview.runner.model.FrontendBuildResult;
-import lombok.extern.slf4j.Slf4j;
-import lombok.RequiredArgsConstructor;
-import org.springframework.stereotype.Service;
-
-import java.nio.file.Path;
-import java.io.IOException;
-import java.io.BufferedReader;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
-import java.time.Duration;
-import java.time.OffsetDateTime;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Optional;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 
 import jakarta.annotation.PreDestroy;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 @Service
 @RequiredArgsConstructor
@@ -259,7 +258,10 @@ public class FrontendSandboxService {
                             persistentRunner.patchWorkspaceFiles(workspaceRoot, request.getFiles());
                         }
                         if (watcherAlive) {
-                            FrontendBuildResult watcherResult = awaitWatchBuild(workspaceId, timeoutMs);
+                            FrontendBuildResult watcherResult = awaitWatchBuild(
+                                    workspaceId,
+                                    resolveWatchBuildTimeoutMs(request.getLanguage(), timeoutMs)
+                            );
                             if (watcherResult != null) {
                                 if (!watcherResult.isSuccess() && hasOnlyGenericWatchFailure(watcherResult)) {
                                     log.warn("Frontend watcher build produced only generic failure output for workspaceId={}, running direct build for detailed diagnostics", workspaceId);
@@ -342,9 +344,20 @@ public class FrontendSandboxService {
         return normalized.startsWith("changes detected. rebuilding")
                 || normalized.startsWith("❯ changes detected. rebuilding")
                 || normalized.startsWith("✔ changes detected. rebuilding")
+                || normalized.startsWith("vite v")
+                || normalized.startsWith("transforming")
+                || normalized.startsWith("rendering chunks")
+                || normalized.startsWith("computing gzip size")
+                || normalized.startsWith("built in ")
                 || normalized.startsWith("application bundle generation failed")
                 || normalized.startsWith("application bundle generation complete")
                 || normalized.startsWith("watch stream closed:");
+    }
+
+    private long resolveWatchBuildTimeoutMs(ExecutionLanguage language, long timeoutMs) {
+        long boundedTimeoutMs = timeoutMs > 0 ? timeoutMs : 1_000L;
+        long preferredTimeoutMs = language == ExecutionLanguage.REACT ? 700L : 2_000L;
+        return Math.min(boundedTimeoutMs, preferredTimeoutMs);
     }
 
     private java.util.Optional<Path> resolveWorkspaceRoot(BuildRequest request) {

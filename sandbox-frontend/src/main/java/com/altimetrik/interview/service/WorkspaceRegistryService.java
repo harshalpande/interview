@@ -294,13 +294,25 @@ public class WorkspaceRegistryService {
     private boolean isSuccessfulWatchLine(String normalizedLine) {
         return normalizedLine.contains("application bundle generation complete")
                 || normalizedLine.contains("built in ")
+                || normalizedLine.contains("build complete")
                 || normalizedLine.contains("compiled successfully");
     }
 
     private boolean isFailedWatchLine(String normalizedLine) {
         return normalizedLine.contains("application bundle generation failed")
                 || normalizedLine.contains("build failed")
+                || normalizedLine.contains("failed in ")
+                || normalizedLine.contains("transform failed")
                 || normalizedLine.contains("error during build")
+                || normalizedLine.contains(": error ")
+                || normalizedLine.contains(" error ts")
+                || normalizedLine.contains("does not provide an export named")
+                || normalizedLine.contains("has no default export")
+                || normalizedLine.contains("cannot find module")
+                || normalizedLine.contains("unexpected token")
+                || normalizedLine.contains("failed to resolve import")
+                || normalizedLine.contains("could not resolve")
+                || normalizedLine.contains("[plugin:vite:")
                 || normalizedLine.startsWith("error");
     }
 

@@ -112,24 +112,28 @@ const Disclaimer: React.FC = () => {
         <p className="page-subtitle">{subtitle}</p>
 
         <div className="disclaimer-identity">
-          <div className="identity-item identity-item-row identity-item-wide">
-            <strong>Name:</strong>
-            <span>{participant?.name || 'Not available'}</span>
-          </div>
-          <div className="identity-item identity-item-row">
-            <strong>Email:</strong>
-            <span>{participant?.email || 'Not available'}</span>
-          </div>
-          <div className="identity-item identity-item-row identity-item-timezone">
-            <strong>Current timezone:</strong>
-            <span>{getLocalTimeZoneLabel()}</span>
-          </div>
-          {session?.createdAt && (
-            <div className="identity-item identity-item-row identity-item-wide">
-              <strong>Created:</strong>
-              <span>{formatDateTime(session.createdAt)}</span>
+          <div className="identity-column">
+            <div className="identity-item identity-item-row">
+              <strong>Name:</strong>
+              <span>{participant?.name || 'Not available'}</span>
             </div>
-          )}
+            <div className="identity-item identity-item-row">
+              <strong>Email:</strong>
+              <span>{participant?.email || 'Not available'}</span>
+            </div>
+            {session?.createdAt && (
+              <div className="identity-item identity-item-row">
+                <strong>Created:</strong>
+                <span>{formatDateTime(session.createdAt)}</span>
+              </div>
+            )}
+          </div>
+          <div className="identity-column identity-column-compact">
+            <div className="identity-item identity-item-row identity-item-timezone">
+              <strong>Current timezone:</strong>
+              <span>{getLocalTimeZoneLabel()}</span>
+            </div>
+          </div>
         </div>
 
         <ol className="disclaimer-list">
