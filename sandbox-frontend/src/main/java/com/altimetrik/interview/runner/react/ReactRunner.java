@@ -1,14 +1,5 @@
 package com.altimetrik.interview.runner.react;
 
-import com.altimetrik.interview.dto.EditableCodeFileDto;
-import com.altimetrik.interview.enums.ExecutionLanguage;
-import com.altimetrik.interview.runner.PersistentFrontendRunner;
-import com.altimetrik.interview.runner.model.FrontendBuildResult;
-import com.altimetrik.interview.service.PreviewStorageService;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Component;
-
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
@@ -23,7 +14,6 @@ import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -35,6 +25,17 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.stream.Stream;
+
+import org.springframework.stereotype.Component;
+
+import com.altimetrik.interview.dto.EditableCodeFileDto;
+import com.altimetrik.interview.enums.ExecutionLanguage;
+import com.altimetrik.interview.runner.PersistentFrontendRunner;
+import com.altimetrik.interview.runner.model.FrontendBuildResult;
+import com.altimetrik.interview.service.PreviewStorageService;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 @Component
 @RequiredArgsConstructor
@@ -250,7 +251,7 @@ public class ReactRunner implements PersistentFrontendRunner {
                 if (relative.startsWith("node_modules")) {
                     continue;
                 }
-                Files.createDirectories(destination.getParent());
+                createParentDirectories(destination);
                 Files.copy(path, destination, StandardCopyOption.REPLACE_EXISTING);
             }
         }
@@ -271,7 +272,7 @@ public class ReactRunner implements PersistentFrontendRunner {
                 Path relative = source.relativize(path);
                 Path destination = target.resolve(relative.toString());
                 if (Files.isSymbolicLink(path)) {
-                    Files.createDirectories(Objects.requireNonNull(destination.getParent()));
+                    createParentDirectories(destination);
                     try {
                         Files.createSymbolicLink(destination, Files.readSymbolicLink(path));
                     } catch (UnsupportedOperationException | IOException exception) {
@@ -285,7 +286,7 @@ public class ReactRunner implements PersistentFrontendRunner {
                 } else if (Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {
                     Files.createDirectories(destination);
                 } else {
-                    Files.createDirectories(destination.getParent());
+                    createParentDirectories(destination);
                     Files.copy(path, destination, StandardCopyOption.REPLACE_EXISTING);
                 }
             }
@@ -296,7 +297,7 @@ public class ReactRunner implements PersistentFrontendRunner {
         List<EditableCodeFileDto> effectiveFiles = files == null || files.isEmpty() ? DEFAULT_FILES : files;
         for (EditableCodeFileDto file : effectiveFiles) {
             Path destination = workspaceDir.resolve(file.getPath().replace('/', java.io.File.separatorChar));
-            Files.createDirectories(Objects.requireNonNull(destination.getParent()));
+            createParentDirectories(destination);
             Files.writeString(destination, file.getContent() == null ? "" : file.getContent(), StandardCharsets.UTF_8);
         }
     }
@@ -337,7 +338,7 @@ public class ReactRunner implements PersistentFrontendRunner {
                     workspaceDir, previewRoot, previewId);
             return FrontendBuildResult.success(stdout, stderr, exitCode, executionTimeMs, "/workspace/preview/" + previewId + "/");
         } catch (ExecutionException exception) {
-            return FrontendBuildResult.error("Failed during React build output reading: " + exception.getCause().getMessage());
+            return FrontendBuildResult.error("Failed during React build output reading: " + rootCauseMessage(exception));
         } catch (TimeoutException exception) {
             return FrontendBuildResult.error("Failed to read React build output");
         } catch (InterruptedException exception) {
@@ -368,10 +369,7 @@ public class ReactRunner implements PersistentFrontendRunner {
                 .flatMap(content -> content.lines())
                 .map(String::trim)
                 .filter(line -> !line.isBlank())
-                .filter(line -> {
-                    String normalized = line.toLowerCase(Locale.ROOT);
-                    return normalized.contains("error") || normalized.contains("failed") || normalized.contains("vite") || normalized.contains("ts");
-                })
+                .filter(this::isRelevantBuildErrorLine)
                 .forEach(errors::add);
         if (errors.isEmpty()) {
             if (stderr != null && !stderr.isBlank()) {
@@ -383,6 +381,28 @@ public class ReactRunner implements PersistentFrontendRunner {
             return List.of("React build failed");
         }
         return errors.stream().distinct().toList();
+    }
+
+    private boolean isRelevantBuildErrorLine(String line) {
+        String normalized = line.toLowerCase(Locale.ROOT);
+        if (normalized.startsWith("vite v")
+                || normalized.startsWith("transforming")
+                || normalized.startsWith("rendering chunks")
+                || normalized.startsWith("computing gzip size")
+                || normalized.startsWith("built in ")) {
+            return false;
+        }
+
+        return normalized.contains("error")
+                || normalized.contains("failed")
+                || normalized.contains("could not resolve")
+                || normalized.contains("failed to resolve import")
+                || normalized.contains("[plugin:vite:")
+                || normalized.contains("tsx")
+                || normalized.contains("ts230")
+                || normalized.contains("ts27")
+                || normalized.contains("ts28")
+                || normalized.contains("ts70");
     }
 
     private String readStream(InputStream stream) throws IOException {
@@ -427,5 +447,20 @@ public class ReactRunner implements PersistentFrontendRunner {
                 .editable(true)
                 .sortOrder(sortOrder)
                 .build();
+    }
+
+    private void createParentDirectories(Path destination) throws IOException {
+        Path parent = destination.getParent();
+        if (parent == null) {
+            throw new IllegalStateException("React workspace destination has no parent: " + destination);
+        }
+        Files.createDirectories(parent);
+    }
+
+    private String rootCauseMessage(ExecutionException exception) {
+        Throwable cause = exception.getCause();
+        return cause == null || cause.getMessage() == null || cause.getMessage().isBlank()
+                ? "unknown cause"
+                : cause.getMessage();
     }
 }

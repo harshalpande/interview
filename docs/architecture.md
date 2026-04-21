@@ -47,6 +47,7 @@ flowchart LR
 - Backend creates a persistent workspace per session and reuses it for fast warm builds.
 - File changes are patched into the workspace and builds prefer the live watcher path, with direct-build fallback when better diagnostics are needed.
 - Preview is exposed during the live session through the sandbox frontend preview route.
+- React workspaces are intentionally constrained to `tsx`, `ts`, and `css` files under `src/`, which keeps the Monaco setup and sandbox contract aligned with the supported interview format.
 
 ### End Interview / Final Preview
 - Before a session is marked ended, backend performs one final execution/build using the latest saved code/files.

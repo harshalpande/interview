@@ -9,7 +9,9 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.List;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
@@ -47,6 +49,10 @@ public class FinalPreviewStorageService {
         if (!previewRoot.startsWith(storageRoot) || !Files.exists(previewRoot)) {
             return null;
         }
+        previewRoot = resolveEffectivePreviewRoot(previewRoot);
+        if (previewRoot == null) {
+            return null;
+        }
 
         String normalizedAssetPath = (assetPath == null || assetPath.isBlank()) ? "index.html" : assetPath;
         Path resolved = previewRoot.resolve(normalizedAssetPath).normalize();
@@ -61,6 +67,28 @@ public class FinalPreviewStorageService {
         }
 
         return new FileSystemResource(resolved);
+    }
+
+    private Path resolveEffectivePreviewRoot(Path previewRoot) {
+        Path directIndex = previewRoot.resolve("index.html").normalize();
+        if (directIndex.startsWith(previewRoot) && Files.exists(directIndex) && !Files.isDirectory(directIndex)) {
+            return previewRoot;
+        }
+
+        try (java.util.stream.Stream<Path> paths = Files.walk(previewRoot, 4)) {
+            List<Path> candidateRoots = new ArrayList<>(paths
+                    .filter(path -> Files.isRegularFile(path) && "index.html".equalsIgnoreCase(path.getFileName().toString()))
+                    .map(Path::getParent)
+                    .filter(path -> path != null && path.startsWith(previewRoot))
+                    .toList());
+            if (candidateRoots.isEmpty()) {
+                return null;
+            }
+            candidateRoots.sort(Comparator.comparingInt(path -> previewRoot.relativize(path).getNameCount()));
+            return candidateRoots.get(0);
+        } catch (IOException exception) {
+            return null;
+        }
     }
 
     public String detectContentType(Resource resource) throws IOException {

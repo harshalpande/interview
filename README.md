@@ -8,6 +8,12 @@ The platform currently runs as four services:
 - `sandbox-backend` for Java/Python compile-run execution
 - `sandbox-frontend` for persistent Angular/React workspaces, warm builds, and preview generation
 
+Frontend interview technologies currently available in the UI:
+- `JAVA`
+- `PYTHON`
+- `ANGULAR`
+- `REACT`
+
 ## Documentation
 
 Documentation is consolidated under `docs/`:
