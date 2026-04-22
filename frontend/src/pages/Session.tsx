@@ -81,6 +81,7 @@ const Session: React.FC = () => {
   const interviewer = session?.participants.find((participant) => participant.role === 'INTERVIEWER');
   const interviewee = session?.participants.find((participant) => participant.role === 'INTERVIEWEE');
   const isFrontendWorkspaceSession = session?.technology === 'ANGULAR' || session?.technology === 'REACT';
+  const isInAppAvSession = session?.avMode === 'IN_APP';
   const intervieweeName = interviewee?.name?.trim() || 'Interviewee';
   const interviewerFirstName = firstName(interviewer?.name, 'Interviewer');
   const intervieweeFirstName = firstName(interviewee?.name, 'Interviewee');
@@ -345,14 +346,14 @@ const Session: React.FC = () => {
     toggleMute,
     toggleCamera,
   } = useWebRtcSession({
-    enabled: Boolean(sessionId && role && isCameraSessionActive),
+    enabled: Boolean(sessionId && role && isCameraSessionActive && isInAppAvSession),
     isSocketConnected: isConnected,
     role: role === 'interviewer' ? 'interviewer' : 'interviewee',
     incomingSignal,
     sendSignal,
   });
   useCameraMonitor({
-    enabled: role === 'interviewee' && isCameraSessionActive,
+    enabled: role === 'interviewee' && isCameraSessionActive && isInAppAvSession,
     stream: localStream,
     onStreamLost: handleCameraStreamLost,
     onNoFaceDetected: handleNoFaceDetected,
@@ -523,7 +524,7 @@ const Session: React.FC = () => {
   }, [role, session?.status]);
 
   React.useEffect(() => {
-    if (role !== 'interviewee' || session?.status !== 'ACTIVE' || !streamError) {
+    if (!isInAppAvSession || role !== 'interviewee' || session?.status !== 'ACTIVE' || !streamError) {
       if (session?.status !== 'ACTIVE') {
         lastCameraStreamIssueRef.current = '';
       }
@@ -539,10 +540,10 @@ const Session: React.FC = () => {
       'CAMERA_STREAM_LOST',
       `${formatPossessiveLabel(intervieweeName)} camera stream was interrupted.`
     );
-  }, [intervieweeName, recordActivityEvent, role, session?.status, streamError]);
+  }, [intervieweeName, isInAppAvSession, recordActivityEvent, role, session?.status, streamError]);
 
   React.useEffect(() => {
-    if (role !== 'interviewee') {
+    if (!isInAppAvSession || role !== 'interviewee') {
       previousMuteStateRef.current = isMuted;
       previousCameraStateRef.current = isCameraEnabled;
       return;
@@ -570,7 +571,7 @@ const Session: React.FC = () => {
 
     previousMuteStateRef.current = isMuted;
     previousCameraStateRef.current = isCameraEnabled;
-  }, [intervieweeName, isCameraEnabled, isMuted, recordActivityEvent, role, session?.status]);
+  }, [intervieweeName, isCameraEnabled, isInAppAvSession, isMuted, recordActivityEvent, role, session?.status]);
 
   if (isLoading) {
     return (
@@ -603,7 +604,10 @@ const Session: React.FC = () => {
   const waitingForFeedback = isInterviewer && session.status === 'ENDED' && !session.feedback;
   const lockDisqualificationOutcome = waitingForFeedback && Boolean(session.suspiciousRejected);
   const suspiciousActivityEvents = (session.activityEvents || []).filter((event) =>
-    ['TAB_HIDDEN', 'PASTE_IN_EDITOR', 'EXTERNAL_DROP_BLOCKED', 'CAMERA_STREAM_LOST', 'MICROPHONE_DISABLED_MANUALLY', 'CAMERA_DISABLED_MANUALLY', 'NO_FACE_DETECTED', 'MULTIPLE_FACES_DETECTED'].includes(event.eventType)
+    (isInAppAvSession
+      ? ['TAB_HIDDEN', 'PASTE_IN_EDITOR', 'EXTERNAL_DROP_BLOCKED', 'CAMERA_STREAM_LOST', 'MICROPHONE_DISABLED_MANUALLY', 'CAMERA_DISABLED_MANUALLY', 'NO_FACE_DETECTED', 'MULTIPLE_FACES_DETECTED']
+      : ['TAB_HIDDEN', 'PASTE_IN_EDITOR', 'EXTERNAL_DROP_BLOCKED']
+    ).includes(event.eventType)
   );
   const waitingJoinLabel = `Waiting for ${interviewee?.name || 'Interviewee'} to join`;
   const hasCompleteFeedback = Boolean(feedback.rating && feedback.recommendationDecision && feedback.comments.trim());
@@ -626,8 +630,8 @@ const Session: React.FC = () => {
     : isInterviewer
       ? 'Waiting for the interviewee media stream'
       : 'Waiting for the interviewer media stream';
-  const activeStageClassName = `interviewer-stage ${session.status === 'ACTIVE' ? 'active' : ''}`;
-  const activeBannerClassName = `session-banner session-banner-interviewer ${session.status === 'ACTIVE' ? 'active' : ''}`;
+  const activeStageClassName = `interviewer-stage ${session.status === 'ACTIVE' ? 'active' : ''} ${isInAppAvSession ? 'with-av' : 'without-av'}`;
+  const activeBannerClassName = `session-banner session-banner-interviewer ${session.status === 'ACTIVE' ? 'active' : ''} ${isInAppAvSession ? 'with-av' : 'without-av'}`;
   const counterpart = isInterviewer ? interviewee : interviewer;
   const counterpartFirstName = isInterviewer ? intervieweeFirstName : interviewerFirstName;
   const counterpartConnectionStatus = counterpart?.connectionStatus;
@@ -724,39 +728,41 @@ const Session: React.FC = () => {
             </div>
           </div>
 
-          <VideoPanel
-            title={remotePanelTitle}
-            stream={displayedPanelStream}
-            audioStream={remotePanelAudioStream}
-            status={panelStatus}
-            emptyMessage={remoteEmptyMessage}
-            mirror={!remoteVideoStream && Boolean(localVideoStream)}
-            muted
-            headerActions={
-              <div className="media-action-group">
-                <button
-                  type="button"
-                  className={`media-icon-button ${isMuted ? 'off' : 'on'}`}
-                  onClick={toggleMute}
-                  aria-label={isMuted ? 'Unmute microphone' : 'Mute microphone'}
-                  title={isMuted ? 'Unmute microphone' : 'Mute microphone'}
-                >
-                  <MicrophoneIcon muted={isMuted} />
-                </button>
-                {canToggleCamera ? (
+          {isInAppAvSession ? (
+            <VideoPanel
+              title={remotePanelTitle}
+              stream={displayedPanelStream}
+              audioStream={remotePanelAudioStream}
+              status={panelStatus}
+              emptyMessage={remoteEmptyMessage}
+              mirror={!remoteVideoStream && Boolean(localVideoStream)}
+              muted
+              headerActions={
+                <div className="media-action-group">
                   <button
                     type="button"
-                    className={`media-icon-button ${isCameraEnabled ? 'on' : 'off'}`}
-                    onClick={toggleCamera}
-                    aria-label={isCameraEnabled ? 'Turn camera off' : 'Turn camera on'}
-                    title={isCameraEnabled ? 'Turn camera off' : 'Turn camera on'}
+                    className={`media-icon-button ${isMuted ? 'off' : 'on'}`}
+                    onClick={toggleMute}
+                    aria-label={isMuted ? 'Unmute microphone' : 'Mute microphone'}
+                    title={isMuted ? 'Unmute microphone' : 'Mute microphone'}
                   >
-                    <CameraIcon disabled={!isCameraEnabled} />
+                    <MicrophoneIcon muted={isMuted} />
                   </button>
-                ) : null}
-              </div>
-            }
-          />
+                  {canToggleCamera ? (
+                    <button
+                      type="button"
+                      className={`media-icon-button ${isCameraEnabled ? 'on' : 'off'}`}
+                      onClick={toggleCamera}
+                      aria-label={isCameraEnabled ? 'Turn camera off' : 'Turn camera on'}
+                      title={isCameraEnabled ? 'Turn camera off' : 'Turn camera on'}
+                    >
+                      <CameraIcon disabled={!isCameraEnabled} />
+                    </button>
+                  ) : null}
+                </div>
+              }
+            />
+          ) : null}
         </div>
       ) : !isFullscreen && (
         <div className="session-banner">
@@ -868,7 +874,7 @@ const Session: React.FC = () => {
               <h3>{session.status === 'WAITING_JOIN' ? waitingJoinLabel : 'Interview is ready to start'}</h3>
               <p>
                 The editor is visible in read-only mode until the interviewer starts the interview. Once started, both
-                participants can collaborate live and the 60 minute countdown begins.
+                participants can collaborate live, the 60 minute countdown begins, and {isInAppAvSession ? 'the in-app audio/video panel becomes available.' : 'the interview continues with external audio/video such as Teams or Zoom.'}
               </p>
             </div>
           )}
@@ -1095,7 +1101,7 @@ export default Session;
 
 const SESSION_LOADING_MESSAGES = [
   'Loading the interview session details.',
-  'Connecting real-time collaboration and video signals.',
+  'Connecting real-time collaboration and session signals.',
   'Preparing the editor and sandbox workspace.',
 ];
 

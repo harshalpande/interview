@@ -136,6 +136,10 @@
   align-items: stretch;
 }
 
+.interviewer-stage.without-av {
+  grid-template-columns: 1fr;
+}
+
 .session-banner-interviewer {
   grid-template-columns: 1fr;
   grid-template-areas:
@@ -150,9 +154,25 @@
   overflow: hidden;
 }
 
+.session-banner-interviewer.without-av {
+  min-height: 176px;
+  height: auto;
+  max-height: none;
+  padding: 12px 14px;
+}
+
 .session-banner-interviewer .banner-participants {
   grid-template-columns: repeat(2, minmax(250px, 1fr));
   gap: 12px;
+}
+
+.session-banner-interviewer.without-av .banner-participants {
+  grid-template-columns: repeat(2, minmax(280px, 1fr));
+}
+
+.session-banner-interviewer.without-av .participant-card {
+  gap: 3px;
+  padding: 10px 12px;
 }
 
 .session-status-interviewer {

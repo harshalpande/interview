@@ -1,10 +1,10 @@
 # Interview Live Coding Platform
 
-React + Spring Boot app for running live coding interviews (session creation, token-based join, real-time collaboration, compile/run, frontend workspace preview, and result artifacts).
+React + Spring Boot app for running live coding interviews (session creation, token-based join, real-time collaboration, compile/run, frontend workspace preview, result artifacts, mandatory identity capture, and configurable in-app or external AV handling).
 
 The platform currently runs as four services:
 - `frontend` for the UI
-- `backend` for session, AV, feedback, monitoring, and persistence workflows
+- `backend` for session, identity capture, AV policy, feedback, monitoring, and persistence workflows
 - `sandbox-backend` for Java/Python compile-run execution
 - `sandbox-frontend` for persistent Angular/React workspaces, warm builds, and preview generation
 

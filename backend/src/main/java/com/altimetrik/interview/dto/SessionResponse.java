@@ -3,6 +3,7 @@ package com.altimetrik.interview.dto;
 import com.altimetrik.interview.enums.SessionStatus;
 import com.altimetrik.interview.enums.TechnologySkill;
 import com.altimetrik.interview.enums.ParticipantRole;
+import com.altimetrik.interview.enums.AvMode;
 import lombok.Builder;
 import lombok.Data;
 
@@ -14,6 +15,7 @@ import java.util.List;
 public class SessionResponse {
     private String id;
     private TechnologySkill technology;
+    private AvMode avMode;
     private SessionStatus status;
     private OffsetDateTime createdAt;
     private OffsetDateTime startedAt;

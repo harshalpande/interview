@@ -3,6 +3,7 @@ package com.altimetrik.interview.dto;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
+import com.altimetrik.interview.enums.AvMode;
 import com.altimetrik.interview.enums.TechnologySkill;
 
 @Data
@@ -25,4 +26,6 @@ public class CreateSessionRequest {
     private TechnologySkill technology;
 
     private String interviewerTimeZone;
+
+    private AvMode avMode;
 }

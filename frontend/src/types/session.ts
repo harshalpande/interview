@@ -2,6 +2,7 @@ export type ParticipantRole = 'INTERVIEWER' | 'INTERVIEWEE';
 export type SessionStatus = 'CREATED' | 'WAITING_JOIN' | 'ACTIVE' | 'ENDED' | 'EXPIRED';
 export type ParticipantConnectionStatus = 'DISCONNECTED' | 'CONNECTED' | 'AWAITING_APPROVAL';
 export type FeedbackRating = 'EXCELLENT' | 'GOOD' | 'FAIR' | 'BAD' | 'DISQUALIFIED';
+export type AvMode = 'IN_APP' | 'EXTERNAL';
 export type ActivityEventType =
   | 'TAB_HIDDEN'
   | 'PASTE_IN_EDITOR'
@@ -100,6 +101,7 @@ export interface EditableCodeFile {
 export interface SessionResponse {
   id: string;
   technology: TechnologySkill;
+  avMode: AvMode;
   status: SessionStatus;
   createdAt: string;
   startedAt?: string | null;
@@ -155,6 +157,7 @@ export interface CreateSessionRequest {
   intervieweeEmail: string;
   interviewerTimeZone?: string;
   technology: TechnologySkill;
+  avMode: AvMode;
 }
 
 export interface AcceptDisclaimerRequest {
