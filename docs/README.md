@@ -39,6 +39,9 @@ $env:BINDMOUNT_DIR="C:/Users/hpande/Documents/workspace/bindmount"
 docker compose up -d --build
 ```
 
+Note:
+- The backend Docker image now builds the Spring Boot application from source inside Docker. A separate local `mvn package` step is no longer required before `docker compose build backend` or `docker compose up -d --build`.
+
 3) URLs (Docker):
 - UI: `http://localhost:3000/`
 - Backend API: `http://localhost:8081/api`
@@ -135,5 +138,6 @@ REACT_APP_PUBLIC_ORIGIN=http://alti-karat.com:3000
 ## Rebuild / Redeploy Notes
 
 - `docker compose up -d --build` rebuilds images and recreates containers if needed.
+- `docker compose build backend` now compiles the backend source inside the Docker build itself, which helps prevent stale local JAR files from being deployed accidentally.
 - Your bind-mounted DB files are only deleted if you delete the Windows folder contents (or change the mount path).
 - Frontend result previews are stored as final immutable artifacts under the bind-mounted storage root before the live frontend workspace is cleaned up.

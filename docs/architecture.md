@@ -33,8 +33,12 @@ flowchart LR
 
 ### Interview Session
 - Interviewer creates a session and receives a join link token.
+- During session creation, the interviewer selects the live AV mode for the interview: built-in platform AV or an external channel such as Microsoft Teams or Zoom.
 - Interviewee joins using the token (name/email must match what interviewer registered).
+- Identity capture remains mandatory before the interviewee enters the live session, regardless of the selected AV mode.
 - Live collaboration uses STOMP topics (`/topic/session/{sessionId}`) for code + session state.
+- When `IN_APP` AV is selected, the session also uses WebRTC signaling for the built-in media panel.
+- When `EXTERNAL` AV is selected, the coding session remains focused on the editor and session controls while live audio/video is handled outside the platform.
 
 ### Compile & Run
 - Frontend posts Java source to the main backend using the existing `/api/compile` contract.

@@ -111,6 +111,7 @@ const Result: React.FC = () => {
 
   const interviewer = session.participants.find((participant) => participant.role === 'INTERVIEWER');
   const interviewee = session.participants.find((participant) => participant.role === 'INTERVIEWEE');
+  const isInAppAvSession = session.avMode === 'IN_APP';
   const isTokenExpired = session.status === 'EXPIRED';
   const activityEvents = session.activityEvents || [];
   const tabSwitchEvents = activityEvents.filter(
@@ -211,22 +212,26 @@ const Result: React.FC = () => {
                     <span className="activity-metric-label">Blocked drops</span>
                     <strong>{blockedDropEvents.length}</strong>
                   </div>
-                  <div className="activity-metric">
-                    <span className="activity-metric-label">Camera interruptions</span>
-                    <strong>{cameraStreamLostEvents.length}</strong>
-                  </div>
-                  <div className="activity-metric">
-                    <span className="activity-metric-label">Mic turned off</span>
-                    <strong>{microphoneDisabledEvents.length}</strong>
-                  </div>
-                  <div className="activity-metric">
-                    <span className="activity-metric-label">Camera turned off</span>
-                    <strong>{cameraDisabledEvents.length}</strong>
-                  </div>
+                  {isInAppAvSession ? (
+                    <>
+                      <div className="activity-metric">
+                        <span className="activity-metric-label">Camera interruptions</span>
+                        <strong>{cameraStreamLostEvents.length}</strong>
+                      </div>
+                      <div className="activity-metric">
+                        <span className="activity-metric-label">Mic turned off</span>
+                        <strong>{microphoneDisabledEvents.length}</strong>
+                      </div>
+                      <div className="activity-metric">
+                        <span className="activity-metric-label">Camera turned off</span>
+                        <strong>{cameraDisabledEvents.length}</strong>
+                      </div>
+                    </>
+                  ) : null}
                 </div>
                 <div className="activity-summary-note">
                   <p>
-                    <strong>Summary:</strong> {tabSwitchEvents.length} tab switch event{tabSwitchEvents.length === 1 ? '' : 's'}, {browserCloseRefreshEvents.length} browser refresh/close event{browserCloseRefreshEvents.length === 1 ? '' : 's'}, {pasteEvents.length} paste event{pasteEvents.length === 1 ? '' : 's'}, {blockedDropEvents.length} blocked drag-and-drop attempt{blockedDropEvents.length === 1 ? '' : 's'}, {cameraStreamLostEvents.length} camera interruption{cameraStreamLostEvents.length === 1 ? '' : 's'}, {microphoneDisabledEvents.length} microphone-off event{microphoneDisabledEvents.length === 1 ? '' : 's'}, and {cameraDisabledEvents.length} camera-off event{cameraDisabledEvents.length === 1 ? '' : 's'} were recorded during the session.
+                    <strong>Summary:</strong> {tabSwitchEvents.length} tab switch event{tabSwitchEvents.length === 1 ? '' : 's'}, {browserCloseRefreshEvents.length} browser refresh/close event{browserCloseRefreshEvents.length === 1 ? '' : 's'}, {pasteEvents.length} paste event{pasteEvents.length === 1 ? '' : 's'}, and {blockedDropEvents.length} blocked drag-and-drop attempt{blockedDropEvents.length === 1 ? '' : 's'} were recorded during the session.{isInAppAvSession ? ` ${cameraStreamLostEvents.length} camera interruption${cameraStreamLostEvents.length === 1 ? '' : 's'}, ${microphoneDisabledEvents.length} microphone-off event${microphoneDisabledEvents.length === 1 ? '' : 's'}, and ${cameraDisabledEvents.length} camera-off event${cameraDisabledEvents.length === 1 ? '' : 's'} were also recorded through the in-app AV workflow.` : ' Live AV was handled outside the platform for this session, so in-app AV monitoring events were not collected.'}
                   </p>
                   {latestActivity ? (
                     <p>

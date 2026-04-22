@@ -5,6 +5,7 @@ import com.altimetrik.interview.enums.TechnologySkill;
 import com.altimetrik.interview.enums.FeedbackRating;
 import com.altimetrik.interview.enums.ParticipantRole;
 import com.altimetrik.interview.enums.RecommendationDecision;
+import com.altimetrik.interview.enums.AvMode;
 import jakarta.persistence.*;
 import lombok.Data;
 import org.hibernate.annotations.CreationTimestamp;
@@ -61,6 +62,9 @@ public class InterviewSession {
 
     @Enumerated(EnumType.STRING)
     private TechnologySkill technology = TechnologySkill.JAVA;
+
+    @Enumerated(EnumType.STRING)
+    private AvMode avMode = AvMode.EXTERNAL;
     
     @Enumerated(EnumType.STRING)
     private SessionStatus status = SessionStatus.CREATED;

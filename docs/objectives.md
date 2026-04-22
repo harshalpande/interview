@@ -13,7 +13,9 @@
 ## Key Features
 
 - Monaco editor with Run/Reset, theme toggle, and `Ctrl+Enter` run shortcut.
-- Two-way live audio/video session controls with pre-start media readiness, interviewer/interviewee toggles, explicit no-video states, and interviewer-visible suspicious activity signals during feedback.
+- Mandatory pre-interview identity capture for every session, independent of the selected live AV mode.
+- Configurable live AV mode at session creation, allowing the interviewer to choose either the built-in platform AV experience or an external channel such as Microsoft Teams or Zoom.
+- Two-way live audio/video session controls with pre-start media readiness, interviewer/interviewee toggles, explicit no-video states, and interviewer-visible suspicious activity signals during feedback when the session is configured for in-app AV.
 - Suspicious external drag attempts into the editor are blocked and surfaced as interviewer-visible monitoring activity.
 - Session dashboard with status + summary.
 - Persistent session resume for active interviews, including reconnect/redeploy recovery, interviewer approval for high-risk interviewee resumes, and automatic incomplete handling after interruption timeout.
@@ -35,7 +37,9 @@
 
 ## Future Enhancements
 
-- Shift the next product phase toward performance analysis and future-scope enhancements now that the core AV workflow is complete.
+- Based on the product demo held on April 22, 2026, the recommended standard operating position is to keep external AV as the default session mode, using Microsoft Teams or Zoom based on interviewer availability, so the platform experience remains centered on the interview editor, collaboration workflow, and evaluation journey rather than on embedded AV.
+- In-app AV remains available as a supported option for sessions that explicitly require it, but it should be treated as an exception path rather than the default operating model.
+- Shift the next product phase toward performance analysis and future-scope enhancements while preserving this editor-first interview workflow.
 - Add a program-evaluation engine that compares the interviewee solution with an ideal/reference solution.
   - Phase 1 metrics should focus on:
     - correctness / passed tests

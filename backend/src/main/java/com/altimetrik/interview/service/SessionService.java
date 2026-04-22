@@ -35,6 +35,7 @@ import com.altimetrik.interview.entity.RunResult;
 import com.altimetrik.interview.entity.SessionActivityEvent;
 import com.altimetrik.interview.entity.SessionToken;
 import com.altimetrik.interview.enums.ActivityEventType;
+import com.altimetrik.interview.enums.AvMode;
 import com.altimetrik.interview.enums.CodeStorageMode;
 import com.altimetrik.interview.enums.ExecutionLanguage;
 import com.altimetrik.interview.enums.FeedbackRating;
@@ -254,6 +255,7 @@ public class SessionService {
         session.setDurationSec(DEFAULT_DURATION_SEC);
         session.setExtensionUsed(false);
         session.setTechnology(request.getTechnology() == null ? TechnologySkill.JAVA : request.getTechnology());
+        session.setAvMode(request.getAvMode() == null ? AvMode.EXTERNAL : request.getAvMode());
         session = sessionRepository.save(session);
 
         participantRepository.save(createParticipant(session.getId(), ParticipantRole.INTERVIEWER,
@@ -1175,7 +1177,7 @@ public class SessionService {
     @Transactional(readOnly = true)
     public ResourceWithMetadata getFinalPreviewResource(String sessionId, String assetPath) {
         InterviewSession session = getRequiredSession(sessionId);
-        log.info("Loading final preview resource for session {} finalPreviewPath={} assetPath={}",
+        log.debug("Loading final preview resource for session {} finalPreviewPath={} assetPath={}",
                 sessionId,
                 session.getFinalPreviewPath(),
                 assetPath);
@@ -1302,6 +1304,7 @@ public class SessionService {
         return SessionResponse.builder()
                 .id(session.getId())
                 .technology(session.getTechnology())
+                .avMode(session.getAvMode() == null ? AvMode.EXTERNAL : session.getAvMode())
                 .status(session.getStatus())
                 .createdAt(session.getCreatedAt())
                 .startedAt(session.getStartedAt())
@@ -1533,11 +1536,11 @@ public class SessionService {
 
     private String resolveFinalPreviewUrl(InterviewSession session) {
         if (session.getFinalPreviewPath() == null || session.getFinalPreviewPath().isBlank()) {
-            log.info("Final preview URL unavailable for session {} because finalPreviewPath is empty", session.getId());
+            log.debug("Final preview URL unavailable for session {} because finalPreviewPath is empty", session.getId());
             return null;
         }
         String finalPreviewUrl = "/api/sessions/" + session.getId() + "/final-preview/";
-        log.info("Resolved final preview URL for session {} finalPreviewPath={} finalPreviewUrl={}",
+        log.debug("Resolved final preview URL for session {} finalPreviewPath={} finalPreviewUrl={}",
                 session.getId(),
                 session.getFinalPreviewPath(),
                 finalPreviewUrl);

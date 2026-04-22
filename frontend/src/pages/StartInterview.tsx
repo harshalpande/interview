@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Button } from '../components/Button';
 import { sessionApi } from '../services/sessionApi';
-import type { CreateSessionRequest, TechnologySkill } from '../types/session';
+import type { AvMode, CreateSessionRequest, TechnologySkill } from '../types/session';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useSessionStore } from '../stores/sessionStore';
 import { getBrowserTimeZone } from '../utils/dateTime';
@@ -19,6 +19,7 @@ const StartInterview: React.FC = () => {
     intervieweeEmail: '',
     interviewerTimeZone: getBrowserTimeZone(),
     technology,
+    avMode: 'EXTERNAL',
   });
   const navigate = useNavigate();
   const setSession = useSessionStore((state) => state.setSession);
@@ -31,10 +32,23 @@ const StartInterview: React.FC = () => {
     });
   };
 
+  const handleAvModeChange = (avMode: AvMode) => {
+    setFormData((previous) => ({
+      ...previous,
+      avMode,
+    }));
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
       e.preventDefault();
       try {
-        const response = await sessionApi.createSession(formData);
+        const submittedForm = new FormData(e.currentTarget as HTMLFormElement);
+        const avMode = (submittedForm.get('avMode') as AvMode | null) ?? formData.avMode;
+        const request: CreateSessionRequest = {
+          ...formData,
+          avMode,
+        };
+        const response = await sessionApi.createSession(request);
         setSession(response);
         setRole('interviewer');
         navigate(`/java/disclaimer/interviewer?sessionId=${response.id}`);
@@ -70,6 +84,33 @@ const StartInterview: React.FC = () => {
         <div className="form-group">
           <label htmlFor="intervieweeEmail">Interviewee Email</label>
           <input id="intervieweeEmail" name="intervieweeEmail" type="email" autoComplete="new-password" inputMode="email" value={formData.intervieweeEmail} onChange={handleChange} required />
+        </div>
+        <div className="form-group form-group-full">
+          <label>Interview AV Mode</label>
+          <div className="av-mode-options" role="radiogroup" aria-label="Interview AV mode">
+            <label className={`av-mode-option ${formData.avMode === 'EXTERNAL' ? 'selected' : ''}`}>
+              <input
+                type="radio"
+                name="avMode"
+                value="EXTERNAL"
+                checked={formData.avMode === 'EXTERNAL'}
+                onChange={() => handleAvModeChange('EXTERNAL')}
+              />
+              <span className="av-mode-option-title">Use Teams / Zoom</span>
+              <span className="av-mode-option-copy">Recommended for the standard workflow. The coding session stays focused on the editor while AV is handled externally.</span>
+            </label>
+            <label className={`av-mode-option ${formData.avMode === 'IN_APP' ? 'selected' : ''}`}>
+              <input
+                type="radio"
+                name="avMode"
+                value="IN_APP"
+                checked={formData.avMode === 'IN_APP'}
+                onChange={() => handleAvModeChange('IN_APP')}
+              />
+              <span className="av-mode-option-title">Use In-App AV</span>
+              <span className="av-mode-option-copy">Enable the built-in live audio and video panel during the interview session.</span>
+            </label>
+          </div>
         </div>
         <div className="start-interview-actions">
           <Button type="submit">Start</Button>
