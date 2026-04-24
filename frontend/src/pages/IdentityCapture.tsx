@@ -94,7 +94,7 @@ const IdentityCapture: React.FC = () => {
 
   const goToDisclaimer = React.useCallback(
     (nextSessionId: string) => {
-      navigate(`/java/disclaimer/interviewee?sessionId=${nextSessionId}`);
+      navigate(`/java/session/${nextSessionId}?role=interviewee`);
     },
     [navigate]
   );

@@ -1,6 +1,8 @@
 import axios, { AxiosInstance } from 'axios';
 import type { 
   AcceptDisclaimerRequest,
+  AccessLinkResponse,
+  AccessVerificationResponse,
   ActivityEvent,
   ActivityEventRequest,
   CreateSessionRequest, 
@@ -9,14 +11,13 @@ import type {
   FeedbackRating,
   HeartbeatRequest,
   IdentityCaptureRequest,
-  JoinSessionRequest,
   ResumeApprovalRequest,
   ResumeRequest,
   ResumeResponse,
   SessionResponse, 
   FeedbackRequest,
   TechnologySkill,
-  ValidateTokenResponse 
+  VerifyOtpRequest
 } from '../types/session';
 import { resolveApiBaseUrl } from '../utils/apiUrls';
 
@@ -45,6 +46,15 @@ class SessionApiClient {
   async getSession(id: string): Promise<SessionResponse> {
     try {
       const response = await this.axiosInstance.get<SessionResponse>(`/sessions/${id}`);
+      return response.data;
+    } catch (error) {
+      throw this.handleError(error);
+    }
+  }
+
+  async startSecureSession(id: string): Promise<SessionResponse> {
+    try {
+      const response = await this.axiosInstance.post<SessionResponse>(`/sessions/${id}/start-session`);
       return response.data;
     } catch (error) {
       throw this.handleError(error);
@@ -140,18 +150,36 @@ class SessionApiClient {
     }
   }
 
-  async validateToken(token: string): Promise<ValidateTokenResponse> {
+  async getAccessLink(token: string): Promise<AccessLinkResponse> {
     try {
-      const response = await this.axiosInstance.get<ValidateTokenResponse>(`/sessions/join/${token}`);
+      const response = await this.axiosInstance.get<AccessLinkResponse>(`/sessions/access/${token}`);
       return response.data;
     } catch (error) {
       throw this.handleError(error);
     }
   }
 
-  async joinSession(token: string, request: JoinSessionRequest): Promise<SessionResponse> {
+  async verifyAccessOtp(token: string, request: VerifyOtpRequest): Promise<AccessVerificationResponse> {
     try {
-      const response = await this.axiosInstance.post<SessionResponse>(`/sessions/join/${token}`, request);
+      const response = await this.axiosInstance.post<AccessVerificationResponse>(`/sessions/access/${token}/verify-otp`, request);
+      return response.data;
+    } catch (error) {
+      throw this.handleError(error);
+    }
+  }
+
+  async retryAccessOtp(token: string): Promise<AccessVerificationResponse> {
+    try {
+      const response = await this.axiosInstance.post<AccessVerificationResponse>(`/sessions/access/${token}/retry`);
+      return response.data;
+    } catch (error) {
+      throw this.handleError(error);
+    }
+  }
+
+  async acceptAccessDisclaimer(token: string): Promise<SessionResponse> {
+    try {
+      const response = await this.axiosInstance.post<SessionResponse>(`/sessions/access/${token}/disclaimer`);
       return response.data;
     } catch (error) {
       throw this.handleError(error);

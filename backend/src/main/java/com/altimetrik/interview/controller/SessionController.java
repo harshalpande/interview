@@ -26,6 +26,8 @@ import org.springframework.web.multipart.MultipartFile;
 
 import com.altimetrik.interview.dto.AbandonSessionRequest;
 import com.altimetrik.interview.dto.AcceptDisclaimerRequest;
+import com.altimetrik.interview.dto.AccessLinkResponse;
+import com.altimetrik.interview.dto.AccessVerificationResponse;
 import com.altimetrik.interview.dto.ActivityEventDto;
 import com.altimetrik.interview.dto.ActivityEventRequest;
 import com.altimetrik.interview.dto.CodeUpdateRequest;
@@ -34,15 +36,15 @@ import com.altimetrik.interview.dto.DisconnectParticipantRequest;
 import com.altimetrik.interview.dto.EndSessionRequest;
 import com.altimetrik.interview.dto.FeedbackRequest;
 import com.altimetrik.interview.dto.HeartbeatRequest;
-import com.altimetrik.interview.dto.JoinSessionRequest;
 import com.altimetrik.interview.dto.ResumeApprovalRequest;
 import com.altimetrik.interview.dto.ResumeRequest;
 import com.altimetrik.interview.dto.ResumeResponse;
 import com.altimetrik.interview.dto.SessionResponse;
 import com.altimetrik.interview.dto.SessionSocketMessage;
-import com.altimetrik.interview.dto.ValidateTokenResponse;
+import com.altimetrik.interview.dto.VerifyOtpRequest;
 import com.altimetrik.interview.enums.FeedbackRating;
 import com.altimetrik.interview.enums.TechnologySkill;
+import com.altimetrik.interview.service.SessionAccessService;
 import com.altimetrik.interview.service.SessionService;
 
 import jakarta.validation.Valid;
@@ -55,6 +57,7 @@ import lombok.RequiredArgsConstructor;
 public class SessionController {
 
     private final SessionService sessionService;
+    private final SessionAccessService sessionAccessService;
     private final SimpMessagingTemplate messagingTemplate;
 
     @PostMapping
@@ -67,6 +70,13 @@ public class SessionController {
     @GetMapping("/{id}")
     public ResponseEntity<SessionResponse> getSession(@PathVariable String id) {
         return ResponseEntity.ok(sessionService.getSession(id));
+    }
+
+    @PostMapping("/{id}/start-session")
+    public ResponseEntity<SessionResponse> startSecureSession(@PathVariable String id) {
+        SessionResponse response = sessionAccessService.startSession(id);
+        broadcastSession(response, "SESSION_STATE", "Secure session authentication started");
+        return ResponseEntity.ok(response);
     }
 
     @GetMapping
@@ -119,17 +129,50 @@ public class SessionController {
         return ResponseEntity.ok(response);
     }
 
-    @GetMapping("/join/{token}")
-    public ResponseEntity<ValidateTokenResponse> validateToken(@PathVariable String token) {
-        return ResponseEntity.ok(sessionService.validateToken(token));
+    @GetMapping("/access/{token}")
+    public ResponseEntity<AccessLinkResponse> getSecureAccess(@PathVariable String token) {
+        return ResponseEntity.ok(sessionAccessService.getAccessLink(token));
     }
 
-    @PostMapping("/join/{token}")
-    public ResponseEntity<SessionResponse> joinSession(@PathVariable String token,
-                                                       @Valid @RequestBody JoinSessionRequest request,
-                                                       HttpServletRequest servletRequest) {
-        SessionResponse response = sessionService.joinSession(token, request, extractClientIp(servletRequest), servletRequest.getHeader("User-Agent"));
-        broadcastSession(response, "USER_JOINED", "Interviewee joined");
+    @PostMapping("/access/{token}/verify-otp")
+    public ResponseEntity<AccessVerificationResponse> verifyOtp(@PathVariable String token,
+                                                                @Valid @RequestBody VerifyOtpRequest request,
+                                                                HttpServletRequest servletRequest) {
+        AccessVerificationResponse response = sessionAccessService.verifyOtp(
+                token,
+                request,
+                extractClientIp(servletRequest),
+                servletRequest.getHeader("User-Agent")
+        );
+        if (response.getSession() != null) {
+            broadcastSession(response.getSession(), "SESSION_STATE", response.getMessage());
+        }
+        return ResponseEntity.ok(response);
+    }
+
+    @PostMapping("/access/{token}/retry")
+    public ResponseEntity<AccessVerificationResponse> retryOtp(@PathVariable String token,
+                                                               HttpServletRequest servletRequest) {
+        AccessVerificationResponse response = sessionAccessService.retryOtp(
+                token,
+                extractClientIp(servletRequest),
+                servletRequest.getHeader("User-Agent")
+        );
+        if (response.getSession() != null) {
+            broadcastSession(response.getSession(), "SESSION_STATE", response.getMessage());
+        }
+        return ResponseEntity.ok(response);
+    }
+
+    @PostMapping("/access/{token}/disclaimer")
+    public ResponseEntity<SessionResponse> acceptAccessDisclaimer(@PathVariable String token,
+                                                                  HttpServletRequest servletRequest) {
+        SessionResponse response = sessionAccessService.acceptAccessDisclaimer(
+                token,
+                extractClientIp(servletRequest),
+                servletRequest.getHeader("User-Agent")
+        );
+        broadcastSession(response, "SESSION_STATE", "Disclaimer accepted");
         return ResponseEntity.ok(response);
     }
 

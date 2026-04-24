@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Button } from '../components/Button';
 import { sessionApi } from '../services/sessionApi';
 import type { AvMode, CreateSessionRequest, TechnologySkill } from '../types/session';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { useSessionStore } from '../stores/sessionStore';
 import { getBrowserTimeZone } from '../utils/dateTime';
 import './StartInterview.css';
 
@@ -22,8 +22,7 @@ const StartInterview: React.FC = () => {
     avMode: 'EXTERNAL',
   });
   const navigate = useNavigate();
-  const setSession = useSessionStore((state) => state.setSession);
-  const setRole = useSessionStore((state) => state.setRole);
+  const queryClient = useQueryClient();
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData({
@@ -48,23 +47,27 @@ const StartInterview: React.FC = () => {
           ...formData,
           avMode,
         };
-        const response = await sessionApi.createSession(request);
-        setSession(response);
-        setRole('interviewer');
-        navigate(`/java/disclaimer/interviewer?sessionId=${response.id}`);
+        await sessionApi.createSession(request);
+        await queryClient.invalidateQueries({ queryKey: ['sessions'] });
+        navigate('/', {
+          replace: true,
+          state: {
+            registrationCreated: true,
+          },
+        });
       } catch (error) {
         console.error('Failed to create session:', error);
-        alert('Failed to start interview');
+        alert('Failed to register interview');
       }
     };
 
   return (
     <div className="page-shell">
       <div className="page-card form-card">
-      <div className="page-kicker">Create Interview</div>
+      <div className="page-kicker">Register Interview</div>
       <h2>Register interviewer and interviewee</h2>
       <p className="page-subtitle">
-        The interviewer creates the session for both participants. A secure join link will be generated for the interviewee after disclaimer acceptance.
+        This step creates the interview record only. The secure participant session flow will be started later from the dashboard.
       </p>
       <form onSubmit={handleSubmit} className="stack-form start-interview-form" autoComplete="off">
         <input type="text" name="ghostUser" autoComplete="username" tabIndex={-1} aria-hidden="true" className="sr-only-input" />
@@ -113,7 +116,7 @@ const StartInterview: React.FC = () => {
           </div>
         </div>
         <div className="start-interview-actions">
-          <Button type="submit">Start</Button>
+          <Button type="submit">Register</Button>
         </div>
       </form>
       </div>

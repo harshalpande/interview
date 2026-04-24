@@ -2,7 +2,6 @@ import React from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import Editor from '../components/Editor';
-import ShareUrlToggle from '../components/ShareUrlToggle';
 import ToastStack, { ToastItem } from '../components/ToastStack';
 import VideoPanel from '../components/VideoPanel';
 import { useCameraMonitor } from '../hooks/useCameraMonitor';
@@ -21,11 +20,13 @@ const FEEDBACK_COMMENT_LIMIT = 4000;
 const ALTIMETRIK_REDIRECT_URL = process.env.REACT_APP_POST_INTERVIEW_REDIRECT_URL || 'https://www.altimetrik.com/';
 
 const STATUS_LABELS: Record<SessionStatus, string> = {
-  CREATED: 'Ready to Start',
-  WAITING_JOIN: 'Waiting for Interviewee to Join',
+  REGISTERED: 'Registered',
+  AUTH_IN_PROGRESS: 'Authentication In Progress',
+  READY_TO_START: 'Ready to Start',
   ACTIVE: 'Interview In Progress',
   ENDED: 'Interview Ended',
-  EXPIRED: 'Join Link Expired',
+  EXPIRED: 'Session Expired',
+  AUTH_FAILED: 'Authentication Failed',
 };
 
 const Session: React.FC = () => {
@@ -68,8 +69,6 @@ const Session: React.FC = () => {
     queryKey: ['session', sessionId],
     queryFn: () => sessionApi.getSession(sessionId!),
     enabled: !!sessionId,
-    // Keep interviewer UI fresh pre-start so joinInfo disappears right after interviewee joins,
-    // even if a websocket connection is not yet established.
     refetchInterval: (query) => {
       const data = query.state.data as SessionResponse | undefined;
       if (!data) return false;
@@ -322,7 +321,7 @@ const Session: React.FC = () => {
   );
 
   const { isReconnecting, isConnected, sendCode, sendSignal } = useWebSocket(sessionId || '', handleSocketMessage);
-  const isCameraSessionActive = session?.status === 'CREATED' || session?.status === 'ACTIVE';
+  const isCameraSessionActive = session?.status === 'READY_TO_START' || session?.status === 'ACTIVE';
   const handleCameraStreamLost = React.useCallback(() => {
     void recordActivityEvent('CAMERA_STREAM_LOST', `${formatPossessiveLabel(intervieweeName)} camera stream was interrupted.`);
   }, [intervieweeName, recordActivityEvent]);
@@ -595,7 +594,7 @@ const Session: React.FC = () => {
   const isInterviewer = role === 'interviewer';
   const wsRole: ParticipantRole = isInterviewer ? 'INTERVIEWER' : 'INTERVIEWEE';
   const displayedTimeLeft = timeLeft ?? session.remainingSec;
-  const canStart = isInterviewer && session.status === 'CREATED';
+  const canStart = isInterviewer && session.status === 'READY_TO_START';
   const canEnd = isInterviewer && session.status === 'ACTIVE';
   const canExtend =
     isInterviewer && session.status === 'ACTIVE' && !session.extensionUsed && displayedTimeLeft <= 15 * 60;
@@ -787,7 +786,7 @@ const Session: React.FC = () => {
           <div className="session-status">
             <div className="session-status-row">
               <div className={`status-chip status-chip-${session.status.toLowerCase()}`}>
-                {session.status === 'WAITING_JOIN' ? waitingJoinLabel : STATUS_LABELS[session.status]}
+                {session.status === 'AUTH_IN_PROGRESS' ? waitingJoinLabel : STATUS_LABELS[session.status]}
               </div>
               {session.status === 'ACTIVE' && timerLabel && (
                 <div className="timer timer-live">Time left: {timerLabel}</div>
@@ -837,10 +836,6 @@ const Session: React.FC = () => {
         </div>
       )}
 
-      {isInterviewer && session.joinInfo && session.status !== 'ACTIVE' && (
-        <ShareUrlToggle token={session.joinInfo.token} />
-      )}
-
       {isInterviewer && interviewee?.awaitingResumeApproval && (
         <div className="waiting-panel">
           <h3>Resume approval required</h3>
@@ -871,7 +866,7 @@ const Session: React.FC = () => {
         <>
           {showPreStartState && (
             <div className="waiting-panel">
-              <h3>{session.status === 'WAITING_JOIN' ? waitingJoinLabel : 'Interview is ready to start'}</h3>
+              <h3>{session.status === 'AUTH_IN_PROGRESS' ? waitingJoinLabel : 'Interview is ready to start'}</h3>
               <p>
                 The editor is visible in read-only mode until the interviewer starts the interview. Once started, both
                 participants can collaborate live, the 60 minute countdown begins, and {isInAppAvSession ? 'the in-app audio/video panel becomes available.' : 'the interview continues with external audio/video such as Teams or Zoom.'}

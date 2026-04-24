@@ -3,6 +3,7 @@ package com.altimetrik.interview.service;
 import com.altimetrik.interview.dto.AcceptDisclaimerRequest;
 import com.altimetrik.interview.dto.ActivityEventDto;
 import com.altimetrik.interview.dto.ActivityEventRequest;
+import com.altimetrik.interview.dto.AuthAuditEventDto;
 import com.altimetrik.interview.dto.CreateSessionRequest;
 import com.altimetrik.interview.dto.CodeUpdateRequest;
 import com.altimetrik.interview.dto.EditableCodeFileDto;
@@ -15,8 +16,6 @@ import com.altimetrik.interview.dto.FrontendWorkspaceDto;
 import com.altimetrik.interview.dto.FrontendWorkspaceRequest;
 import com.altimetrik.interview.dto.FrontendWorkspaceResponse;
 import com.altimetrik.interview.dto.HeartbeatRequest;
-import com.altimetrik.interview.dto.JoinSessionRequest;
-import com.altimetrik.interview.dto.JoinTokenResponse;
 import com.altimetrik.interview.dto.ParticipantDto;
 import com.altimetrik.interview.dto.DisconnectParticipantRequest;
 import com.altimetrik.interview.dto.ResumeApprovalRequest;
@@ -24,16 +23,15 @@ import com.altimetrik.interview.dto.ResumeRequest;
 import com.altimetrik.interview.dto.ResumeResponse;
 import com.altimetrik.interview.dto.RunResultDto;
 import com.altimetrik.interview.dto.SessionResponse;
-import com.altimetrik.interview.dto.ValidateTokenResponse;
 import com.altimetrik.interview.entity.CodeState;
 import com.altimetrik.interview.entity.CodeFile;
 import com.altimetrik.interview.entity.Feedback;
 import com.altimetrik.interview.entity.FrontendWorkspace;
 import com.altimetrik.interview.entity.InterviewSession;
 import com.altimetrik.interview.entity.Participant;
+import com.altimetrik.interview.entity.ParticipantAccessChallenge;
 import com.altimetrik.interview.entity.RunResult;
 import com.altimetrik.interview.entity.SessionActivityEvent;
-import com.altimetrik.interview.entity.SessionToken;
 import com.altimetrik.interview.enums.ActivityEventType;
 import com.altimetrik.interview.enums.AvMode;
 import com.altimetrik.interview.enums.CodeStorageMode;
@@ -43,6 +41,7 @@ import com.altimetrik.interview.enums.FrontendWorkspaceStatus;
 import com.altimetrik.interview.enums.IdentityCaptureFailureReason;
 import com.altimetrik.interview.enums.IdentityCaptureStatus;
 import com.altimetrik.interview.enums.ParticipantConnectionStatus;
+import com.altimetrik.interview.enums.ParticipantAccessStatus;
 import com.altimetrik.interview.enums.ParticipantRole;
 import com.altimetrik.interview.enums.RecommendationDecision;
 import com.altimetrik.interview.enums.ResumeReason;
@@ -53,10 +52,10 @@ import com.altimetrik.interview.repository.CodeStateRepository;
 import com.altimetrik.interview.repository.FeedbackRepository;
 import com.altimetrik.interview.repository.FrontendWorkspaceRepository;
 import com.altimetrik.interview.repository.ParticipantRepository;
+import com.altimetrik.interview.repository.ParticipantAccessChallengeRepository;
 import com.altimetrik.interview.repository.RunResultRepository;
 import com.altimetrik.interview.repository.SessionActivityEventRepository;
 import com.altimetrik.interview.repository.SessionRepository;
-import com.altimetrik.interview.repository.SessionTokenRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import jakarta.persistence.EntityManager;
@@ -82,6 +81,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -101,7 +101,6 @@ public class SessionService {
     private static final int EXTENSION_SEC = 15 * 60;
     private static final int EXTENSION_THRESHOLD_SEC = 15 * 60;
     private static final int RECOVERY_WINDOW_SEC = 120;
-    private static final int TOKEN_EXPIRY_MINUTES = 5;
     private static final int MAX_WORKSPACE_FILE_COUNT = 20;
     private static final int MAX_WORKSPACE_TOTAL_CHARS = 300_000;
     private static final int MAX_WORKSPACE_FILE_CHARS = 100_000;
@@ -236,7 +235,7 @@ public class SessionService {
 
     private final SessionRepository sessionRepository;
     private final ParticipantRepository participantRepository;
-    private final SessionTokenRepository sessionTokenRepository;
+    private final ParticipantAccessChallengeRepository participantAccessChallengeRepository;
     private final CodeFileRepository codeFileRepository;
     private final CodeStateRepository codeStateRepository;
     private final RunResultRepository runResultRepository;
@@ -251,7 +250,7 @@ public class SessionService {
     @Transactional
     public SessionResponse createSession(CreateSessionRequest request) {
         InterviewSession session = new InterviewSession();
-        session.setStatus(SessionStatus.WAITING_JOIN);
+        session.setStatus(SessionStatus.REGISTERED);
         session.setDurationSec(DEFAULT_DURATION_SEC);
         session.setExtensionUsed(false);
         session.setTechnology(request.getTechnology() == null ? TechnologySkill.JAVA : request.getTechnology());
@@ -273,19 +272,17 @@ public class SessionService {
         codeStateRepository.save(codeState);
         replaceCodeFiles(session.getId(), buildDefaultEditableFiles(session.getTechnology()));
 
-        JoinTokenResponse joinInfo = createJoinToken(session.getId());
-
         InterviewSession persisted = sessionRepository.findById(session.getId())
                 .orElseThrow(() -> new IllegalArgumentException("Session not found"));
         log.info("Created session {}", session.getId());
-        return toSessionResponse(persisted, true, joinInfo);
+        return toSessionResponse(persisted, true);
     }
 
     @Transactional
     public SessionResponse getSession(String id) {
         InterviewSession session = getRequiredSession(id);
         ensureFrontendWorkspaceIfNeeded(session);
-        return toSessionResponse(session, true, getActiveJoinInfo(id));
+        return toSessionResponse(session, true);
     }
 
     @Transactional(readOnly = true)
@@ -385,91 +382,20 @@ public class SessionService {
     @Transactional(readOnly = true)
     public List<SessionResponse> listActiveSessions() {
         return sessionRepository.findByStatus(SessionStatus.ACTIVE).stream()
-                .map(session -> toSessionResponse(session, true, null))
+                .map(session -> toSessionResponse(session, true))
                 .toList();
     }
 
     @Transactional
     public SessionResponse acceptDisclaimer(String sessionId, AcceptDisclaimerRequest request) {
         acceptDisclaimerInternal(sessionId, request.getRole());
-        InterviewSession session = getRequiredSession(sessionId);
-        return toSessionResponse(session, true, getActiveJoinInfo(sessionId));
-    }
-
-    @Transactional(readOnly = true)
-    public ValidateTokenResponse validateToken(String token) {
-        SessionToken sessionToken = getRequiredToken(token);
-        if (sessionToken.getIsUsed()) {
-            InterviewSession session = getRequiredSession(sessionToken.getSessionId());
-            if (session.getStatus() == SessionStatus.ACTIVE || session.getStatus() == SessionStatus.CREATED) {
-                return ValidateTokenResponse.builder()
-                        .valid(true)
-                        .sessionId(sessionToken.getSessionId())
-                        .role(sessionToken.getRole())
-                        .expiresAt(sessionToken.getExpiresAt())
-                        .message("Interview link already used. Please verify your details to resume.")
-                        .resumeRequired(true)
-                        .build();
-            }
-            return invalidToken(sessionToken, "Token has already been used");
-        }
-        if (sessionToken.getExpiresAt().isBefore(nowUtc())) {
-            expireSessionIfNeeded(sessionToken.getSessionId());
-            return invalidToken(sessionToken, "Token has expired");
-        }
-
-        return ValidateTokenResponse.builder()
-                .valid(true)
-                .sessionId(sessionToken.getSessionId())
-                .role(sessionToken.getRole())
-                .expiresAt(sessionToken.getExpiresAt())
-                .message("Token is valid")
-                .resumeRequired(false)
-                .build();
-    }
-
-    @Transactional
-    public SessionResponse joinSession(String token, JoinSessionRequest request, String clientIp, String userAgent) {
-        SessionToken sessionToken = getRequiredToken(token);
-        if (sessionToken.getIsUsed()) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "This interview link has already been used.");
-        }
-        if (sessionToken.getExpiresAt().isBefore(nowUtc())) {
-            expireSessionIfNeeded(sessionToken.getSessionId());
-            throw new ResponseStatusException(HttpStatus.GONE, "This interview link has expired. Please ask the interviewer to share a new link.");
-        }
-
-        Participant participant = participantRepository.findBySessionIdAndRole(sessionToken.getSessionId(), ParticipantRole.INTERVIEWEE)
-                .orElseThrow(() -> new IllegalArgumentException("Interviewee not registered"));
-
-        if (!participant.getName().equalsIgnoreCase(request.getName().trim())
-                || !participant.getEmail().equalsIgnoreCase(request.getEmail().trim())) {
-            throw new ResponseStatusException(
-                    HttpStatus.FORBIDDEN,
-                    "Details do not match our records. Please enter the same name and email that the interviewer registered for this interview."
-            );
-        }
-
-        participant.setJoinedAt(nowUtc());
-        participant.setTimeZone(normalizeTimeZone(request.getTimeZone()));
-        markParticipantConnected(participant, request.getDeviceId(), clientIp, userAgent);
-        participantRepository.save(participant);
-
-        sessionToken.setIsUsed(true);
-        sessionToken.setUsedAt(nowUtc());
-        sessionTokenRepository.save(sessionToken);
-
-        InterviewSession session = getRequiredSession(sessionToken.getSessionId());
-        session.setStatus(SessionStatus.CREATED);
-        clearRecoveryWindow(session);
-        sessionRepository.save(session);
-        return toSessionResponse(session, true, null);
+        return reevaluatePreSessionState(sessionId);
     }
 
     @Transactional
     public ResumeResponse requestResume(String sessionId, ResumeRequest request, String clientIp, String userAgent) {
         InterviewSession session = getRequiredSession(sessionId);
-        if (session.getStatus() != SessionStatus.ACTIVE && session.getStatus() != SessionStatus.CREATED) {
+        if (session.getStatus() != SessionStatus.ACTIVE && session.getStatus() != SessionStatus.READY_TO_START) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "This session is not available for resume.");
         }
 
@@ -514,7 +440,7 @@ public class SessionService {
                     .status(ResumeResponse.PENDING_APPROVAL)
                     .approvalRequired(true)
                     .message("Resume request sent to the interviewer for approval.")
-                    .session(toSessionResponse(session, true, getActiveJoinInfo(sessionId)))
+                    .session(toSessionResponse(session, true))
                     .build();
         }
 
@@ -534,7 +460,7 @@ public class SessionService {
                 .status(ResumeResponse.APPROVED)
                 .approvalRequired(false)
                 .message("Resume approved.")
-                .session(toSessionResponse(session, true, getActiveJoinInfo(sessionId)))
+                .session(toSessionResponse(session, true))
                 .build();
     }
 
@@ -565,7 +491,7 @@ public class SessionService {
         ensureFrontendWorkspaceIfNeeded(session);
         saveSystemActivityEvent(sessionId, ParticipantRole.INTERVIEWER, ActivityEventType.TAB_HIDDEN,
                 "Interviewer approved the interviewee resume request.");
-        return toSessionResponse(session, true, getActiveJoinInfo(sessionId));
+        return toSessionResponse(session, true);
     }
 
     @Transactional
@@ -603,7 +529,7 @@ public class SessionService {
         sessionRepository.save(session);
 
         saveSystemActivityEvent(sessionId, ParticipantRole.INTERVIEWER, ActivityEventType.TAB_HIDDEN, reason);
-        return toSessionResponse(session, true, getActiveJoinInfo(sessionId));
+        return toSessionResponse(session, true);
     }
 
     @Transactional
@@ -618,7 +544,7 @@ public class SessionService {
             sessionRepository.save(session);
         }
         ensureFrontendWorkspaceIfNeeded(session);
-        return toSessionResponse(session, true, getActiveJoinInfo(sessionId));
+        return toSessionResponse(session, true);
     }
 
     @Transactional
@@ -650,7 +576,7 @@ public class SessionService {
                     "Interviewer disconnected during the interview and must resume within the allowed recovery window.");
         }
 
-        return toSessionResponse(session, true, getActiveJoinInfo(sessionId));
+        return toSessionResponse(session, true);
     }
 
     @Transactional
@@ -666,8 +592,13 @@ public class SessionService {
     @Transactional
     public SessionResponse startSession(String sessionId) {
         InterviewSession session = getRequiredSession(sessionId);
-        if (session.getStatus() == SessionStatus.ENDED || session.getStatus() == SessionStatus.EXPIRED) {
+        if (session.getStatus() == SessionStatus.ENDED
+                || session.getStatus() == SessionStatus.EXPIRED
+                || session.getStatus() == SessionStatus.AUTH_FAILED) {
             throw new IllegalArgumentException("Session can no longer be started");
+        }
+        if (session.getStatus() != SessionStatus.READY_TO_START && session.getStatus() != SessionStatus.ACTIVE) {
+            throw new IllegalArgumentException("Session is not ready to start");
         }
 
         session.setStatus(SessionStatus.ACTIVE);
@@ -681,7 +612,7 @@ public class SessionService {
         clearRecoveryWindow(session);
         sessionRepository.save(session);
         ensureFrontendWorkspaceIfNeeded(session);
-        return toSessionResponse(session, true, null);
+        return toSessionResponse(session, true);
     }
 
     @Transactional
@@ -702,7 +633,7 @@ public class SessionService {
         session.setDurationSec(newDuration);
         session.setExtensionUsed(true);
         sessionRepository.save(session);
-        return toSessionResponse(session, true, null);
+        return toSessionResponse(session, true);
     }
 
     @Transactional
@@ -723,7 +654,7 @@ public class SessionService {
         session.setFeedbackDraftComments(null);
         session.setFeedbackDraftRecommendationDecision(null);
         sessionRepository.save(session);
-        return toSessionResponse(session, true, null);
+        return toSessionResponse(session, true);
     }
 
     @Transactional
@@ -770,7 +701,7 @@ public class SessionService {
         clearRecoveryWindow(session);
         sessionRepository.save(session);
         cleanupFrontendWorkspaceIfNeeded(session);
-        return toSessionResponse(session, true, null);
+        return toSessionResponse(session, true);
     }
 
     @Transactional
@@ -800,7 +731,7 @@ public class SessionService {
         sessionRepository.save(session);
         cleanupFrontendWorkspaceIfNeeded(session);
 
-        return toSessionResponse(session, true, null);
+        return toSessionResponse(session, true);
     }
 
     @Transactional
@@ -819,7 +750,7 @@ public class SessionService {
         }
         validateWorkspaceFiles(session.getTechnology(), request.getCodeFiles());
         upsertCodeState(sessionId, request);
-        return toSessionResponse(session, true, getActiveJoinInfo(sessionId));
+        return toSessionResponse(session, true);
     }
 
     @Transactional
@@ -998,7 +929,7 @@ public class SessionService {
         sessionRepository.save(session);
 
         saveSystemActivityEvent(session.getId(), ParticipantRole.INTERVIEWEE, ActivityEventType.TAB_HIDDEN, reason);
-        return toSessionResponse(session, true, getActiveJoinInfo(session.getId()));
+        return toSessionResponse(session, true);
     }
 
     private void appendSuspiciousScenario(InterviewSession session, String scenarioTag) {
@@ -1158,7 +1089,60 @@ public class SessionService {
         }
 
         participantRepository.save(participant);
-        return toSessionResponse(session, true, getActiveJoinInfo(sessionId));
+        if (status == IdentityCaptureStatus.SUCCESS) {
+            participantAccessChallengeRepository.findBySessionIdAndParticipantRole(sessionId, role)
+                    .ifPresent(challenge -> {
+                        if (challenge.getStatus() == ParticipantAccessStatus.OTP_VERIFIED) {
+                            challenge.setStatus(ParticipantAccessStatus.COMPLETED);
+                            participantAccessChallengeRepository.save(challenge);
+                        }
+                    });
+        }
+        return reevaluatePreSessionState(sessionId);
+    }
+
+    @Transactional
+    public SessionResponse reevaluatePreSessionState(String sessionId) {
+        InterviewSession session = getRequiredSession(sessionId);
+        if (session.getStatus() == SessionStatus.ACTIVE
+                || session.getStatus() == SessionStatus.ENDED
+                || session.getStatus() == SessionStatus.EXPIRED
+                || session.getStatus() == SessionStatus.AUTH_FAILED) {
+            return toSessionResponse(session, true);
+        }
+
+        Participant interviewer = participantRepository.findBySessionIdAndRole(sessionId, ParticipantRole.INTERVIEWER)
+                .orElseThrow(() -> new IllegalArgumentException("Interviewer not found"));
+        Participant interviewee = participantRepository.findBySessionIdAndRole(sessionId, ParticipantRole.INTERVIEWEE)
+                .orElseThrow(() -> new IllegalArgumentException("Interviewee not found"));
+        ParticipantAccessChallenge interviewerChallenge = participantAccessChallengeRepository
+                .findBySessionIdAndParticipantRole(sessionId, ParticipantRole.INTERVIEWER)
+                .orElse(null);
+        ParticipantAccessChallenge intervieweeChallenge = participantAccessChallengeRepository
+                .findBySessionIdAndParticipantRole(sessionId, ParticipantRole.INTERVIEWEE)
+                .orElse(null);
+
+        boolean interviewerReady = interviewer.getDisclaimerAcceptedAt() != null
+                && isOtpSatisfied(interviewerChallenge);
+        boolean intervieweeReady = interviewee.getDisclaimerAcceptedAt() != null
+                && isOtpSatisfied(intervieweeChallenge)
+                && interviewee.getIdentityCaptureStatus() == IdentityCaptureStatus.SUCCESS;
+
+        if (interviewerReady && intervieweeReady) {
+            session.setStatus(SessionStatus.READY_TO_START);
+            if (session.getReadyToStartAt() == null) {
+                session.setReadyToStartAt(nowUtc());
+            }
+        } else if (session.getAuthStartedAt() != null) {
+            session.setStatus(SessionStatus.AUTH_IN_PROGRESS);
+            session.setReadyToStartAt(null);
+        } else {
+            session.setStatus(SessionStatus.REGISTERED);
+            session.setReadyToStartAt(null);
+        }
+
+        sessionRepository.save(session);
+        return toSessionResponse(session, true);
     }
 
     @Transactional(readOnly = true)
@@ -1196,56 +1180,15 @@ public class SessionService {
         }
     }
 
-    private JoinTokenResponse createJoinToken(String sessionId) {
-        SessionToken token = new SessionToken();
-        token.setSessionId(sessionId);
-        token.setRole(ParticipantRole.INTERVIEWEE);
-        token.setToken(UUID.randomUUID().toString());
-        participantRepository.findBySessionIdAndRole(sessionId, ParticipantRole.INTERVIEWEE)
-                .map(Participant::getEmail)
-                .ifPresent(token::setExpectedEmail);
-        token.setExpiresAt(nowUtc().plusMinutes(TOKEN_EXPIRY_MINUTES));
-        token.setIsUsed(false);
-        sessionTokenRepository.save(token);
-        return toJoinTokenResponse(token);
-    }
-
-    private JoinTokenResponse getActiveJoinInfo(String sessionId) {
-        return sessionTokenRepository.findAll().stream()
-                .filter(token -> sessionId.equals(token.getSessionId()))
-                .filter(token -> token.getRole() == ParticipantRole.INTERVIEWEE)
-                .filter(token -> !Boolean.TRUE.equals(token.getIsUsed()))
-                .filter(token -> token.getExpiresAt() != null && token.getExpiresAt().isAfter(nowUtc()))
-                .max(Comparator.comparing(SessionToken::getCreatedAt))
-                .map(this::toJoinTokenResponse)
-                .orElse(null);
-    }
-
-    private JoinTokenResponse toJoinTokenResponse(SessionToken token) {
-        return JoinTokenResponse.builder()
-                .token(token.getToken())
-                .joinUrl("/join/" + token.getToken())
-                .expiresAt(token.getExpiresAt())
-                .build();
-    }
-
-    private ValidateTokenResponse invalidToken(SessionToken token, String message) {
-        return ValidateTokenResponse.builder()
-                .valid(false)
-                .sessionId(token.getSessionId())
-                .role(token.getRole())
-                .expiresAt(token.getExpiresAt())
-                .message(message)
-                .resumeRequired(false)
-                .build();
-    }
-
     private void expireSessionIfNeeded(String sessionId) {
         InterviewSession session = getRequiredSession(sessionId);
-        if (session.getStatus() == SessionStatus.WAITING_JOIN) {
+        if (session.getStatus() == SessionStatus.REGISTERED || session.getStatus() == SessionStatus.AUTH_IN_PROGRESS) {
             session.setStatus(SessionStatus.EXPIRED);
             if (session.getEndedAt() == null) {
                 session.setEndedAt(nowUtc());
+            }
+            if (session.getExpiredReason() == null || session.getExpiredReason().isBlank()) {
+                session.setExpiredReason("Interview session was not started within the allowed pre-session window.");
             }
             sessionRepository.save(session);
         }
@@ -1254,11 +1197,6 @@ public class SessionService {
     private InterviewSession getRequiredSession(String sessionId) {
         return sessionRepository.findById(sessionId)
                 .orElseThrow(() -> new IllegalArgumentException("Session not found"));
-    }
-
-    private SessionToken getRequiredToken(String token) {
-        return sessionTokenRepository.findByToken(token)
-                .orElseThrow(() -> new IllegalArgumentException("Token not found"));
     }
 
     private void upsertCodeState(String sessionId, String latestCode, ParticipantRole updatedByRole) {
@@ -1285,8 +1223,9 @@ public class SessionService {
         replaceCodeFiles(sessionId, editableFiles);
     }
 
-    private SessionResponse toSessionResponse(InterviewSession session, boolean includeDetails, JoinTokenResponse joinInfo) {
-        List<ParticipantDto> participants = participantRepository.findBySessionId(session.getId()).stream()
+    private SessionResponse toSessionResponse(InterviewSession session, boolean includeDetails) {
+        List<Participant> participantEntities = participantRepository.findBySessionId(session.getId());
+        List<ParticipantDto> participants = participantEntities.stream()
                 .map(this::toParticipantDto)
                 .toList();
 
@@ -1300,6 +1239,9 @@ public class SessionService {
                         .map(this::toActivityEventDto)
                         .toList()
                 : List.of();
+        List<AuthAuditEventDto> authAuditEvents = includeDetails
+                ? buildAuthAuditEvents(session, participantEntities)
+                : List.of();
 
         return SessionResponse.builder()
                 .id(session.getId())
@@ -1307,6 +1249,9 @@ public class SessionService {
                 .avMode(session.getAvMode() == null ? AvMode.EXTERNAL : session.getAvMode())
                 .status(session.getStatus())
                 .createdAt(session.getCreatedAt())
+                .authStartedAt(session.getAuthStartedAt())
+                .readyToStartAt(session.getReadyToStartAt())
+                .authFailedAt(session.getAuthFailedAt())
                 .startedAt(session.getStartedAt())
                 .endedAt(session.getEndedAt())
                 .interruptedAt(session.getInterruptedAt())
@@ -1315,7 +1260,9 @@ public class SessionService {
                 .durationSec(session.getDurationSec())
                 .remainingSec(calculateRemainingSec(session))
                 .extensionUsed(Boolean.TRUE.equals(session.getExtensionUsed()))
-                .readOnly(session.getStatus() == SessionStatus.ENDED || session.getStatus() == SessionStatus.EXPIRED)
+                .readOnly(session.getStatus() == SessionStatus.ENDED
+                        || session.getStatus() == SessionStatus.EXPIRED
+                        || session.getStatus() == SessionStatus.AUTH_FAILED)
                 .participants(participants)
                 .latestCode(includeDetails && codeState != null ? codeState.getLatestCode() : null)
                 .codeFiles(editableFiles)
@@ -1339,14 +1286,148 @@ public class SessionService {
                         .submittedAt(null)
                         .build())
                 .activityEvents(activityEvents)
-                .joinInfo(joinInfo)
+                .authAuditEvents(authAuditEvents)
                 .summary(buildSummary(session, feedback))
                 .suspiciousRejected(Boolean.TRUE.equals(session.getSuspiciousRejected()))
                 .suspiciousScenarioKey(session.getSuspiciousScenarioKey())
                 .suspiciousActivityReason(session.getSuspiciousActivityReason())
+                .authFailureReason(session.getAuthFailureReason())
+                .expiredReason(session.getExpiredReason())
                 .frontendWorkspace(frontendWorkspace == null ? null : toFrontendWorkspaceDto(frontendWorkspace))
                 .finalPreviewUrl(resolveFinalPreviewUrl(session))
                 .build();
+    }
+
+    private List<AuthAuditEventDto> buildAuthAuditEvents(InterviewSession session, List<Participant> participants) {
+        Map<ParticipantRole, Participant> participantByRole = new HashMap<>();
+        for (Participant participant : participants) {
+            participantByRole.put(participant.getRole(), participant);
+        }
+
+        List<AuthAuditEventDto> events = new ArrayList<>();
+        if (session.getCreatedAt() != null) {
+            events.add(AuthAuditEventDto.builder()
+                    .createdAt(session.getCreatedAt())
+                    .participantRole(null)
+                    .title("Registration Created")
+                    .detail("Interview registration record was created.")
+                    .build());
+        }
+        if (session.getAuthStartedAt() != null) {
+            events.add(AuthAuditEventDto.builder()
+                    .createdAt(session.getAuthStartedAt())
+                    .participantRole(ParticipantRole.INTERVIEWER)
+                    .title("Secure Session Started")
+                    .detail("Interviewer initiated secure participant verification and passcode delivery.")
+                    .build());
+        }
+
+        for (Participant participant : participants) {
+            if (participant.getDisclaimerAcceptedAt() != null) {
+                events.add(AuthAuditEventDto.builder()
+                        .createdAt(participant.getDisclaimerAcceptedAt())
+                        .participantRole(participant.getRole())
+                        .title("Disclaimer Accepted")
+                        .detail(participant.getName() + " accepted the pre-session disclaimer.")
+                        .build());
+            }
+            if (participant.getRole() == ParticipantRole.INTERVIEWEE && participant.getIdentitySnapshotCapturedAt() != null) {
+                events.add(AuthAuditEventDto.builder()
+                        .createdAt(participant.getIdentitySnapshotCapturedAt())
+                        .participantRole(participant.getRole())
+                        .title("Identity Capture Completed")
+                        .detail("Interviewee identity capture completed successfully.")
+                        .build());
+            }
+        }
+
+        for (ParticipantAccessChallenge challenge : participantAccessChallengeRepository.findBySessionId(session.getId())) {
+            Participant participant = participantByRole.get(challenge.getParticipantRole());
+            String participantName = participant == null ? challenge.getParticipantRole().name() : participant.getName();
+            if (challenge.getCreatedAt() != null) {
+                events.add(AuthAuditEventDto.builder()
+                        .createdAt(challenge.getCreatedAt())
+                        .participantRole(challenge.getParticipantRole())
+                        .title("Secure Link Prepared")
+                        .detail("Secure access link was prepared for " + participantName + ".")
+                        .build());
+            }
+            if (challenge.getLastEmailSentAt() != null) {
+                events.add(AuthAuditEventDto.builder()
+                        .createdAt(challenge.getLastEmailSentAt())
+                        .participantRole(challenge.getParticipantRole())
+                        .title("Passcode Sent")
+                        .detail("A one-time passcode email was issued to " + participantName + ". Window count: " + (challenge.getOtpWindowCount() == null ? 0 : challenge.getOtpWindowCount()) + ".")
+                        .build());
+            }
+            if (challenge.getOtpVerifiedAt() != null) {
+                events.add(AuthAuditEventDto.builder()
+                        .createdAt(challenge.getOtpVerifiedAt())
+                        .participantRole(challenge.getParticipantRole())
+                        .title("Passcode Verified")
+                        .detail(participantName + " verified the one-time passcode successfully.")
+                        .build());
+            }
+            if (challenge.getStatus() == ParticipantAccessStatus.FAILED && challenge.getUpdatedAt() != null) {
+                events.add(AuthAuditEventDto.builder()
+                        .createdAt(challenge.getUpdatedAt())
+                        .participantRole(challenge.getParticipantRole())
+                        .title("Participant Authentication Failed")
+                        .detail(challenge.getFailureReason() == null || challenge.getFailureReason().isBlank()
+                                ? participantName + " could not complete secure authentication."
+                                : challenge.getFailureReason())
+                        .build());
+            }
+        }
+
+        if (session.getReadyToStartAt() != null) {
+            events.add(AuthAuditEventDto.builder()
+                    .createdAt(session.getReadyToStartAt())
+                    .participantRole(null)
+                    .title("Session Ready to Start")
+                    .detail("All required pre-session checks were completed.")
+                    .build());
+        }
+        if (session.getStartedAt() != null) {
+            events.add(AuthAuditEventDto.builder()
+                    .createdAt(session.getStartedAt())
+                    .participantRole(ParticipantRole.INTERVIEWER)
+                    .title("Interview Started")
+                    .detail("Interviewer started the live interview session.")
+                    .build());
+        }
+        if (session.getAuthFailedAt() != null) {
+            events.add(AuthAuditEventDto.builder()
+                    .createdAt(session.getAuthFailedAt())
+                    .participantRole(null)
+                    .title("Authentication Failed")
+                    .detail(session.getAuthFailureReason() == null || session.getAuthFailureReason().isBlank()
+                            ? "Secure participant authentication failed."
+                            : session.getAuthFailureReason())
+                    .build());
+        }
+        if (session.getStatus() == SessionStatus.EXPIRED && session.getEndedAt() != null) {
+            events.add(AuthAuditEventDto.builder()
+                    .createdAt(session.getEndedAt())
+                    .participantRole(null)
+                    .title("Session Expired")
+                    .detail(session.getExpiredReason() == null || session.getExpiredReason().isBlank()
+                            ? "Session expired before the interview started."
+                            : session.getExpiredReason())
+                    .build());
+        }
+        if (session.getEndedAt() != null && session.getStatus() == SessionStatus.ENDED) {
+            events.add(AuthAuditEventDto.builder()
+                    .createdAt(session.getEndedAt())
+                    .participantRole(null)
+                    .title("Interview Ended")
+                    .detail("Interview session ended.")
+                    .build());
+        }
+
+        return events.stream()
+                .sorted(Comparator.comparing(AuthAuditEventDto::getCreatedAt, Comparator.nullsLast(Comparator.naturalOrder())))
+                .toList();
     }
 
     private int calculateRemainingSec(InterviewSession session) {
@@ -1391,6 +1472,14 @@ public class SessionService {
         return OffsetDateTime.now(ZoneOffset.UTC);
     }
 
+    private boolean isOtpSatisfied(ParticipantAccessChallenge challenge) {
+        if (challenge == null) {
+            return false;
+        }
+        return challenge.getStatus() == ParticipantAccessStatus.OTP_VERIFIED
+                || challenge.getStatus() == ParticipantAccessStatus.COMPLETED;
+    }
+
     private String buildSummary(InterviewSession session, Feedback feedback) {
         if (Boolean.TRUE.equals(session.getSuspiciousRejected())) {
             return "Rejected due to suspicious activity";
@@ -1399,12 +1488,20 @@ public class SessionService {
             return "INCOMPLETE";
         }
         if (session.getStatus() == SessionStatus.EXPIRED) {
-            return "Token Expired";
+            return session.getStartedAt() == null ? "Expired before interview start" : "Token expired";
         }
         if (feedback != null) {
             return feedback.getRating() + " / " + formatRecommendationDecision(resolveRecommendationDecision(feedback));
         }
-        return session.getStatus().name();
+        return switch (session.getStatus()) {
+            case REGISTERED -> "Pending secure session start";
+            case AUTH_IN_PROGRESS -> "Participant verification in progress";
+            case READY_TO_START -> "Ready for interview start";
+            case ACTIVE -> "Interview in progress";
+            case ENDED -> "Completed";
+            case AUTH_FAILED -> "Authentication failed";
+            case EXPIRED -> "Expired before interview start";
+        };
     }
 
     private String buildActivityDetail(ActivityEventRequest request) {
@@ -1442,7 +1539,7 @@ public class SessionService {
         if (!supportsPersistentFrontendWorkspace(session.getTechnology())) {
             return;
         }
-        if (session.getStatus() == SessionStatus.ENDED || session.getStatus() == SessionStatus.EXPIRED) {
+        if (session.getStatus() != SessionStatus.READY_TO_START && session.getStatus() != SessionStatus.ACTIVE) {
             return;
         }
 
@@ -1536,7 +1633,6 @@ public class SessionService {
 
     private String resolveFinalPreviewUrl(InterviewSession session) {
         if (session.getFinalPreviewPath() == null || session.getFinalPreviewPath().isBlank()) {
-            log.debug("Final preview URL unavailable for session {} because finalPreviewPath is empty", session.getId());
             return null;
         }
         String finalPreviewUrl = "/api/sessions/" + session.getId() + "/final-preview/";
@@ -1897,7 +1993,7 @@ public class SessionService {
                                                  List<FeedbackRating> ratings,
                                                  boolean includeDetails) {
         return sessionRepository.findAll().stream()
-                .map(session -> toSessionResponse(session, includeDetails, null))
+                .map(session -> toSessionResponse(session, includeDetails))
                 .filter(session -> matchesSearch(session, search))
                 .filter(session -> matchesFilters(session, from, to, technologies, ratings))
                 .toList();

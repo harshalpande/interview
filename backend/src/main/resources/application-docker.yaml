@@ -18,5 +18,13 @@ spring:
         web-allow-others: true
 
 app:
+  email:
+    subject-prefix: ${APP_EMAIL_SUBJECT_PREFIX:DEV}
+  public-origin: ${APP_PUBLIC_ORIGIN:http://localhost:3000}
   storage:
     root: ${APP_STORAGE_PATH:/data}
+
+management:
+  health:
+    mail:
+      enabled: false

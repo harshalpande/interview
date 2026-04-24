@@ -66,8 +66,20 @@ public class InterviewSession {
     @Enumerated(EnumType.STRING)
     private AvMode avMode = AvMode.EXTERNAL;
     
+    private OffsetDateTime authStartedAt;
+
+    private OffsetDateTime readyToStartAt;
+
+    private OffsetDateTime authFailedAt;
+
+    @Column(columnDefinition = "TEXT")
+    private String authFailureReason;
+
+    @Column(columnDefinition = "TEXT")
+    private String expiredReason;
+
     @Enumerated(EnumType.STRING)
-    private SessionStatus status = SessionStatus.CREATED;
+    private SessionStatus status = SessionStatus.REGISTERED;
 
     private String finalPreviewPath;
 }

@@ -18,6 +18,9 @@ public class SessionResponse {
     private AvMode avMode;
     private SessionStatus status;
     private OffsetDateTime createdAt;
+    private OffsetDateTime authStartedAt;
+    private OffsetDateTime readyToStartAt;
+    private OffsetDateTime authFailedAt;
     private OffsetDateTime startedAt;
     private OffsetDateTime endedAt;
     private Integer durationSec;
@@ -32,7 +35,7 @@ public class SessionResponse {
     private FeedbackDto feedback;
     private FeedbackDto feedbackDraft;
     private List<ActivityEventDto> activityEvents;
-    private JoinTokenResponse joinInfo;
+    private List<AuthAuditEventDto> authAuditEvents;
     private String summary;
     private OffsetDateTime interruptedAt;
     private OffsetDateTime recoveryDeadlineAt;
@@ -40,6 +43,8 @@ public class SessionResponse {
     private Boolean suspiciousRejected;
     private String suspiciousScenarioKey;
     private String suspiciousActivityReason;
+    private String authFailureReason;
+    private String expiredReason;
     private FrontendWorkspaceDto frontendWorkspace;
     private String finalPreviewUrl;
 }

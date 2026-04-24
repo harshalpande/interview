@@ -1,13 +1,18 @@
 import React from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
+import { Button } from './Button';
+import { sessionApi } from '../services/sessionApi';
 import type { SessionResponse } from '../types/session';
-import { formatDateTimeCompact } from '../utils/dateTime';
+import { formatDateTimeSplit } from '../utils/dateTime';
 
 const STATUS_LABELS: Record<string, string> = {
-  CREATED: 'Ready to Start',
-  WAITING_JOIN: 'Waiting for Join',
+  REGISTERED: 'Registered',
+  AUTH_IN_PROGRESS: 'Auth In Progress',
+  READY_TO_START: 'Ready to Start',
   ACTIVE: 'Active',
   ENDED: 'Ended',
+  AUTH_FAILED: 'Authentication Failed',
   EXPIRED: 'Expired',
 };
 
@@ -17,12 +22,34 @@ interface InterviewRowProps {
 }
 
 const InterviewRow: React.FC<InterviewRowProps> = ({ session, searchTerm = '' }) => {
+  const queryClient = useQueryClient();
   const interviewer = session.participants?.find((p) => p.role === 'INTERVIEWER');
   const interviewee = session.participants?.find((p) => p.role === 'INTERVIEWEE');
+  const startDate = session.startedAt ? formatDateTimeSplit(session.startedAt) : null;
+  const resumeSessionMutation = useMutation({
+    mutationFn: () => sessionApi.startSecureSession(session.id),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['sessions'] });
+      await queryClient.invalidateQueries({ queryKey: ['session', session.id] });
+      window.alert('Secure session access has been sent to both participants.');
+    },
+    onError: (error) => {
+      window.alert(error instanceof Error ? error.message : 'Unable to start secure session access.');
+    },
+  });
 
   return (
     <tr>
-      <td className="date-cell">{formatDateTimeCompact(session.createdAt)}</td>
+      <td className="date-cell">
+        {startDate ? (
+          <div className="date-stack">
+            <div className="date-primary">{startDate.dateLabel}</div>
+            <div className="date-secondary">{startDate.timeLabel}</div>
+          </div>
+        ) : (
+          'Not started'
+        )}
+      </td>
       <td>
         {session.technology ? (
           <span className={`technology-pill technology-pill-${session.technology.toLowerCase()}`}>
@@ -42,10 +69,20 @@ const InterviewRow: React.FC<InterviewRowProps> = ({ session, searchTerm = '' })
       <td className="summary-cell">
         <div>{session.summary || 'No summary available yet'}</div>
       </td>
-      <td>
-        {session.status !== 'EXPIRED' ? (
+      <td className="action-cell">
+        {session.status === 'REGISTERED' || session.status === 'AUTH_IN_PROGRESS' || session.status === 'READY_TO_START' ? (
+          <Button
+            variant="secondary"
+            className="btn-small dashboard-action-btn"
+            onClick={() => resumeSessionMutation.mutate()}
+            disabled={resumeSessionMutation.isPending}
+          >
+            {resumeSessionMutation.isPending ? 'Sending...' : 'Resume'}
+          </Button>
+        ) : null}
+        {(session.status === 'ENDED' || session.status === 'AUTH_FAILED') ? (
           <Link to={`/java/result/${session.id}`} className="btn btn-small btn-secondary">
-            Result
+            {session.status === 'AUTH_FAILED' ? 'Details' : 'Result'}
           </Link>
         ) : null}
       </td>

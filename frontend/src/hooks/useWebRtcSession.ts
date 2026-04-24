@@ -90,8 +90,8 @@ export function useWebRtcSession({
   const [isRemoteMicrophoneEnabled, setIsRemoteMicrophoneEnabled] = React.useState(false);
   const [connectionState, setConnectionState] = React.useState<CameraConnectionState>('idle');
   const [streamError, setStreamError] = React.useState<string | null>(null);
-  const [isMuted, setIsMuted] = React.useState(true);
-  const [isCameraEnabled, setIsCameraEnabled] = React.useState(false);
+  const [isMuted, setIsMuted] = React.useState(false);
+  const [isCameraEnabled, setIsCameraEnabled] = React.useState(true);
   const isMutedRef = React.useRef(isMuted);
   const isCameraEnabledRef = React.useRef(isCameraEnabled);
   const isSocketConnectedRef = React.useRef(isSocketConnected);
