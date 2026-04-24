@@ -10,6 +10,7 @@ import './Result.css';
 
 type ResultTabKey = 'overview' | 'code' | 'preview' | 'output' | 'errors' | 'audit' | 'suspicious';
 type AuditStageKey = 'registration' | 'delivery' | 'verification' | 'readiness';
+type FinalPreviewStatus = 'unknown' | 'available' | 'missing';
 
 const STATUS_LABELS: Record<string, string> = {
   REGISTERED: 'Registered',
@@ -74,6 +75,7 @@ const Result: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const [activeCodePath, setActiveCodePath] = React.useState<string>('');
   const [activeAuditStage, setActiveAuditStage] = React.useState<AuditStageKey>('registration');
+  const [finalPreviewStatus, setFinalPreviewStatus] = React.useState<FinalPreviewStatus>('unknown');
 
   const { data: session, isLoading } = useQuery({
     queryKey: ['session', sessionId],
@@ -81,7 +83,10 @@ const Result: React.FC = () => {
     enabled: !!sessionId,
   });
   const isFrontendWorkspaceSession = session?.technology === 'ANGULAR' || session?.technology === 'REACT';
-  const hasSuccessfulFrontendPreview = Boolean(isFrontendWorkspaceSession && session?.finalPreviewUrl);
+  const finalPreviewUrl = session?.finalPreviewUrl || '';
+  const hasSuccessfulFrontendPreview = Boolean(
+    isFrontendWorkspaceSession && finalPreviewUrl && finalPreviewStatus === 'available'
+  );
   const resultCodeFiles = React.useMemo(
     () => buildResultCodeFiles(session?.technology || '', session?.codeFiles, session?.latestCode || ''),
     [session?.codeFiles, session?.latestCode, session?.technology]
@@ -112,6 +117,34 @@ const Result: React.FC = () => {
       resultCodeFiles.some((file) => file.path === previous) ? previous : resultCodeFiles[0].path
     ));
   }, [resultCodeFiles]);
+
+  React.useEffect(() => {
+    if (!finalPreviewUrl) {
+      setFinalPreviewStatus('missing');
+      return;
+    }
+
+    let cancelled = false;
+    setFinalPreviewStatus('unknown');
+
+    fetch(finalPreviewUrl, { headers: { Accept: 'text/html' } })
+      .then((response) => {
+        if (cancelled) {
+          return;
+        }
+        const contentType = response.headers.get('content-type') || '';
+        setFinalPreviewStatus(response.ok && contentType.includes('text/html') ? 'available' : 'missing');
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setFinalPreviewStatus('missing');
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [finalPreviewUrl]);
 
   if (isLoading) return <div className="page-shell"><div className="page-card">Loading result...</div></div>;
   if (!session) return <div className="page-shell"><div className="page-card">Session not found</div></div>;
@@ -282,7 +315,7 @@ const Result: React.FC = () => {
               <div className="result-preview">
                 <iframe
                   title={`Final ${session.technology} Preview`}
-                  src={session.finalPreviewUrl!}
+                  src={finalPreviewUrl}
                   className="result-preview-frame"
                 />
               </div>

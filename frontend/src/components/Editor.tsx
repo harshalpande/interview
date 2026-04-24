@@ -578,7 +578,7 @@ const Editor: React.FC<EditorProps> = ({
 
   const activeEditorValue = isFrontendWorkspace ? activeAngularFile.content : state.code;
   const activeEditorReadOnly = readOnly || (isFrontendWorkspace && activeAngularFile.editable === false);
-  const runButtonLabel = isFrontendWorkspace ? (state.loading ? 'Building...' : 'Build') : (state.loading ? 'Running...' : 'Run (Ctrl+Enter)');
+  const runButtonLabel = isFrontendWorkspace ? (state.loading ? 'Building...' : 'Build (Ctrl+Enter)') : (state.loading ? 'Running...' : 'Run (Ctrl+Enter)');
   const runButtonTitle = isFrontendWorkspace ? `Build ${executionLanguage === 'REACT' ? 'React' : 'Angular'} workspace (Ctrl+Enter)` : 'Run code (Ctrl+Enter)';
 
   const handleCodeChange = useCallback(
@@ -649,6 +649,7 @@ const Editor: React.FC<EditorProps> = ({
             codeFiles: changedFiles,
             timeoutMs: 15000,
             memoryLimitMb: 1024,
+            livePreviewMode: executionLanguage === 'REACT',
           });
           console.info('[frontend-build] response', {
             language: executionLanguage,

@@ -34,6 +34,8 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class FrontendSandboxService {
 
+    private static final long REACT_LIVE_PREVIEW_FAILURE_SETTLE_MS = 200L;
+
     private final List<FrontendRunner> runners;
     private final WorkspaceRegistryService workspaceRegistryService;
     private final ExecutorService watchLogExecutor = Executors.newCachedThreadPool(runnable -> {
@@ -251,17 +253,33 @@ public class FrontendSandboxService {
                         boolean watcherAlive = workspaceRegistryService.resolveProcess(workspaceId)
                                 .map(Process::isAlive)
                                 .orElse(false);
-                        if (watcherAlive) {
-                            workspaceRegistryService.markBuildRequested(workspaceId);
-                        }
                         if (request.getFiles() != null && !request.getFiles().isEmpty()) {
                             persistentRunner.patchWorkspaceFiles(workspaceRoot, request.getFiles());
+                        }
+                        if (watcherAlive) {
+                            workspaceRegistryService.markBuildRequested(workspaceId);
                         }
                         if (watcherAlive) {
                             FrontendBuildResult watcherResult = awaitWatchBuild(
                                     workspaceId,
                                     resolveWatchBuildTimeoutMs(request.getLanguage(), timeoutMs)
                             );
+                            if (isReactLivePreviewMode(request)) {
+                                if (watcherResult != null) {
+                                    if (!watcherResult.isSuccess()) {
+                                        return settleReactLivePreviewFailure(workspaceId, watcherResult);
+                                    }
+                                    return watcherResult;
+                                }
+                                log.info("React live preview build still updating for workspaceId={}, returning current warm preview", workspaceId);
+                                return FrontendBuildResult.success(
+                                        "React live preview is updating.",
+                                        "",
+                                        0,
+                                        resolveWatchBuildTimeoutMs(request.getLanguage(), timeoutMs),
+                                        "/workspaces/" + workspaceId + "/preview/"
+                                );
+                            }
                             if (watcherResult != null) {
                                 if (!watcherResult.isSuccess() && hasOnlyGenericWatchFailure(watcherResult)) {
                                     log.warn("Frontend watcher build produced only generic failure output for workspaceId={}, running direct build for detailed diagnostics", workspaceId);
@@ -282,6 +300,22 @@ public class FrontendSandboxService {
                     request.getLanguage(), request.getSessionId(), request.getWorkspaceId());
         }
         return runner.build(request.getFiles(), timeoutMs);
+    }
+
+    private boolean isReactLivePreviewMode(BuildRequest request) {
+        return request.isLivePreviewMode() && request.getLanguage() == ExecutionLanguage.REACT;
+    }
+
+    private FrontendBuildResult settleReactLivePreviewFailure(String workspaceId, FrontendBuildResult initialResult) {
+        try {
+            TimeUnit.MILLISECONDS.sleep(REACT_LIVE_PREVIEW_FAILURE_SETTLE_MS);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            return initialResult;
+        }
+
+        FrontendBuildResult settledResult = awaitWatchBuild(workspaceId, 1L);
+        return settledResult == null ? initialResult : settledResult;
     }
 
     private FrontendBuildResult awaitWatchBuild(String workspaceId, long timeoutMs) {

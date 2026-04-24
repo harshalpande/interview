@@ -61,6 +61,7 @@ public class SandboxClientService {
                     .language(request.getLanguage())
                     .files(request.getCodeFiles())
                     .timeoutMs(request.getTimeoutMs())
+                    .livePreviewMode(request.isLivePreviewMode())
                     .build());
             String previewUrl = resolveFrontendPreviewUrl(response.getPreviewPath());
             log.info("Frontend sandbox execution completed language={} sessionId={} success={} exitCode={} executionTimeMs={} previewPath={} previewUrl={} stderrLength={} compileErrorCount={} message={}",

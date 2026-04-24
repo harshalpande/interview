@@ -69,6 +69,11 @@ public class FinalPreviewStorageService {
         return new FileSystemResource(resolved);
     }
 
+    public boolean hasPreview(String relativePath) {
+        Resource resource = loadPreviewResource(relativePath, "");
+        return resource != null && resource.exists();
+    }
+
     private Path resolveEffectivePreviewRoot(Path previewRoot) {
         Path directIndex = previewRoot.resolve("index.html").normalize();
         if (directIndex.startsWith(previewRoot) && Files.exists(directIndex) && !Files.isDirectory(directIndex)) {

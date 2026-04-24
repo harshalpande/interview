@@ -1684,6 +1684,12 @@ public class SessionService {
         if (session.getFinalPreviewPath() == null || session.getFinalPreviewPath().isBlank()) {
             return null;
         }
+        if (!finalPreviewStorageService.hasPreview(session.getFinalPreviewPath())) {
+            log.debug("Final preview URL unavailable for session {} because stored preview is missing at {}",
+                    session.getId(),
+                    session.getFinalPreviewPath());
+            return null;
+        }
         String finalPreviewUrl = "/api/sessions/" + session.getId() + "/final-preview/";
         log.debug("Resolved final preview URL for session {} finalPreviewPath={} finalPreviewUrl={}",
                 session.getId(),

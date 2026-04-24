@@ -27,6 +27,7 @@ public class ExecuteRequest {
     private List<EditableCodeFileDto> codeFiles;
     private long timeoutMs;
     private long memoryLimitMb;
+    private boolean livePreviewMode;
 
     public ExecuteRequest(String sourceCode) {
         this.sourceCode = sourceCode;

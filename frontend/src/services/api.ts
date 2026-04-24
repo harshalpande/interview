@@ -48,6 +48,7 @@ class CompilerApiClient {
         codeFiles: request.codeFiles,
         timeoutMs: request.timeoutMs || 5000,
         memoryLimitMb: request.memoryLimitMb || 512,
+        livePreviewMode: request.livePreviewMode || false,
       };
 
       const response = await this.axiosInstance.post<ExecuteResponse>(

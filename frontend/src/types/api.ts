@@ -25,6 +25,7 @@ export interface ExecuteRequest {
   codeFiles?: EditableCodeFile[];
   timeoutMs?: number;
   memoryLimitMb?: number;
+  livePreviewMode?: boolean;
 }
 
 export interface ExecuteResponse {
