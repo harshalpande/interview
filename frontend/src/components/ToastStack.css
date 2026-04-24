@@ -90,6 +90,20 @@
   color: #8a6b2a;
 }
 
+.toast-card.danger {
+  border-color: rgba(201, 69, 57, 0.38);
+  background: #fff1ef;
+  color: #9a3025;
+}
+
+.toast-card.danger .toast-title {
+  color: #9a3025;
+}
+
+.toast-card.danger .toast-countdown {
+  background: rgba(154, 48, 37, 0.12);
+}
+
 .toast-card.info {
   border-color: rgba(11, 114, 133, 0.22);
   background: #f4fbfc;

@@ -1,6 +1,7 @@
 package com.altimetrik.interview.entity;
 
 import com.altimetrik.interview.enums.ActivityEventType;
+import com.altimetrik.interview.enums.ActivityEventSeverity;
 import com.altimetrik.interview.enums.ParticipantRole;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -34,8 +35,19 @@ public class SessionActivityEvent {
     @Column(length = 64, columnDefinition = "VARCHAR(64)")
     private ActivityEventType eventType;
 
+    @Enumerated(EnumType.STRING)
+    @Column(length = 32, columnDefinition = "VARCHAR(32)")
+    private ActivityEventSeverity severity = ActivityEventSeverity.WARNING;
+
     @Column(columnDefinition = "TEXT")
     private String detail;
+
+    @Column(columnDefinition = "TEXT")
+    private String candidateMessage;
+
+    private Long durationMs;
+
+    private Integer occurrenceCount;
 
     @CreationTimestamp
     private OffsetDateTime createdAt;

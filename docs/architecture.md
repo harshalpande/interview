@@ -49,9 +49,23 @@ flowchart LR
 ### Frontend Workspace Build & Preview
 - Angular and React interviews use `sandbox-frontend`.
 - Backend creates a persistent workspace per session and reuses it for fast warm builds.
-- File changes are patched into the workspace and builds prefer the live watcher path, with direct-build fallback when better diagnostics are needed.
+- Editor builds use Warm Watcher Live Preview: the UI sends changed files with `livePreviewMode=true`, the sandbox patches them into the persistent workspace, and the active framework watcher result is returned without launching a second full build.
+- React live-preview failures wait `200 ms` to collect more watcher diagnostics before returning.
+- Angular live-preview failures wait `1000 ms` because Angular CLI watcher output can flush diagnostic lines more slowly.
+- Final/session-end builds are not treated as live preview; they remain strict so result artifacts are captured only from durable successful builds.
 - Preview is exposed during the live session through the sandbox frontend preview route.
 - React workspaces are intentionally constrained to `tsx`, `ts`, and `css` files under `src/`, which keeps the Monaco setup and sandbox contract aligned with the supported interview format.
+
+### Integrity Activity Tracking
+- Candidate monitoring uses Progressive Integrity Warnings.
+- Activity events are stored with a severity: `INFO`, `WARNING`, or `SUSPICIOUS`.
+- Backend owns severity classification so websocket updates, persisted results, and refreshes remain consistent.
+- First-time paste and drag/drop attempts are warnings; repeated attempts are suspicious.
+- In-app AV focus loss is suspicious after `10 seconds` or a repeat occurrence.
+- External AV focus loss is initially informational/warning-level and becomes suspicious after `30 seconds` or repeated occurrences, because Teams/Zoom interaction can be legitimate.
+- In-app mic/camera disablement is warning-first and becomes suspicious after `15 seconds` or repeated disablement.
+- Candidate notifications use corrective language, while interviewer alerts are reserved for confirmed suspicious events.
+- The Result Workspace summarizes integrity activity by severity and event category.
 
 ### End Interview / Final Preview
 - Before a session is marked ended, backend performs one final execution/build using the latest saved code/files.

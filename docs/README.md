@@ -16,7 +16,59 @@ This repo contains a small interview platform:
 React workspace constraints:
 - editable files are limited to `src/**/*.tsx`, `src/**/*.ts`, and `src/**/*.css`
 - `package.json` is visible in the editor but read-only
-- builds use the persistent `sandbox-frontend` workspace path, with watcher-first warm builds and direct-build fallback when clearer diagnostics are needed
+- editor builds use the persistent `sandbox-frontend` workspace path with Warm Watcher Live Preview, which patches changed files into the running workspace and reads the active watcher instead of launching a second full build
+- final/session-end builds remain strict and durable so stored result previews are only captured from successful final builds
+
+Angular workspace constraints:
+- editable files are limited to supported Angular source files under `src/app`
+- `package.json` is visible in the editor but read-only
+- editor builds use the same Warm Watcher Live Preview path as React, with a longer Angular failure-settle window because Angular CLI diagnostics can flush more slowly
+
+## Live Preview Performance
+
+Warm Watcher Live Preview is used for Angular and React editor builds:
+- A persistent workspace is created when the frontend interview session is prepared.
+- The sandbox keeps the framework watcher process alive for that workspace.
+- The editor sends only changed files with `livePreviewMode=true`.
+- The sandbox waits briefly for the watcher to report success/failure and returns that result to the editor.
+- Failure responses wait a short extra settle window to capture more diagnostic output (`200 ms` for React, `1000 ms` for Angular).
+- The slower direct-build fallback is avoided for editor live-preview builds, but final/session-end builds still use the strict durable flow.
+
+## Integrity Monitoring
+
+The interview session uses Progressive Integrity Warnings for monitored candidate activity:
+- First-time low-risk events are recorded as `WARNING` or `INFO` rather than immediately treated as suspicious.
+- Repeated events, or events that exceed duration thresholds, are elevated to `SUSPICIOUS`.
+- In-app AV is stricter because the platform owns the media experience.
+- External AV is softer for focus-away events because Teams/Zoom interaction can be legitimate.
+- Candidate-facing toasts use clear corrective language, while interviewer/result views focus on confirmed suspicious activity and overall integrity signals.
+
+Default thresholds:
+- In-app tab away: suspicious after `10 seconds` or the second occurrence.
+- External AV tab away: suspicious after `30 seconds` or the third occurrence.
+- In-app mic/camera off: suspicious after `15 seconds` or the second occurrence.
+- Paste and drag/drop: first event is a warning, second and later events are suspicious.
+
+## Email Configuration
+
+Local and Docker environments can use SMTP settings for Postmark or another SMTP provider. Configure these environment variables when email delivery is required:
+
+```env
+APP_EMAIL_MODE=smtp
+APP_EMAIL_FROM_ADDRESS=noreply@interviewonline.xyz
+APP_EMAIL_FROM_NAME=Admin
+APP_EMAIL_SUBJECT_PREFIX=LOCAL
+SPRING_MAIL_HOST=smtp.postmarkapp.com
+SPRING_MAIL_PORT=587
+SPRING_MAIL_USERNAME=<server-token>
+SPRING_MAIL_PASSWORD=<server-token>
+SPRING_MAIL_SMTP_AUTH=true
+SPRING_MAIL_SMTP_STARTTLS_ENABLE=true
+SPRING_MAIL_SMTP_STARTTLS_REQUIRED=false
+SPRING_MAIL_SMTP_SSL_ENABLE=false
+```
+
+Subject prefixes identify the sending environment. Use `LOCAL`, `DEV`, `UAT`, and no prefix for production as configured by deployment. Higher-environment Microsoft Exchange SMTP details are still pending and should be completed before UAT/production email rollout.
 
 ## Run With Docker (Recommended)
 

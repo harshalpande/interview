@@ -13,10 +13,14 @@
 ## Key Features
 
 - Monaco editor with Run/Reset, theme toggle, and `Ctrl+Enter` run shortcut.
+- Angular/React editor builds use Warm Watcher Live Preview for fast feedback from persistent framework watchers while preserving strict final result builds.
 - Mandatory pre-interview identity capture for every session, independent of the selected live AV mode.
 - Configurable live AV mode at session creation, allowing the interviewer to choose either the built-in platform AV experience or an external channel such as Microsoft Teams or Zoom.
 - Two-way live audio/video session controls with pre-start media readiness, interviewer/interviewee toggles, explicit no-video states, and interviewer-visible suspicious activity signals during feedback when the session is configured for in-app AV.
-- Suspicious external drag attempts into the editor are blocked and surfaced as interviewer-visible monitoring activity.
+- Progressive Integrity Warnings classify candidate activity as informational, warning, or suspicious based on AV mode, repetition, and duration.
+- Paste and external drag/drop attempts are blocked for the interviewee, warned on first occurrence, and marked suspicious when repeated.
+- Focus-away events are treated strictly for in-app AV and more cautiously for external Teams/Zoom-style AV to reduce false positives.
+- Candidate-facing integrity notices explain what behavior should be corrected; interviewer alerts are reserved for confirmed suspicious events.
 - Session dashboard with status + summary.
 - Persistent session resume for active interviews, including reconnect/redeploy recovery, interviewer approval for high-risk interviewee resumes, and automatic incomplete handling after interruption timeout.
 - Token expiry handling:
@@ -33,7 +37,7 @@
 - Sandbox is “best effort” (process + limits), not a hardened container sandbox.
 - AuthN/AuthZ is currently open (no login / RBAC).
 - H2 is fine for dev/demo; production would typically use Postgres/MySQL with migrations.
-- Current sandbox support is still Java-only, but the internal runner architecture is now in place for future language expansion.
+- Higher-environment Microsoft Exchange SMTP settings are still pending; local/Docker SMTP can be configured with Postmark or another SMTP provider.
 
 ## Future Enhancements
 

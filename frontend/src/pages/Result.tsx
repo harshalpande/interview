@@ -155,6 +155,9 @@ const Result: React.FC = () => {
   const isPreSessionExpired = session.status === 'EXPIRED';
   const activityEvents = session.activityEvents || [];
   const authAuditEvents = session.authAuditEvents || [];
+  const suspiciousEvents = activityEvents.filter((event) => event.severity === 'SUSPICIOUS' || !event.severity);
+  const warningEvents = activityEvents.filter((event) => event.severity === 'WARNING');
+  const infoEvents = activityEvents.filter((event) => event.severity === 'INFO');
   const tabSwitchEvents = activityEvents.filter(
     (event) => event.eventType === 'TAB_HIDDEN' && !event.detail.toLowerCase().includes('closed or refreshed the browser/tab')
   );
@@ -179,7 +182,7 @@ const Result: React.FC = () => {
     ...(showExecutionTabs ? [{ key: 'output' as const, label: 'Output' }] : []),
     ...(showExecutionTabs && hasFinalErrors ? [{ key: 'errors' as const, label: 'Errors' }] : []),
     { key: 'audit' as const, label: 'Audit' },
-    ...(!isPreSessionExpired ? [{ key: 'suspicious' as const, label: 'Suspicious Activity' }] : []),
+    ...(!isPreSessionExpired ? [{ key: 'suspicious' as const, label: 'Integrity Activity' }] : []),
   ];
   const requestedTab = searchParams.get('tab') as ResultTabKey | null;
   const activeTab = resultTabs.some((tab) => tab.key === requestedTab) ? requestedTab! : 'overview';
@@ -398,12 +401,24 @@ const Result: React.FC = () => {
           {activeTab === 'suspicious' && !isPreSessionExpired && (
             <section className="result-panel">
               <h3 className="result-section-title">
-                <span>Suspicious Activity</span>
+                <span>Integrity Activity</span>
                 {activityEvents.length ? <span className="result-section-total">Total {activityEvents.length}</span> : null}
               </h3>
               {activityEvents.length ? (
                 <div className="activity-summary">
                   <div className="activity-summary-grid">
+                    <div className="activity-metric">
+                      <span className="activity-metric-label">Suspicious</span>
+                      <strong>{suspiciousEvents.length}</strong>
+                    </div>
+                    <div className="activity-metric">
+                      <span className="activity-metric-label">Warnings</span>
+                      <strong>{warningEvents.length}</strong>
+                    </div>
+                    <div className="activity-metric">
+                      <span className="activity-metric-label">Info</span>
+                      <strong>{infoEvents.length}</strong>
+                    </div>
                     <div className="activity-metric">
                       <span className="activity-metric-label">Tab switches</span>
                       <strong>{tabSwitchEvents.length}</strong>
@@ -439,7 +454,7 @@ const Result: React.FC = () => {
                   </div>
                   <div className="activity-summary-note">
                     <p>
-                      <strong>Summary:</strong> {tabSwitchEvents.length} tab switch event{tabSwitchEvents.length === 1 ? '' : 's'}, {browserCloseRefreshEvents.length} browser refresh/close event{browserCloseRefreshEvents.length === 1 ? '' : 's'}, {pasteEvents.length} paste event{pasteEvents.length === 1 ? '' : 's'}, and {blockedDropEvents.length} blocked drag-and-drop attempt{blockedDropEvents.length === 1 ? '' : 's'} were recorded during the session.{isInAppAvSession ? ` ${cameraStreamLostEvents.length} camera interruption${cameraStreamLostEvents.length === 1 ? '' : 's'}, ${microphoneDisabledEvents.length} microphone-off event${microphoneDisabledEvents.length === 1 ? '' : 's'}, and ${cameraDisabledEvents.length} camera-off event${cameraDisabledEvents.length === 1 ? '' : 's'} were also recorded through the in-app AV workflow.` : ' Live AV was handled outside the platform for this session, so in-app AV monitoring events were not collected.'}
+                      <strong>Summary:</strong> {suspiciousEvents.length} suspicious event{suspiciousEvents.length === 1 ? '' : 's'}, {warningEvents.length} warning{warningEvents.length === 1 ? '' : 's'}, and {infoEvents.length} informational signal{infoEvents.length === 1 ? '' : 's'} were recorded. {tabSwitchEvents.length} tab switch event{tabSwitchEvents.length === 1 ? '' : 's'}, {browserCloseRefreshEvents.length} browser refresh/close event{browserCloseRefreshEvents.length === 1 ? '' : 's'}, {pasteEvents.length} paste event{pasteEvents.length === 1 ? '' : 's'}, and {blockedDropEvents.length} blocked drag-and-drop attempt{blockedDropEvents.length === 1 ? '' : 's'} were observed during the session.{isInAppAvSession ? ` ${cameraStreamLostEvents.length} camera interruption${cameraStreamLostEvents.length === 1 ? '' : 's'}, ${microphoneDisabledEvents.length} microphone-off event${microphoneDisabledEvents.length === 1 ? '' : 's'}, and ${cameraDisabledEvents.length} camera-off event${cameraDisabledEvents.length === 1 ? '' : 's'} were also recorded through the in-app AV workflow.` : ' Live AV was handled outside the platform for this session, so focus-away events are reviewed with more context.'}
                     </p>
                     {latestActivity ? (
                       <p>
@@ -449,7 +464,7 @@ const Result: React.FC = () => {
                   </div>
                 </div>
               ) : (
-                <p className="activity-empty">No suspicious activities were observed.</p>
+                <p className="activity-empty">No integrity activity was observed.</p>
               )}
             </section>
           )}

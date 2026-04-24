@@ -1,7 +1,7 @@
 import React from 'react';
 import './ToastStack.css';
 
-export type ToastTone = 'info' | 'warning';
+export type ToastTone = 'info' | 'warning' | 'danger';
 
 export interface ToastItem {
   id: string;
@@ -100,8 +100,9 @@ function getToastExpiresAt(toast: ToastItem) {
 }
 
 function splitToastMessage(message: string) {
-  const prefix = 'Suspicious Alert :';
-  if (!message.startsWith(prefix)) {
+  const prefixes = ['Suspicious Alert :', 'Integrity Warning :', 'Integrity Notice :'];
+  const prefix = prefixes.find((candidate) => message.startsWith(candidate));
+  if (!prefix) {
     return {
       title: 'Alert',
       body: message,

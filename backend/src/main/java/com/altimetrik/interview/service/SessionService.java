@@ -32,6 +32,7 @@ import com.altimetrik.interview.entity.Participant;
 import com.altimetrik.interview.entity.ParticipantAccessChallenge;
 import com.altimetrik.interview.entity.RunResult;
 import com.altimetrik.interview.entity.SessionActivityEvent;
+import com.altimetrik.interview.enums.ActivityEventSeverity;
 import com.altimetrik.interview.enums.ActivityEventType;
 import com.altimetrik.interview.enums.AvMode;
 import com.altimetrik.interview.enums.CodeStorageMode;
@@ -105,6 +106,9 @@ public class SessionService {
     private static final int MAX_WORKSPACE_FILE_COUNT = 20;
     private static final int MAX_WORKSPACE_TOTAL_CHARS = 300_000;
     private static final int MAX_WORKSPACE_FILE_CHARS = 100_000;
+    private static final long IN_APP_TAB_AWAY_SUSPICIOUS_MS = 10_000L;
+    private static final long EXTERNAL_TAB_AWAY_SUSPICIOUS_MS = 30_000L;
+    private static final long IN_APP_AV_OFF_SUSPICIOUS_MS = 15_000L;
     private static final String SCENARIO_REFRESH = "REFRESH_OR_REOPEN";
     private static final String SCENARIO_CONNECTION = "CONNECTION_RECOVERY";
     private static final String SCENARIO_NETWORK = "NETWORK_CHANGE";
@@ -764,11 +768,17 @@ public class SessionService {
             throw new IllegalArgumentException("Only interviewee activity is tracked");
         }
 
+        int occurrenceCount = Math.toIntExact(sessionActivityEventRepository.countBySessionIdAndEventType(sessionId, request.getEventType()) + 1);
+        ActivityEventSeverity severity = resolveActivitySeverity(session, request, occurrenceCount);
         SessionActivityEvent event = new SessionActivityEvent();
         event.setSessionId(sessionId);
         event.setParticipantRole(request.getParticipantRole());
         event.setEventType(request.getEventType());
+        event.setSeverity(severity);
         event.setDetail(buildActivityDetail(request));
+        event.setCandidateMessage(buildCandidateActivityMessage(request, severity));
+        event.setDurationMs(normalizeDurationMs(request.getDurationMs()));
+        event.setOccurrenceCount(occurrenceCount);
         event = sessionActivityEventRepository.save(event);
         return toActivityEventDto(event);
     }
@@ -1553,6 +1563,71 @@ public class SessionService {
         };
     }
 
+    private ActivityEventSeverity resolveActivitySeverity(InterviewSession session, ActivityEventRequest request, int occurrenceCount) {
+        long durationMs = normalizeDurationMs(request.getDurationMs());
+        boolean inAppAv = session.getAvMode() == AvMode.IN_APP;
+
+        return switch (request.getEventType()) {
+            case TAB_HIDDEN -> resolveFocusAwaySeverity(inAppAv, durationMs, occurrenceCount);
+            case PASTE_IN_EDITOR, EXTERNAL_DROP_BLOCKED -> occurrenceCount >= 2
+                    ? ActivityEventSeverity.SUSPICIOUS
+                    : ActivityEventSeverity.WARNING;
+            case MICROPHONE_DISABLED_MANUALLY, CAMERA_DISABLED_MANUALLY -> {
+                if (!inAppAv) {
+                    yield ActivityEventSeverity.INFO;
+                }
+                yield durationMs >= IN_APP_AV_OFF_SUSPICIOUS_MS || occurrenceCount >= 2
+                        ? ActivityEventSeverity.SUSPICIOUS
+                        : ActivityEventSeverity.WARNING;
+            }
+            case CAMERA_STREAM_LOST, NO_FACE_DETECTED, MULTIPLE_FACES_DETECTED -> inAppAv
+                    ? ActivityEventSeverity.SUSPICIOUS
+                    : ActivityEventSeverity.INFO;
+        };
+    }
+
+    private ActivityEventSeverity resolveFocusAwaySeverity(boolean inAppAv, long durationMs, int occurrenceCount) {
+        if (inAppAv) {
+            return durationMs >= IN_APP_TAB_AWAY_SUSPICIOUS_MS || occurrenceCount >= 2
+                    ? ActivityEventSeverity.SUSPICIOUS
+                    : ActivityEventSeverity.WARNING;
+        }
+        return durationMs >= EXTERNAL_TAB_AWAY_SUSPICIOUS_MS || occurrenceCount >= 3
+                ? ActivityEventSeverity.SUSPICIOUS
+                : ActivityEventSeverity.INFO;
+    }
+
+    private String buildCandidateActivityMessage(ActivityEventRequest request, ActivityEventSeverity severity) {
+        boolean suspicious = severity == ActivityEventSeverity.SUSPICIOUS;
+        return switch (request.getEventType()) {
+            case TAB_HIDDEN -> suspicious
+                    ? "Changing tabs during the live interview is marked as suspicious."
+                    : "Please stay on the interview tab. Repeated or long focus changes may be marked as suspicious.";
+            case MICROPHONE_DISABLED_MANUALLY, CAMERA_DISABLED_MANUALLY -> suspicious
+                    ? "Switching off audio or video during the live interview is marked as suspicious."
+                    : "Please keep your interview audio and video enabled. Repeated or extended interruptions may be marked as suspicious.";
+            case PASTE_IN_EDITOR -> suspicious
+                    ? "Pasting external content is not allowed and has been recorded."
+                    : "Pasting external content is not allowed. Repeating this action will be marked as suspicious.";
+            case EXTERNAL_DROP_BLOCKED -> suspicious
+                    ? "Dragging external content into the editor is not allowed and has been recorded."
+                    : "Dragging external content into the editor is not allowed. Repeating this action will be marked as suspicious.";
+            case CAMERA_STREAM_LOST -> suspicious
+                    ? "Camera interruption during the live interview is marked as suspicious."
+                    : "Please keep your camera active throughout the interview.";
+            case NO_FACE_DETECTED -> suspicious
+                    ? "Face not visible during the live interview is marked as suspicious."
+                    : "Please keep your face visible in the camera frame.";
+            case MULTIPLE_FACES_DETECTED -> suspicious
+                    ? "Multiple faces detected during the live interview is marked as suspicious."
+                    : "Only the candidate should be visible in the camera frame.";
+        };
+    }
+
+    private long normalizeDurationMs(Long durationMs) {
+        return durationMs == null || durationMs < 0 ? 0L : durationMs;
+    }
+
     private String buildActivityDetail(ActivityEventRequest request) {
         if (request.getDetail() != null && !request.getDetail().isBlank()) {
             return request.getDetail().trim();
@@ -1575,7 +1650,11 @@ public class SessionService {
                 .id(event.getId())
                 .participantRole(event.getParticipantRole())
                 .eventType(event.getEventType())
+                .severity(event.getSeverity() == null ? ActivityEventSeverity.WARNING : event.getSeverity())
                 .detail(event.getDetail())
+                .candidateMessage(event.getCandidateMessage())
+                .durationMs(event.getDurationMs())
+                .occurrenceCount(event.getOccurrenceCount())
                 .createdAt(event.getCreatedAt())
                 .build();
     }

@@ -649,7 +649,7 @@ const Editor: React.FC<EditorProps> = ({
             codeFiles: changedFiles,
             timeoutMs: 15000,
             memoryLimitMb: 1024,
-            livePreviewMode: executionLanguage === 'REACT',
+            livePreviewMode: isFrontendWorkspace,
           });
           console.info('[frontend-build] response', {
             language: executionLanguage,

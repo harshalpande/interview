@@ -16,4 +16,6 @@ public class ActivityEventRequest {
 
     @NotBlank
     private String detail;
+
+    private Long durationMs;
 }

@@ -10,7 +10,7 @@ import { sessionApi } from '../services/sessionApi';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useWebRtcSession } from '../hooks/useWebRtcSession';
 import { useBackGuard } from '../hooks/useBackGuard';
-import type { ActivityEventType, EditableCodeFile, FeedbackRating, ParticipantRole, RecommendationDecision, SessionResponse, SessionSocketMessage, SessionStatus } from '../types/session';
+import type { ActivityEvent, ActivityEventType, EditableCodeFile, FeedbackRating, ParticipantRole, RecommendationDecision, SessionResponse, SessionSocketMessage, SessionStatus } from '../types/session';
 import { formatDateTime, formatTimeZoneLabel } from '../utils/dateTime';
 import { getOrCreateDeviceId } from '../utils/device';
 
@@ -18,6 +18,7 @@ import './Session.css';
 
 const FEEDBACK_COMMENT_LIMIT = 4000;
 const ALTIMETRIK_REDIRECT_URL = process.env.REACT_APP_POST_INTERVIEW_REDIRECT_URL || 'https://www.altimetrik.com/';
+const IN_APP_AV_OFF_SUSPICIOUS_MS = 15000;
 
 const STATUS_LABELS: Record<SessionStatus, string> = {
   REGISTERED: 'Registered',
@@ -59,8 +60,13 @@ const Session: React.FC = () => {
   const suspiciousRejectionNoticeShownRef = React.useRef(false);
   const interviewerRecoveryTimeoutNoticeShownRef = React.useRef(false);
   const lastTabHiddenAtRef = React.useRef(0);
+  const tabHiddenStartedAtRef = React.useRef<number | null>(null);
   const lastBlockedDropAtRef = React.useRef(0);
   const lastCameraStreamIssueRef = React.useRef('');
+  const microphoneDisabledStartedAtRef = React.useRef<number | null>(null);
+  const cameraDisabledStartedAtRef = React.useRef<number | null>(null);
+  const microphoneLongOffRecordedRef = React.useRef(false);
+  const cameraLongOffRecordedRef = React.useRef(false);
   const previousMuteStateRef = React.useRef<boolean | null>(null);
   const previousCameraStateRef = React.useRef<boolean | null>(null);
   const internalClipboardTextsRef = React.useRef<Map<string, number>>(new Map());
@@ -260,6 +266,33 @@ const Session: React.FC = () => {
     setToastItems((prev) => [...prev, { id, message: prefixedMessage, tone, persistent: true, createdAt: Date.now(), autoCloseMs: 60000 }]);
   }, []);
 
+  const pushCandidateActivityToast = React.useCallback((event: ActivityEvent) => {
+    const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const severity = event.severity || 'WARNING';
+    const prefix = severity === 'SUSPICIOUS'
+      ? 'Suspicious Alert :'
+      : severity === 'WARNING'
+        ? 'Integrity Warning :'
+        : 'Integrity Notice :';
+    const tone: ToastItem['tone'] = severity === 'SUSPICIOUS'
+      ? 'danger'
+      : severity === 'WARNING'
+        ? 'warning'
+        : 'info';
+    const message = event.candidateMessage || event.detail;
+    setToastItems((prev) => [
+      ...prev,
+      {
+        id,
+        message: `${prefix} ${message}`,
+        tone,
+        persistent: true,
+        createdAt: Date.now(),
+        autoCloseMs: severity === 'SUSPICIOUS' ? 90000 : 60000,
+      },
+    ]);
+  }, []);
+
   const dismissToast = React.useCallback((id: string) => {
     setToastItems((prev) => prev.filter((toast) => toast.id !== id));
   }, []);
@@ -294,22 +327,24 @@ const Session: React.FC = () => {
   }, [isFullscreen]);
 
   const recordActivityEvent = React.useCallback(
-    async (eventType: ActivityEventType, detail: string) => {
+    async (eventType: ActivityEventType, detail: string, durationMs?: number) => {
       if (!sessionId || role !== 'interviewee' || session?.status !== 'ACTIVE') {
         return;
       }
 
       try {
-        await sessionApi.recordActivityEvent(sessionId, {
+        const event = await sessionApi.recordActivityEvent(sessionId, {
           participantRole: 'INTERVIEWEE',
           eventType,
           detail,
+          durationMs,
         });
+        pushCandidateActivityToast(event);
       } catch {
         // best-effort only
       }
     },
-    [role, session?.status, sessionId]
+    [pushCandidateActivityToast, role, session?.status, sessionId]
   );
 
   const resolvedCodeFiles = React.useMemo(
@@ -355,8 +390,13 @@ const Session: React.FC = () => {
       if (typeof message.timeLeft === 'number') {
         setTimeLeft(message.timeLeft);
       }
-      if (message.type === 'ACTIVITY_EVENT' && message.activityEvent && role === 'interviewer') {
-        pushPersistentToast(message.activityEvent.detail, 'warning');
+      if (
+        message.type === 'ACTIVITY_EVENT' &&
+        message.activityEvent &&
+        role === 'interviewer' &&
+        message.activityEvent.severity === 'SUSPICIOUS'
+      ) {
+        pushPersistentToast(message.activityEvent.detail, 'danger');
       }
       if (message.type === 'WEBRTC_SIGNAL') {
         setIncomingSignal(message);
@@ -526,17 +566,29 @@ const Session: React.FC = () => {
     }
 
     const onVisibilityChange = () => {
-      if (document.visibilityState !== 'hidden') {
+      if (document.visibilityState === 'hidden') {
+        tabHiddenStartedAtRef.current = Date.now();
         return;
       }
 
+      const hiddenStartedAt = tabHiddenStartedAtRef.current;
+      tabHiddenStartedAtRef.current = null;
+      if (!hiddenStartedAt) {
+        return;
+      }
       const now = Date.now();
       if (now - lastTabHiddenAtRef.current < 1200) {
         return;
       }
       lastTabHiddenAtRef.current = now;
+      const durationMs = Math.max(0, now - hiddenStartedAt);
+      const durationSeconds = Math.max(1, Math.round(durationMs / 1000));
 
-      void recordActivityEvent('TAB_HIDDEN', `${interviewee?.name?.trim() || 'Interviewee'} switched away from the interview tab or window.`);
+      void recordActivityEvent(
+        'TAB_HIDDEN',
+        `${interviewee?.name?.trim() || 'Interviewee'} switched away from the interview tab or window for ${durationSeconds} second${durationSeconds === 1 ? '' : 's'}.`,
+        durationMs
+      );
     };
 
     document.addEventListener('visibilitychange', onVisibilityChange);
@@ -600,22 +652,78 @@ const Session: React.FC = () => {
     }
 
     if (previousMuteStateRef.current === false && isMuted) {
+      microphoneDisabledStartedAtRef.current = Date.now();
+      microphoneLongOffRecordedRef.current = false;
       void recordActivityEvent(
         'MICROPHONE_DISABLED_MANUALLY',
         `${intervieweeName} manually turned off the microphone during the interview.`
       );
     }
+    if (previousMuteStateRef.current === true && !isMuted) {
+      microphoneDisabledStartedAtRef.current = null;
+      microphoneLongOffRecordedRef.current = false;
+    }
 
     if (previousCameraStateRef.current === true && !isCameraEnabled) {
+      cameraDisabledStartedAtRef.current = Date.now();
+      cameraLongOffRecordedRef.current = false;
       void recordActivityEvent(
         'CAMERA_DISABLED_MANUALLY',
         `${intervieweeName} manually turned off the camera during the interview.`
       );
     }
+    if (previousCameraStateRef.current === false && isCameraEnabled) {
+      cameraDisabledStartedAtRef.current = null;
+      cameraLongOffRecordedRef.current = false;
+    }
 
     previousMuteStateRef.current = isMuted;
     previousCameraStateRef.current = isCameraEnabled;
   }, [intervieweeName, isCameraEnabled, isInAppAvSession, isMuted, recordActivityEvent, role, session?.status]);
+
+  React.useEffect(() => {
+    if (!isInAppAvSession || role !== 'interviewee' || session?.status !== 'ACTIVE' || !isMuted) {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      if (!isMuted || microphoneLongOffRecordedRef.current) {
+        return;
+      }
+      const startedAt = microphoneDisabledStartedAtRef.current ?? Date.now();
+      const durationMs = Math.max(IN_APP_AV_OFF_SUSPICIOUS_MS, Date.now() - startedAt);
+      microphoneLongOffRecordedRef.current = true;
+      void recordActivityEvent(
+        'MICROPHONE_DISABLED_MANUALLY',
+        `${intervieweeName} kept the microphone switched off for ${Math.round(durationMs / 1000)} seconds during the interview.`,
+        durationMs
+      );
+    }, IN_APP_AV_OFF_SUSPICIOUS_MS);
+
+    return () => window.clearTimeout(timeout);
+  }, [intervieweeName, isInAppAvSession, isMuted, recordActivityEvent, role, session?.status]);
+
+  React.useEffect(() => {
+    if (!isInAppAvSession || role !== 'interviewee' || session?.status !== 'ACTIVE' || isCameraEnabled) {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      if (isCameraEnabled || cameraLongOffRecordedRef.current) {
+        return;
+      }
+      const startedAt = cameraDisabledStartedAtRef.current ?? Date.now();
+      const durationMs = Math.max(IN_APP_AV_OFF_SUSPICIOUS_MS, Date.now() - startedAt);
+      cameraLongOffRecordedRef.current = true;
+      void recordActivityEvent(
+        'CAMERA_DISABLED_MANUALLY',
+        `${intervieweeName} kept the camera switched off for ${Math.round(durationMs / 1000)} seconds during the interview.`,
+        durationMs
+      );
+    }, IN_APP_AV_OFF_SUSPICIOUS_MS);
+
+    return () => window.clearTimeout(timeout);
+  }, [intervieweeName, isCameraEnabled, isInAppAvSession, recordActivityEvent, role, session?.status]);
 
   if (isLoading) {
     return (
@@ -648,10 +756,11 @@ const Session: React.FC = () => {
   const waitingForFeedback = isInterviewer && session.status === 'ENDED' && !session.feedback;
   const lockDisqualificationOutcome = waitingForFeedback && Boolean(session.suspiciousRejected);
   const suspiciousActivityEvents = (session.activityEvents || []).filter((event) =>
-    (isInAppAvSession
+    event.severity === 'SUSPICIOUS' ||
+    (!event.severity && (isInAppAvSession
       ? ['TAB_HIDDEN', 'PASTE_IN_EDITOR', 'EXTERNAL_DROP_BLOCKED', 'CAMERA_STREAM_LOST', 'MICROPHONE_DISABLED_MANUALLY', 'CAMERA_DISABLED_MANUALLY', 'NO_FACE_DETECTED', 'MULTIPLE_FACES_DETECTED']
       : ['TAB_HIDDEN', 'PASTE_IN_EDITOR', 'EXTERNAL_DROP_BLOCKED']
-    ).includes(event.eventType)
+    ).includes(event.eventType))
   );
   const waitingJoinLabel = `Waiting for ${interviewee?.name || 'Interviewee'} to join`;
   const hasCompleteFeedback = Boolean(feedback.rating && feedback.recommendationDecision && feedback.comments.trim());

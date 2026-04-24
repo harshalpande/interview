@@ -47,3 +47,29 @@ This document tracks scenarios that are still pending validation because the cur
   - camera enable/disable behavior
   - reconnect behavior after temporary disruptions
   - overall stream stability during the interview
+
+## 3. Progressive Integrity Warning Threshold Validation
+
+### Scenario
+
+- Validate candidate-facing warnings and suspicious escalation for focus-away, paste, drag/drop, and in-app AV disablement.
+- Confirm that the first low-risk event shows a warning or informational notice, while repeated or long-duration events are marked suspicious.
+
+### Why It Is Still Pending
+
+- Some behavior is difficult to validate accurately when interviewer and interviewee are running on the same machine.
+- External AV focus-away needs real Teams/Zoom usage to confirm that legitimate AV interactions are not over-classified as suspicious.
+- In-app AV audio/video-off duration testing should be done on separate devices to avoid local browser/device permission artifacts.
+
+### Recommended Future Test Setup
+
+- Run interviewer and interviewee on separate machines.
+- Test both `IN_APP` and `EXTERNAL` AV sessions.
+- Verify:
+  - in-app tab away becomes suspicious after 10 seconds or the second occurrence
+  - external AV tab away becomes suspicious after 30 seconds or the third occurrence
+  - in-app microphone/camera off becomes suspicious after 15 seconds or the second occurrence
+  - paste and drag/drop are warned first and suspicious on repeat
+  - candidate sees the correct integrity notice
+  - interviewer sees alerts only for confirmed suspicious events
+  - Result Workspace summarizes `INFO`, `WARNING`, and `SUSPICIOUS` counts correctly
