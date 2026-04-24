@@ -64,6 +64,7 @@ const Session: React.FC = () => {
   const previousMuteStateRef = React.useRef<boolean | null>(null);
   const previousCameraStateRef = React.useRef<boolean | null>(null);
   const internalClipboardTextsRef = React.useRef<Map<string, number>>(new Map());
+  const codeVersionRef = React.useRef(0);
 
   const { data: session, isLoading, error } = useQuery({
     queryKey: ['session', sessionId],
@@ -101,25 +102,63 @@ const Session: React.FC = () => {
     }
   }, [role, setRole, storedRole]);
 
+  const mergeIncomingSession = React.useCallback(
+    (nextSession: SessionResponse) => {
+      const incomingVersion = normalizeCodeVersion(nextSession.codeVersion);
+      const localVersion = Math.max(codeVersionRef.current, normalizeCodeVersion(currentSession?.codeVersion));
+      if (incomingVersion < localVersion && currentSession?.id === nextSession.id) {
+        const localFiles = currentCodeFiles.length > 0 ? currentCodeFiles : (currentSession.codeFiles ?? nextSession.codeFiles ?? []);
+        const localCode = isFrontendWorkspaceSession
+          ? resolvePrimaryCodeFromFiles(nextSession.technology, localFiles)
+          : currentCode;
+        return {
+          ...nextSession,
+          latestCode: localCode,
+          codeFiles: localFiles,
+          codeVersion: localVersion,
+        };
+      }
+      codeVersionRef.current = Math.max(codeVersionRef.current, incomingVersion);
+      return nextSession;
+    },
+    [currentCode, currentCodeFiles, currentSession, isFrontendWorkspaceSession]
+  );
+
+  const reserveNextCodeVersion = React.useCallback(() => {
+    const nextVersion = Math.max(
+      codeVersionRef.current,
+      normalizeCodeVersion(currentSession?.codeVersion),
+      normalizeCodeVersion(session?.codeVersion)
+    ) + 1;
+    codeVersionRef.current = nextVersion;
+    return nextVersion;
+  }, [currentSession?.codeVersion, session?.codeVersion]);
+
   React.useEffect(() => {
     if (session) {
-      setSession(session);
-      setTimeLeft(session.remainingSec);
-      if (session.feedback) {
+      const safeSession = mergeIncomingSession(session);
+      if (safeSession !== session) {
+        queryClient.setQueryData(['session', sessionId], safeSession);
+      }
+      if (currentSession !== safeSession) {
+        setSession(safeSession);
+      }
+      setTimeLeft(safeSession.remainingSec);
+      if (safeSession.feedback) {
         setFeedback({
-          rating: session.feedback.rating,
-          comments: session.feedback.comments,
-          recommendationDecision: session.feedback.recommendationDecision,
+          rating: safeSession.feedback.rating,
+          comments: safeSession.feedback.comments,
+          recommendationDecision: safeSession.feedback.recommendationDecision,
         });
-      } else if (session.feedbackDraft) {
+      } else if (safeSession.feedbackDraft) {
         setFeedback({
-          rating: session.feedbackDraft.rating,
-          comments: session.feedbackDraft.comments,
-          recommendationDecision: session.feedbackDraft.recommendationDecision,
+          rating: safeSession.feedbackDraft.rating,
+          comments: safeSession.feedbackDraft.comments,
+          recommendationDecision: safeSession.feedbackDraft.recommendationDecision,
         });
       }
     }
-  }, [session, setSession]);
+  }, [currentSession, mergeIncomingSession, queryClient, session, sessionId, setSession]);
 
   React.useEffect(() => {
     suspiciousRejectionNoticeShownRef.current = false;
@@ -206,12 +245,13 @@ const Session: React.FC = () => {
 
   const refreshSession = React.useCallback(
     (nextSession: SessionResponse) => {
-      queryClient.setQueryData(['session', sessionId], nextSession);
+      const safeSession = mergeIncomingSession(nextSession);
+      queryClient.setQueryData(['session', sessionId], safeSession);
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
-      setSession(nextSession);
-      setTimeLeft(nextSession.remainingSec);
+      setSession(safeSession);
+      setTimeLeft(safeSession.remainingSec);
     },
-    [queryClient, sessionId, setSession]
+    [mergeIncomingSession, queryClient, sessionId, setSession]
   );
 
   const pushPersistentToast = React.useCallback((message: string, tone: ToastItem['tone'] = 'warning') => {
@@ -304,7 +344,12 @@ const Session: React.FC = () => {
       if (message.session) {
         refreshSession(message.session);
       }
-      if (message.type === 'CODE_UPDATE' && typeof message.code === 'string') {
+      if (!message.session && message.type === 'CODE_UPDATE' && typeof message.code === 'string') {
+        const incomingVersion = normalizeCodeVersion(message.version);
+        if (incomingVersion < codeVersionRef.current) {
+          return;
+        }
+        codeVersionRef.current = Math.max(codeVersionRef.current, incomingVersion);
         setCurrentCode(message.code);
       }
       if (typeof message.timeLeft === 'number') {
@@ -942,13 +987,14 @@ const Session: React.FC = () => {
             }
             initialCodeFiles={resolvedCodeFiles}
             initialCode={resolvedLatestCode}
+            initialCodeVersion={normalizeCodeVersion(currentSession?.codeVersion ?? session.codeVersion)}
             showFullscreenToggle={canFullscreen}
             isFullscreen={isFullscreen}
             onToggleFullscreen={toggleFullscreen}
             onCodeChange={(code) => {
               setCurrentCode(code);
               if (session.status === 'ACTIVE') {
-                const nextVersion = ((currentSession?.codeVersion ?? session.codeVersion) || 0) + 1;
+                const nextVersion = reserveNextCodeVersion();
                 const nextSession = {
                   ...session,
                   latestCode: code,
@@ -961,7 +1007,7 @@ const Session: React.FC = () => {
             onCodeFilesChange={(files) => {
               setCurrentCodeFiles(files);
               if (session.status === 'ACTIVE') {
-                const nextVersion = ((currentSession?.codeVersion ?? session.codeVersion) || 0) + 1;
+                const nextVersion = reserveNextCodeVersion();
                 const nextCode = resolvePrimaryCodeFromFiles(session.technology, files);
                 const nextSession = {
                   ...session,
@@ -1153,6 +1199,10 @@ function formatActivityEventLabel(eventType: ActivityEventType) {
     .split('_')
     .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
     .join(' ');
+}
+
+function normalizeCodeVersion(version: number | null | undefined) {
+  return typeof version === 'number' && Number.isFinite(version) ? version : 0;
 }
 
 function formatPossessiveLabel(name: string) {

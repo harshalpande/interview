@@ -403,6 +403,7 @@ interface EditorProps {
   readOnly?: boolean;
   initialCode?: string;
   initialCodeFiles?: EditableCodeFile[];
+  initialCodeVersion?: number;
   onCodeChange?: (code: string) => void;
   onCodeFilesChange?: (files: EditableCodeFile[]) => void;
   onPasteInEditor?: (text: string) => boolean | void;
@@ -424,6 +425,7 @@ const Editor: React.FC<EditorProps> = ({
   readOnly = false,
   initialCode,
   initialCodeFiles,
+  initialCodeVersion,
   onCodeChange,
   onCodeFilesChange,
   onPasteInEditor,
@@ -482,8 +484,25 @@ const Editor: React.FC<EditorProps> = ({
   const workspaceFilesRef = React.useRef<AngularWorkspaceFile[]>(buildWorkspaceFiles(executionLanguage, initialCodeFiles));
   const dirtyWorkspacePathsRef = React.useRef<string[]>([]);
   const activeFilePathRef = React.useRef<string>(buildWorkspaceFiles(executionLanguage, initialCodeFiles)[0]?.path ?? defaultWorkspaceFiles(executionLanguage)[0].path);
+  const appliedInitialCodeVersionRef = React.useRef(initialCodeVersion ?? 0);
+  const previousExecutionLanguageRef = React.useRef(executionLanguage);
 
   useEffect(() => {
+    const languageChanged = previousExecutionLanguageRef.current !== executionLanguage;
+    const hasVersion = typeof initialCodeVersion === 'number';
+    const shouldApplyInitialCode = languageChanged
+      || !hasVersion
+      || initialCodeVersion > appliedInitialCodeVersionRef.current;
+
+    if (!shouldApplyInitialCode) {
+      return;
+    }
+
+    previousExecutionLanguageRef.current = executionLanguage;
+    if (hasVersion) {
+      appliedInitialCodeVersionRef.current = initialCodeVersion;
+    }
+
     if (!isFrontendWorkspace) {
       setState((prev) => ({
         ...prev,
@@ -503,7 +522,7 @@ const Editor: React.FC<EditorProps> = ({
       }
       return nextFiles[0]?.path ?? defaultWorkspaceFiles(executionLanguage)[0].path;
     });
-    }, [executionLanguage, initialCodeFiles, isFrontendWorkspace, resolvedInitialCode]);
+    }, [executionLanguage, initialCodeFiles, initialCodeVersion, isFrontendWorkspace, resolvedInitialCode]);
 
   useEffect(() => {
     workspaceFilesRef.current = workspaceFiles;

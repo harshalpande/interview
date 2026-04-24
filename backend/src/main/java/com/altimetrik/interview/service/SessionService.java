@@ -86,6 +86,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 
 @Service
@@ -1208,19 +1209,67 @@ public class SessionService {
 
     private void upsertCodeState(String sessionId, CodeUpdateRequest request) {
         CodeState codeState = codeStateRepository.findBySessionId(sessionId).orElseGet(CodeState::new);
-        if (request.getVersion() != null && codeState.getVersion() != null && request.getVersion() < codeState.getVersion()) {
-            throw new IllegalArgumentException("Code version is stale");
-        }
         CodeStorageMode storageMode = resolveStorageMode(codeState, request);
         List<EditableCodeFileDto> editableFiles = resolveEditableFilesForUpdate(sessionId, request, storageMode, codeState);
+        Long storedVersion = codeState.getVersion() == null ? 0L : codeState.getVersion();
+        Long requestedVersion = request.getVersion();
+        String nextLatestCode = resolvePrimaryCode(editableFiles, request.getCode());
+
+        if (requestedVersion != null && requestedVersion < storedVersion) {
+            log.debug("Ignoring stale code update for session {} from {}. requestedVersion={} storedVersion={}",
+                    sessionId, request.getUpdatedByRole(), requestedVersion, storedVersion);
+            return;
+        }
+        if (requestedVersion != null && requestedVersion.equals(storedVersion)) {
+            boolean sameCodeState = hasSameCodeState(sessionId, codeState, nextLatestCode, editableFiles);
+            if (sameCodeState || request.getUpdatedByRole() != ParticipantRole.INTERVIEWER) {
+                log.debug("Ignoring same-version code update for session {} from {}. requestedVersion={} storedVersion={} sameCodeState={}",
+                        sessionId, request.getUpdatedByRole(), requestedVersion, storedVersion, sameCodeState);
+                return;
+            }
+        }
+
         codeState.setSessionId(sessionId);
-        codeState.setLatestCode(resolvePrimaryCode(editableFiles, request.getCode()));
+        codeState.setLatestCode(nextLatestCode);
         codeState.setStorageMode(storageMode);
         codeState.setUpdatedAt(nowUtc());
         codeState.setUpdatedByRole(request.getUpdatedByRole().name());
-        codeState.setVersion(codeState.getVersion() == null ? 1L : codeState.getVersion() + 1);
+        codeState.setVersion(resolveAcceptedCodeVersion(storedVersion, requestedVersion));
         codeStateRepository.save(codeState);
         replaceCodeFiles(sessionId, editableFiles);
+    }
+
+    private Long resolveAcceptedCodeVersion(Long storedVersion, Long requestedVersion) {
+        if (requestedVersion == null) {
+            return storedVersion + 1;
+        }
+        return requestedVersion > storedVersion ? requestedVersion : storedVersion + 1;
+    }
+
+    private boolean hasSameCodeState(String sessionId,
+                                     CodeState codeState,
+                                     String nextLatestCode,
+                                     List<EditableCodeFileDto> nextFiles) {
+        if (!Objects.equals(codeState.getLatestCode(), nextLatestCode)) {
+            return false;
+        }
+        List<EditableCodeFileDto> existingFiles = codeFileRepository.findBySessionIdOrderBySortOrderAscCreatedAtAsc(sessionId).stream()
+                .map(this::toEditableCodeFileDto)
+                .toList();
+        if (existingFiles.size() != nextFiles.size()) {
+            return false;
+        }
+        for (int index = 0; index < existingFiles.size(); index++) {
+            EditableCodeFileDto existing = existingFiles.get(index);
+            EditableCodeFileDto next = nextFiles.get(index);
+            if (!Objects.equals(existing.getPath(), next.getPath())
+                    || !Objects.equals(existing.getContent(), next.getContent())
+                    || !Objects.equals(existing.getEditable(), next.getEditable())
+                    || !Objects.equals(existing.getSortOrder(), next.getSortOrder())) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private SessionResponse toSessionResponse(InterviewSession session, boolean includeDetails) {
