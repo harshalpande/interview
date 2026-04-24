@@ -55,10 +55,27 @@ services:
       - SANDBOX_BASE_URL=http://sandbox-backend:8080/api
       - SANDBOX_FRONTEND_BASE_URL=http://sandbox-frontend:8080/api
       - SANDBOX_FRONTEND_PUBLIC_BASE_URL=http://localhost:8083/api
+      - APP_PUBLIC_ORIGIN=${APP_PUBLIC_ORIGIN:-http://localhost:3000}
+      - APP_EMAIL_MODE=${APP_EMAIL_MODE:-logging}
+      - APP_EMAIL_FROM_ADDRESS=${APP_EMAIL_FROM_ADDRESS:-no-reply@example.com}
+      - APP_EMAIL_FROM_NAME=${APP_EMAIL_FROM_NAME:-Interview Platform}
+      - APP_EMAIL_SUBJECT_PREFIX=${APP_EMAIL_SUBJECT_PREFIX:-DEV}
+      - SPRING_MAIL_HOST=${SPRING_MAIL_HOST:-}
+      - SPRING_MAIL_PORT=${SPRING_MAIL_PORT:-2525}
+      - SPRING_MAIL_USERNAME=${SPRING_MAIL_USERNAME:-}
+      - SPRING_MAIL_PASSWORD=${SPRING_MAIL_PASSWORD:-}
+      - SPRING_MAIL_SMTP_AUTH=${SPRING_MAIL_SMTP_AUTH:-true}
+      - SPRING_MAIL_SMTP_STARTTLS_ENABLE=${SPRING_MAIL_SMTP_STARTTLS_ENABLE:-true}
+      - SPRING_MAIL_SMTP_STARTTLS_REQUIRED=${SPRING_MAIL_SMTP_STARTTLS_REQUIRED:-false}
+      - SPRING_MAIL_SMTP_SSL_ENABLE=${SPRING_MAIL_SMTP_SSL_ENABLE:-false}
+      - MANAGEMENT_HEALTH_MAIL_ENABLED=false
       - JAVA_OPTS=-Xmx512m -Xms256m
       - LOGGING_LEVEL_COM_ALTIMETRIK=DEBUG
     volumes:
       - "${BINDMOUNT_DIR:-C:/Users/hpande/Documents/workspace/bindmount}:/data" # Persistent H2 DB (Windows bind mount)
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     networks:
       - java-compiler-network
     depends_on:

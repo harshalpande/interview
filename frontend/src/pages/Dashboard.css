@@ -302,22 +302,32 @@
 }
 
 .interviews-table tbody td {
-  padding: 12px 16px;
+  padding: 12px 12px;
   border-top: 1px solid #e6edf4;
-  vertical-align: top;
+  vertical-align: middle;
+  text-align: center;
   color: var(--text);
   line-height: 1.35;
-  word-break: break-word;
+  word-break: normal;
+  overflow-wrap: break-word;
 }
 
 .summary-cell {
-  min-width: 220px;
   color: var(--text-soft);
+  text-align: center;
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.action-cell {
+  text-align: center;
 }
 
 .participant-cell {
   display: grid;
   gap: 3px;
+  justify-items: center;
+  text-align: center;
 }
 
 .participant-name {
@@ -327,14 +337,34 @@
 }
 
 .participant-email {
-  color: #617488;
-  font-size: 0.92rem;
+  color: #7a8a9a;
+  font-size: 0.68rem;
+  line-height: 1.2;
 }
 
 .date-cell {
-  white-space: nowrap;
   color: #617488;
   font-size: 0.92rem;
+  text-align: center;
+}
+
+.date-stack {
+  display: grid;
+  gap: 2px;
+  justify-items: center;
+}
+
+.date-primary {
+  color: #334a62;
+  font-size: 0.84rem;
+  font-weight: 500;
+  line-height: 1.2;
+}
+
+.date-secondary {
+  color: #7c8c9b;
+  font-size: 0.72rem;
+  line-height: 1.2;
 }
 
 .empty-grid-row td {
@@ -353,44 +383,83 @@
 .status {
   display: inline-flex;
   align-items: center;
-  padding: 7px 12px;
+  justify-content: center;
+  min-height: 40px;
+  min-width: 124px;
+  max-width: 100%;
+  padding: 8px 12px;
   border-radius: 999px;
-  font-size: 0.82rem;
+  border: 1px solid transparent;
+  font-size: 0.78rem;
   font-weight: 700;
+  line-height: 1.15;
+  text-align: center;
+  white-space: normal;
+  word-break: normal;
+  overflow-wrap: normal;
 }
 
-.status-created {
-  background: #e4f3f6;
-  color: #0a6474;
+.status-registered {
+  background: #eef4fb;
+  border-color: #d9e4f1;
+  color: #43637f;
 }
 
-.status-waiting_join {
-  background: #fff1d6;
-  color: #925f0f;
+.status-auth_in_progress {
+  background: #fff3dd;
+  border-color: #f2dfb7;
+  color: #8c6716;
+}
+
+.status-ready_to_start {
+  background: #e5f7ef;
+  border-color: #c8e8d9;
+  color: #1f7a52;
 }
 
 .status-active {
   background: #e2f6ec;
+  border-color: #c5e9d5;
   color: #1b7b4c;
 }
 
 .status-ended {
   background: #e8edf4;
+  border-color: #d6e0ea;
   color: #42576f;
 }
 
 .status-expired {
   background: #ffe7e4;
+  border-color: #f3c5c1;
   color: #a53831;
+}
+
+.status-auth_failed {
+  background: #fff0ef;
+  border-color: #f1cdca;
+  color: #ad423a;
 }
 
 .technology-pill {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   padding: 7px 12px;
   border-radius: 999px;
   font-size: 0.82rem;
   font-weight: 700;
+}
+
+.dashboard-action-btn {
+  min-width: 120px;
+  max-width: 100%;
+  padding-inline: 14px;
+  font-size: 0.86rem;
+  white-space: nowrap;
+  word-break: normal;
+  overflow-wrap: normal;
+  box-shadow: 0 10px 18px rgba(16, 37, 66, 0.08);
 }
 
 .technology-pill-java {

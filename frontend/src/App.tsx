@@ -3,8 +3,8 @@ import { BrowserRouter as Router, Navigate, Routes, Route, useLocation, useParam
 import Dashboard from './pages/Dashboard';
 import StartInterview from './pages/StartInterview';
 import Disclaimer from './pages/Disclaimer';
+import AccessEntry from './pages/AccessEntry';
 import Session from './pages/Session';
-import Join from './pages/Join';
 import Resume from './pages/Resume';
 import Result from './pages/Result';
 import TechnologySelection from './pages/TechnologySelection';
@@ -26,7 +26,7 @@ function LegacySessionRedirect() {
 
 function LegacyJoinRedirect() {
   const { token } = useParams();
-  return <Navigate to={token ? `/java/join/${token}` : '/'} replace />;
+  return <Navigate to={token ? `/java/access/${token}` : '/'} replace />;
 }
 
 function LegacyResultRedirect() {
@@ -53,7 +53,8 @@ function AppContent() {
           <Route path="/java/identity-capture/:sessionId" element={<IdentityCapture />} />
           <Route path="/java/disclaimer/:role" element={<Disclaimer />} />
           <Route path="/java/session/:sessionId" element={<Session />} />
-          <Route path="/java/join/:token" element={<Join />} />
+          <Route path="/java/access/:token" element={<AccessEntry />} />
+          <Route path="/java/join/:token" element={<AccessEntry />} />
           <Route path="/java/resume/:sessionId" element={<Resume />} />
           <Route path="/java/result/:sessionId" element={<Result />} />
           <Route path="/disclaimer/:role" element={<LegacyDisclaimerRedirect />} />

@@ -1,6 +1,25 @@
 spring:
+  config:
+    import: optional:file:../.env[.properties],optional:file:.env[.properties],optional:file:../backend/.env.local[.properties],optional:file:.env.local[.properties]
   application:
     name: java-compiler-backend
+  mail:
+    host: ${SPRING_MAIL_HOST:}
+    port: ${SPRING_MAIL_PORT:2525}
+    username: ${SPRING_MAIL_USERNAME:}
+    password: ${SPRING_MAIL_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          connectiontimeout: ${SPRING_MAIL_SMTP_CONNECTION_TIMEOUT_MS:30000}
+          timeout: ${SPRING_MAIL_SMTP_TIMEOUT_MS:30000}
+          writetimeout: ${SPRING_MAIL_SMTP_WRITE_TIMEOUT_MS:30000}
+          auth: ${SPRING_MAIL_SMTP_AUTH:true}
+          starttls:
+            enable: ${SPRING_MAIL_SMTP_STARTTLS_ENABLE:true}
+            required: ${SPRING_MAIL_SMTP_STARTTLS_REQUIRED:false}
+          ssl:
+            enable: ${SPRING_MAIL_SMTP_SSL_ENABLE:false}
   datasource:
     # Default (local): file-based H2 on the Windows bind-mount path so data persists
     # Override via env var `H2_DB_PATH` if needed.
@@ -43,6 +62,12 @@ logging:
     com.altimetrik: INFO
 
 app:
+  email:
+    mode: ${APP_EMAIL_MODE:logging}
+    from-address: ${APP_EMAIL_FROM_ADDRESS:no-reply@example.com}
+    from-name: ${APP_EMAIL_FROM_NAME:Interview Platform}
+    subject-prefix: ${APP_EMAIL_SUBJECT_PREFIX:LOCAL}
+  public-origin: ${APP_PUBLIC_ORIGIN:http://localhost:3000}
   storage:
     root: ${APP_STORAGE_PATH:C:/Users/hpande/Documents/workspace/bindmount}
 
@@ -58,6 +83,9 @@ springdoc:
     path: /swagger-ui.html
 
 management:
+  health:
+    mail:
+      enabled: false
   endpoints:
     web:
       exposure:

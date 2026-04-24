@@ -1,5 +1,12 @@
 export type ParticipantRole = 'INTERVIEWER' | 'INTERVIEWEE';
-export type SessionStatus = 'CREATED' | 'WAITING_JOIN' | 'ACTIVE' | 'ENDED' | 'EXPIRED';
+export type SessionStatus =
+  | 'REGISTERED'
+  | 'AUTH_IN_PROGRESS'
+  | 'READY_TO_START'
+  | 'ACTIVE'
+  | 'ENDED'
+  | 'EXPIRED'
+  | 'AUTH_FAILED';
 export type ParticipantConnectionStatus = 'DISCONNECTED' | 'CONNECTED' | 'AWAITING_APPROVAL';
 export type FeedbackRating = 'EXCELLENT' | 'GOOD' | 'FAIR' | 'BAD' | 'DISQUALIFIED';
 export type AvMode = 'IN_APP' | 'EXTERNAL';
@@ -26,6 +33,7 @@ export type ResumeReason =
   | 'TAB_OR_BROWSER_CLOSED'
   | 'MANUAL_RESUME';
 export type FrontendWorkspaceStatus = 'READY' | 'FAILED' | 'STOPPED';
+export type ParticipantAccessStatus = 'NOT_STARTED' | 'OTP_PENDING' | 'OTP_VERIFIED' | 'COMPLETED' | 'FAILED';
 
 export interface Participant {
   role: ParticipantRole;
@@ -49,12 +57,6 @@ export interface Participant {
   resumeCount?: number | null;
   pendingResumeReason?: ResumeReason | null;
   awaitingResumeApproval?: boolean | null;
-}
-
-export interface JoinInfo {
-  token: string;
-  joinUrl: string;
-  expiresAt: string;
 }
 
 export interface RunResult {
@@ -90,6 +92,13 @@ export interface ActivityEvent {
   createdAt: string;
 }
 
+export interface AuthAuditEvent {
+  createdAt: string;
+  participantRole?: ParticipantRole | null;
+  title: string;
+  detail: string;
+}
+
 export interface EditableCodeFile {
   path: string;
   displayName: string;
@@ -104,6 +113,9 @@ export interface SessionResponse {
   avMode: AvMode;
   status: SessionStatus;
   createdAt: string;
+  authStartedAt?: string | null;
+  readyToStartAt?: string | null;
+  authFailedAt?: string | null;
   startedAt?: string | null;
   endedAt?: string | null;
   interruptedAt?: string | null;
@@ -121,13 +133,15 @@ export interface SessionResponse {
   feedback?: Feedback | null;
   feedbackDraft?: Feedback | null;
   activityEvents?: ActivityEvent[];
-  joinInfo?: JoinInfo | null;
+  authAuditEvents?: AuthAuditEvent[];
   summary?: string | null;
   frontendWorkspace?: FrontendWorkspace | null;
   finalPreviewUrl?: string | null;
   suspiciousRejected?: boolean;
   suspiciousScenarioKey?: string | null;
   suspiciousActivityReason?: string | null;
+  authFailureReason?: string | null;
+  expiredReason?: string | null;
 }
 
 export interface SessionSocketMessage {
@@ -164,20 +178,37 @@ export interface AcceptDisclaimerRequest {
   role: ParticipantRole;
 }
 
-export interface JoinSessionRequest {
-  name: string;
-  email: string;
-  timeZone?: string;
-  deviceId?: string;
-}
-
-export interface ValidateTokenResponse {
-  valid: boolean;
+export interface AccessLinkResponse {
   sessionId: string;
   role: ParticipantRole;
-  expiresAt: string;
+  participantName: string;
+  participantEmail: string;
+  avMode: AvMode;
+  sessionStatus: SessionStatus;
+  accessStatus: ParticipantAccessStatus;
+  otpExpiresAt?: string | null;
+  remainingOtpWindows: number;
+  disclaimerAccepted: boolean;
+  otpVerified: boolean;
+  identityCaptureRequired: boolean;
+  identityCaptureComplete: boolean;
+  sessionReadyToStart: boolean;
   message: string;
-  resumeRequired: boolean;
+}
+
+export interface VerifyOtpRequest {
+  otp: string;
+}
+
+export interface AccessVerificationResponse {
+  success: boolean;
+  sessionReadyToStart: boolean;
+  retryAvailable: boolean;
+  remainingOtpWindows: number;
+  otpExpiresAt?: string | null;
+  message: string;
+  access: AccessLinkResponse;
+  session?: SessionResponse | null;
 }
 
 export interface ResumeRequest {

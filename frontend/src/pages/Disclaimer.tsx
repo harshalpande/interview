@@ -53,6 +53,30 @@ const intervieweePointsForExternalAv = [
   'The interview is designed for 60 minutes unless the interviewer grants the one permitted 15-minute extension.',
 ];
 
+export function getDisclaimerContent(role: 'interviewer' | 'interviewee', avMode: 'IN_APP' | 'EXTERNAL' = 'EXTERNAL') {
+  const points = role === 'interviewer'
+    ? avMode === 'IN_APP'
+      ? interviewerPointsForInAppAv
+      : interviewerPointsForExternalAv
+    : avMode === 'IN_APP'
+      ? intervieweePointsForInAppAv
+      : intervieweePointsForExternalAv;
+  const subtitle = role === 'interviewer'
+    ? 'Please review the interviewer responsibilities, privacy obligations, and fair-use expectations before continuing.'
+    : 'Please review the interview monitoring, privacy, and conduct expectations carefully before continuing.';
+  const acknowledgement = role === 'interviewer'
+    ? 'I understand my responsibilities as the interviewer and will use this platform fairly, professionally, and in accordance with the interview process.'
+    : avMode === 'IN_APP'
+      ? 'I understand that this interview session may use identity capture, live camera streaming, activity monitoring, and session integrity controls, and I agree to participate under these guidelines.'
+      : 'I understand that this interview session requires identity capture and editor activity monitoring, while live audio and video will be handled outside this platform, and I agree to participate under these guidelines.';
+
+  return {
+    points,
+    subtitle,
+    acknowledgement,
+  };
+}
+
 const Disclaimer: React.FC = () => {
   const { role } = useParams<{ role: 'interviewer' | 'interviewee' }>();
   const navigate = useNavigate();
@@ -102,21 +126,7 @@ const Disclaimer: React.FC = () => {
 
   const participantRole = role === 'interviewer' ? 'INTERVIEWER' : 'INTERVIEWEE';
   const participant = session?.participants.find((entry) => entry.role === participantRole);
-  const points = role === 'interviewer'
-    ? session?.avMode === 'IN_APP'
-      ? interviewerPointsForInAppAv
-      : interviewerPointsForExternalAv
-    : session?.avMode === 'IN_APP'
-      ? intervieweePointsForInAppAv
-      : intervieweePointsForExternalAv;
-  const subtitle = role === 'interviewer'
-    ? 'Please review the interviewer responsibilities, privacy obligations, and fair-use expectations before continuing.'
-    : 'Please review the interview monitoring, privacy, and conduct expectations carefully before continuing.';
-  const acknowledgement = role === 'interviewer'
-    ? 'I understand my responsibilities as the interviewer and will use this platform fairly, professionally, and in accordance with the interview process.'
-    : session?.avMode === 'IN_APP'
-      ? 'I understand that this interview session may use identity capture, live camera streaming, activity monitoring, and session integrity controls, and I agree to participate under these guidelines.'
-      : 'I understand that this interview session requires identity capture and editor activity monitoring, while live audio and video will be handled outside this platform, and I agree to participate under these guidelines.';
+  const { points, subtitle, acknowledgement } = getDisclaimerContent(role, session?.avMode === 'IN_APP' ? 'IN_APP' : 'EXTERNAL');
 
   const handleAccept = async () => {
     try {

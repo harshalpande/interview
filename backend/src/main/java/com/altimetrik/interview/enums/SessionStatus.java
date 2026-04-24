@@ -1,9 +1,11 @@
 package com.altimetrik.interview.enums;
 
 public enum SessionStatus {
-    CREATED,
-    WAITING_JOIN,
+    REGISTERED,
+    AUTH_IN_PROGRESS,
+    READY_TO_START,
     ACTIVE,
     ENDED,
-    EXPIRED
+    EXPIRED,
+    AUTH_FAILED
 }

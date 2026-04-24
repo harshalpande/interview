@@ -106,6 +106,49 @@
   align-self: flex-start;
 }
 
+.otp-entry-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.otp-entry-box {
+  width: 52px;
+  height: 56px;
+  border-radius: 14px;
+  border: 1px solid #c9d7e5;
+  background: #ffffff;
+  color: #16324f;
+  font-size: 1.2rem;
+  font-weight: 700;
+  text-align: center;
+  text-transform: uppercase;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+.form-group .otp-entry-box {
+  flex: 0 0 52px;
+  width: 52px;
+  padding: 0;
+}
+
+.otp-entry-box:focus {
+  outline: none;
+  border-color: #0b7285;
+  box-shadow: 0 0 0 3px rgba(11, 114, 133, 0.14);
+}
+
+.otp-entry-box:disabled {
+  background: #f4f7fa;
+  color: #6d8091;
+}
+
+.otp-entry-separator {
+  color: #89a0b2;
+  font-weight: 700;
+}
+
 @media (max-width: 980px) {
   .disclaimer-shell {
     width: min(1180px, calc(100% - 24px));
@@ -151,6 +194,21 @@
 
   .disclaimer-card h2 {
     font-size: 1.42rem;
+  }
+
+  .otp-entry-group {
+    gap: 6px;
+  }
+
+  .otp-entry-box {
+    width: 44px;
+    height: 50px;
+    font-size: 1.05rem;
+  }
+
+  .form-group .otp-entry-box {
+    flex-basis: 44px;
+    width: 44px;
   }
 
   .disclaimer-card .page-subtitle,

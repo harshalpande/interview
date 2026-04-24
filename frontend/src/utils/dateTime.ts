@@ -52,6 +52,40 @@ export function formatDateTimeCompact(value?: string | null) {
   }
 }
 
+export function formatDateTimeSplit(value?: string | null) {
+  if (!value) {
+    return { dateLabel: 'N/A', timeLabel: '' };
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return { dateLabel: 'Invalid date', timeLabel: '' };
+  }
+
+  try {
+    const dateLabel = new Intl.DateTimeFormat(undefined, {
+      year: 'numeric',
+      month: 'long',
+      day: '2-digit',
+    }).format(date);
+
+    const timeLabel = new Intl.DateTimeFormat(undefined, {
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(date);
+
+    return {
+      dateLabel,
+      timeLabel: `${timeLabel} ${getLocalTimeZoneLabel()}`,
+    };
+  } catch {
+    return {
+      dateLabel: date.toLocaleDateString(),
+      timeLabel: `${date.toLocaleTimeString()} ${getLocalTimeZoneLabel()}`,
+    };
+  }
+}
+
 export function getBrowserTimeZone() {
   try {
     return Intl.DateTimeFormat().resolvedOptions().timeZone;

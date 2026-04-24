@@ -1,6 +1,6 @@
 import React, { useDeferredValue, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { InterviewRow } from '../components/InterviewRow';
 import { sessionApi } from '../services/sessionApi';
 import type { FeedbackRating, SessionResponse, TechnologySkill } from '../types/session';
@@ -12,9 +12,10 @@ type DatePresetKey = 'today' | 'week' | 'month' | 'year' | 'financialYear';
 const TECHNOLOGY_OPTIONS: TechnologySkill[] = ['JAVA', 'PYTHON', 'ANGULAR', 'REACT', 'SQL'];
 const RATING_OPTIONS: FeedbackRating[] = ['EXCELLENT', 'GOOD', 'FAIR', 'BAD', 'DISQUALIFIED'];
 const TODAY_DATE = toDateValue(new Date());
-const TABLE_COLUMN_WIDTHS = ['15%', '10%', '21%', '21%', '11%', '14%', '8%'];
+const TABLE_COLUMN_WIDTHS = ['12%', '8%', '18%', '18%', '13%', '17%', '14%'];
 
 const Dashboard: React.FC = () => {
+  const location = useLocation();
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(10);
   const [searchInput, setSearchInput] = useState('');
@@ -57,6 +58,7 @@ const Dashboard: React.FC = () => {
   const sessions = data?.content || [];
   const totalPages = data?.totalPages || 0;
   const totalElements = data?.totalElements || 0;
+  const registrationCreated = Boolean((location.state as { registrationCreated?: boolean } | null)?.registrationCreated);
   const presetOptions = useMemo(() => buildPresetOptions(), []);
   const fromMax = filters.to ? minDate(filters.to, TODAY_DATE) : TODAY_DATE;
   const toMin = filters.from || undefined;
@@ -159,6 +161,10 @@ const Dashboard: React.FC = () => {
         <h2>Recent Interview Sessions (newest first)</h2>
       </div>
 
+      {registrationCreated && (
+        <div className="grid-refreshing">Interview registration created. Start the secure session later from the dashboard.</div>
+      )}
+
       <div className="dashboard-toolbar">
         <div className="dashboard-search">
           <label htmlFor="session-search">Search participants</label>
@@ -187,7 +193,7 @@ const Dashboard: React.FC = () => {
               Filter
             </button>
             <Link to="/start" className="btn btn-primary start-interview-btn">
-              Start Interview
+              Register
             </Link>
           </div>
           <span className="search-hint">Minimum 3 characters are needed to search.</span>
@@ -298,7 +304,7 @@ const Dashboard: React.FC = () => {
             <div className="filter-group">
               <div className="filter-field">
                 <div className="filter-label-row">
-                  <label htmlFor="filter-rating">Summary</label>
+                  <label htmlFor="filter-rating">Rating</label>
                   {filters.ratings.length > 0 && (
                     <button type="button" className="filter-clear-button" onClick={() => clearFilterField('ratings')}>
                       Clear
@@ -344,10 +350,10 @@ const Dashboard: React.FC = () => {
               <tr>
                 <th>
                   <button type="button" className="sort-button" onClick={() => toggleSort('createdAt', sortBy, direction, setSortBy, setDirection)}>
-                    Date{renderSortIndicator('createdAt', sortBy, direction)}
+                    Interview Start{renderSortIndicator('createdAt', sortBy, direction)}
                   </button>
                 </th>
-                <th>Technology/Skill</th>
+                <th>Skill</th>
                 <th>Interviewer</th>
                 <th>Interviewee</th>
                 <th>
@@ -357,7 +363,7 @@ const Dashboard: React.FC = () => {
                 </th>
                 <th>
                   <button type="button" className="sort-button" onClick={() => toggleSort('summary', sortBy, direction, setSortBy, setDirection)}>
-                    Summary{renderSortIndicator('summary', sortBy, direction)}
+                    Session Summary{renderSortIndicator('summary', sortBy, direction)}
                   </button>
                 </th>
                 <th>Action</th>
