@@ -15,4 +15,10 @@ public class EditableCodeFileDto {
     private String content;
     private Boolean editable;
     private Integer sortOrder;
+    private Boolean enabledForCandidate;
+    private Boolean activeQuestion;
+    private Boolean submitted;
+    private Integer idealDurationMinutes;
+    private RunResultDto runResult;
+    private Boolean changedAfterLastRun;
 }

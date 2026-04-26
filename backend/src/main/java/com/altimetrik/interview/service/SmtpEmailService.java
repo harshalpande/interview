@@ -2,8 +2,8 @@ package com.altimetrik.interview.service;
 
 import jakarta.mail.MessagingException;
 import jakarta.mail.internet.MimeMessage;
+import com.altimetrik.interview.config.EmailProviderProperties;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.mail.MailSendException;
 import org.springframework.mail.javamail.JavaMailSender;
@@ -21,13 +21,11 @@ public class SmtpEmailService implements EmailService {
     private final String subjectPrefix;
 
     public SmtpEmailService(JavaMailSender mailSender,
-                            @Value("${app.email.from-address}") String fromAddress,
-                            @Value("${app.email.from-name:Interview Platform}") String fromName,
-                            @Value("${app.email.subject-prefix:}") String subjectPrefix) {
+                            EmailProviderProperties emailProperties) {
         this.mailSender = mailSender;
-        this.fromAddress = fromAddress;
-        this.fromName = fromName;
-        this.subjectPrefix = subjectPrefix;
+        this.fromAddress = emailProperties.getActiveFromAddress();
+        this.fromName = emailProperties.getActiveFromName();
+        this.subjectPrefix = emailProperties.getSubjectPrefix();
     }
 
     @Override

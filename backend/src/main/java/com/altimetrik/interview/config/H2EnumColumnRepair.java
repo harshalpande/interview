@@ -38,6 +38,7 @@ public class H2EnumColumnRepair implements ApplicationRunner {
             "ALTER TABLE code_states ALTER COLUMN storage_mode SET DATA TYPE VARCHAR(64)",
             "ALTER TABLE session_activity_events ALTER COLUMN participant_role SET DATA TYPE VARCHAR(64)",
             "ALTER TABLE session_activity_events ALTER COLUMN event_type SET DATA TYPE VARCHAR(64)",
+            "ALTER TABLE session_activity_events ALTER COLUMN severity SET DATA TYPE VARCHAR(32)",
             "ALTER TABLE session_tokens ALTER COLUMN role SET DATA TYPE VARCHAR(64)"
     );
 

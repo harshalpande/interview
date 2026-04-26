@@ -17,6 +17,7 @@ public class ExecuteRequest {
     private String sourceCode;
     @Builder.Default
     private ExecutionLanguage language = ExecutionLanguage.JAVA;
+    private String activeFilePath;
     private long timeoutMs;
     private long memoryLimitMb;
 

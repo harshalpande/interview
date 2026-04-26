@@ -23,6 +23,7 @@ export interface ExecuteRequest {
   sessionId?: string;
   language?: ExecutionLanguage;
   codeFiles?: EditableCodeFile[];
+  activeFilePath?: string;
   timeoutMs?: number;
   memoryLimitMb?: number;
   livePreviewMode?: boolean;

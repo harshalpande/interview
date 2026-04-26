@@ -62,9 +62,13 @@ export interface Participant {
 
 export interface RunResult {
   compiledAt: string;
+  filePath?: string | null;
+  displayName?: string | null;
+  sourceSnapshot?: string | null;
   stdout: string;
   stderr: string;
   exitStatus: number;
+  executionTimeMs?: number | null;
 }
 
 export interface FrontendWorkspace {
@@ -110,6 +114,12 @@ export interface EditableCodeFile {
   content: string;
   editable: boolean;
   sortOrder: number;
+  enabledForCandidate?: boolean;
+  activeQuestion?: boolean;
+  submitted?: boolean;
+  idealDurationMinutes?: number | null;
+  runResult?: RunResult | null;
+  changedAfterLastRun?: boolean | null;
 }
 
 export interface SessionResponse {
@@ -259,6 +269,7 @@ export interface FeedbackRequest {
 export interface EndSessionRequest {
   finalCode: string;
   codeFiles?: EditableCodeFile[];
+  activeFilePath?: string;
 }
 
 export interface ActivityEventRequest {

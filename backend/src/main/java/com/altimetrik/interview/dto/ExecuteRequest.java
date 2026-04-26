@@ -25,6 +25,7 @@ public class ExecuteRequest {
     @Builder.Default
     private ExecutionLanguage language = ExecutionLanguage.JAVA;
     private List<EditableCodeFileDto> codeFiles;
+    private String activeFilePath;
     private long timeoutMs;
     private long memoryLimitMb;
     private boolean livePreviewMode;

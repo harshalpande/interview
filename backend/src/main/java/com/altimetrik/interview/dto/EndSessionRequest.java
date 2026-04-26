@@ -8,4 +8,5 @@ import java.util.List;
 public class EndSessionRequest {
     private String finalCode;
     private List<EditableCodeFileDto> codeFiles;
+    private String activeFilePath;
 }

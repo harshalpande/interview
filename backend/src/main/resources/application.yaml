@@ -64,9 +64,39 @@ logging:
 app:
   email:
     mode: ${APP_EMAIL_MODE:logging}
+    provider: ${APP_EMAIL_PROVIDER:postmark}
     from-address: ${APP_EMAIL_FROM_ADDRESS:no-reply@example.com}
     from-name: ${APP_EMAIL_FROM_NAME:Interview Platform}
     subject-prefix: ${APP_EMAIL_SUBJECT_PREFIX:LOCAL}
+    providers:
+      postmark:
+        from-address: ${POSTMARK_APP_EMAIL_FROM_ADDRESS:${APP_EMAIL_FROM_ADDRESS:no-reply@example.com}}
+        from-name: ${POSTMARK_APP_EMAIL_FROM_NAME:${APP_EMAIL_FROM_NAME:Interview Platform}}
+        host: ${POSTMARK_SPRING_MAIL_HOST:${SPRING_MAIL_HOST:}}
+        port: ${POSTMARK_SPRING_MAIL_PORT:${SPRING_MAIL_PORT:2525}}
+        username: ${POSTMARK_SPRING_MAIL_USERNAME:${SPRING_MAIL_USERNAME:}}
+        password: ${POSTMARK_SPRING_MAIL_PASSWORD:${SPRING_MAIL_PASSWORD:}}
+        auth: ${POSTMARK_SPRING_MAIL_SMTP_AUTH:${SPRING_MAIL_SMTP_AUTH:true}}
+        starttls-enable: ${POSTMARK_SPRING_MAIL_SMTP_STARTTLS_ENABLE:${SPRING_MAIL_SMTP_STARTTLS_ENABLE:true}}
+        starttls-required: ${POSTMARK_SPRING_MAIL_SMTP_STARTTLS_REQUIRED:${SPRING_MAIL_SMTP_STARTTLS_REQUIRED:false}}
+        ssl-enable: ${POSTMARK_SPRING_MAIL_SMTP_SSL_ENABLE:${SPRING_MAIL_SMTP_SSL_ENABLE:false}}
+        connection-timeout-ms: ${POSTMARK_SPRING_MAIL_SMTP_CONNECTION_TIMEOUT_MS:${SPRING_MAIL_SMTP_CONNECTION_TIMEOUT_MS:30000}}
+        timeout-ms: ${POSTMARK_SPRING_MAIL_SMTP_TIMEOUT_MS:${SPRING_MAIL_SMTP_TIMEOUT_MS:30000}}
+        write-timeout-ms: ${POSTMARK_SPRING_MAIL_SMTP_WRITE_TIMEOUT_MS:${SPRING_MAIL_SMTP_WRITE_TIMEOUT_MS:30000}}
+      mailgun:
+        from-address: ${MAILGUN_APP_EMAIL_FROM_ADDRESS:${APP_EMAIL_FROM_ADDRESS:no-reply@example.com}}
+        from-name: ${MAILGUN_APP_EMAIL_FROM_NAME:${APP_EMAIL_FROM_NAME:Interview Platform}}
+        host: ${MAILGUN_SPRING_MAIL_HOST:}
+        port: ${MAILGUN_SPRING_MAIL_PORT:587}
+        username: ${MAILGUN_SPRING_MAIL_USERNAME:}
+        password: ${MAILGUN_SPRING_MAIL_PASSWORD:}
+        auth: ${MAILGUN_SPRING_MAIL_SMTP_AUTH:${SPRING_MAIL_SMTP_AUTH:true}}
+        starttls-enable: ${MAILGUN_SPRING_MAIL_SMTP_STARTTLS_ENABLE:${SPRING_MAIL_SMTP_STARTTLS_ENABLE:true}}
+        starttls-required: ${MAILGUN_SPRING_MAIL_SMTP_STARTTLS_REQUIRED:${SPRING_MAIL_SMTP_STARTTLS_REQUIRED:false}}
+        ssl-enable: ${MAILGUN_SPRING_MAIL_SMTP_SSL_ENABLE:${SPRING_MAIL_SMTP_SSL_ENABLE:false}}
+        connection-timeout-ms: ${MAILGUN_SPRING_MAIL_SMTP_CONNECTION_TIMEOUT_MS:${SPRING_MAIL_SMTP_CONNECTION_TIMEOUT_MS:30000}}
+        timeout-ms: ${MAILGUN_SPRING_MAIL_SMTP_TIMEOUT_MS:${SPRING_MAIL_SMTP_TIMEOUT_MS:30000}}
+        write-timeout-ms: ${MAILGUN_SPRING_MAIL_SMTP_WRITE_TIMEOUT_MS:${SPRING_MAIL_SMTP_WRITE_TIMEOUT_MS:30000}}
   public-origin: ${APP_PUBLIC_ORIGIN:http://localhost:3000}
   storage:
     root: ${APP_STORAGE_PATH:C:/Users/hpande/Documents/workspace/bindmount}

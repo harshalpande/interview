@@ -236,6 +236,16 @@ body {
   background: linear-gradient(135deg, var(--accent-strong) 0%, #0f7283 100%);
 }
 
+.btn-danger {
+  background: linear-gradient(135deg, var(--danger) 0%, #b53b31 100%);
+  color: #fff;
+  box-shadow: 0 12px 22px rgba(211, 72, 54, 0.22);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: linear-gradient(135deg, #c74235 0%, #9f3028 100%);
+}
+
 .btn-secondary {
   background: #edf3f8;
   color: var(--text);

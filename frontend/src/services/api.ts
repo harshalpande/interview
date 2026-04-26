@@ -46,6 +46,7 @@ class CompilerApiClient {
         sessionId: request.sessionId,
         language: request.language || 'JAVA',
         codeFiles: request.codeFiles,
+        activeFilePath: request.activeFilePath,
         timeoutMs: request.timeoutMs || 5000,
         memoryLimitMb: request.memoryLimitMb || 512,
         livePreviewMode: request.livePreviewMode || false,

@@ -8,7 +8,7 @@ import type { AuthAuditEvent, EditableCodeFile } from '../types/session';
 
 import './Result.css';
 
-type ResultTabKey = 'overview' | 'code' | 'preview' | 'output' | 'errors' | 'audit' | 'suspicious';
+type ResultTabKey = 'overview' | 'code' | 'preview' | 'errors' | 'audit' | 'suspicious';
 type AuditStageKey = 'registration' | 'delivery' | 'verification' | 'readiness';
 type FinalPreviewStatus = 'unknown' | 'available' | 'missing';
 
@@ -83,6 +83,7 @@ const Result: React.FC = () => {
     enabled: !!sessionId,
   });
   const isFrontendWorkspaceSession = session?.technology === 'ANGULAR' || session?.technology === 'REACT';
+  const isCodeWorkspaceSession = isFrontendWorkspaceSession || session?.technology === 'JAVA' || session?.technology === 'PYTHON';
   const finalPreviewUrl = session?.finalPreviewUrl || '';
   const hasSuccessfulFrontendPreview = Boolean(
     isFrontendWorkspaceSession && finalPreviewUrl && finalPreviewStatus === 'available'
@@ -179,7 +180,6 @@ const Result: React.FC = () => {
     { key: 'overview' as const, label: 'Overview' },
     ...(showExecutionTabs ? [{ key: 'code' as const, label: 'Code' }] : []),
     ...(hasSuccessfulFrontendPreview ? [{ key: 'preview' as const, label: 'Preview' }] : []),
-    ...(showExecutionTabs ? [{ key: 'output' as const, label: 'Output' }] : []),
     ...(showExecutionTabs && hasFinalErrors ? [{ key: 'errors' as const, label: 'Errors' }] : []),
     { key: 'audit' as const, label: 'Audit' },
     ...(!isPreSessionExpired ? [{ key: 'suspicious' as const, label: 'Integrity Activity' }] : []),
@@ -284,10 +284,10 @@ const Result: React.FC = () => {
           {activeTab === 'code' && (
             <section className="result-panel">
               <h3>Final Code</h3>
-              {isFrontendWorkspaceSession && resultCodeFiles.length > 0 ? (
+              {isCodeWorkspaceSession && resultCodeFiles.length > 0 ? (
                 <div className="result-code-workspace">
                   <div className="result-code-tabs" role="tablist" aria-label={`Final ${session.technology} workspace files`}>
-                    {resultCodeFiles.map((file) => {
+                    {resultCodeFiles.map((file, index) => {
                       const isActive = file.path === activeCodePath;
                       return (
                         <button
@@ -298,13 +298,28 @@ const Result: React.FC = () => {
                           className={`result-code-tab ${isActive ? 'is-active' : ''} ${file.editable ? '' : 'is-readonly'}`}
                           onClick={() => setActiveCodePath(file.path)}
                         >
-                          <span>{file.displayName}</span>
-                          {!file.editable ? <span className="result-code-tab-meta">Read only</span> : null}
+                          <span>{resultCodeTabLabel(session.technology, file, index)}</span>
                         </button>
                       );
                     })}
                   </div>
                   <pre className="result-pre code-pre workspace-code-pre">{activeCodeFile?.content || '(no code captured)'}</pre>
+                  {(session.technology === 'JAVA' || session.technology === 'PYTHON') && activeCodeFile ? (
+                    <div className="question-result-grid">
+                      <div className="question-result-card">
+                        <strong>Question run status</strong>
+                        <span>{activeCodeFile.runResult ? resultStatusLabel(activeCodeFile.runResult.exitStatus) : 'Not run'}</span>
+                      </div>
+                      <div className="question-result-card">
+                        <strong>Output</strong>
+                        <pre>{activeCodeFile.runResult?.stdout || '(no output captured)'}</pre>
+                      </div>
+                      <div className="question-result-card">
+                        <strong>Errors</strong>
+                        <pre>{activeCodeFile.runResult?.stderr || '(no errors captured)'}</pre>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               ) : (
                 <pre className="result-pre code-pre">{session.latestCode || '(no code captured)'}</pre>
@@ -322,13 +337,6 @@ const Result: React.FC = () => {
                   className="result-preview-frame"
                 />
               </div>
-            </section>
-          )}
-
-          {activeTab === 'output' && (
-            <section className="result-panel">
-              <h3>Final Output</h3>
-              <pre className="result-pre">{session.finalRunResult?.stdout || '(no output)'}</pre>
             </section>
           )}
 
@@ -477,7 +485,7 @@ const Result: React.FC = () => {
 export default Result;
 
 function buildResultCodeFiles(technology: string, codeFiles: EditableCodeFile[] | undefined, latestCode: string) {
-  if (technology !== 'ANGULAR' && technology !== 'REACT') {
+  if (technology !== 'ANGULAR' && technology !== 'REACT' && technology !== 'JAVA' && technology !== 'PYTHON') {
     return [];
   }
 
@@ -485,14 +493,16 @@ function buildResultCodeFiles(technology: string, codeFiles: EditableCodeFile[] 
   const files = persistedFiles.length > 0
     ? persistedFiles
     : [{
-        path: technology === 'REACT' ? 'src/App.tsx' : 'src/app/app.component.ts',
-        displayName: technology === 'REACT' ? 'App.tsx' : 'app.component.ts',
+        path: defaultResultFilePath(technology),
+        displayName: technology === 'JAVA' || technology === 'PYTHON' ? 'Question 1' : basename(defaultResultFilePath(technology)),
         content: latestCode || '',
         editable: true,
         sortOrder: 0,
+        enabledForCandidate: true,
+        activeQuestion: true,
       }];
 
-  if (!files.some((file) => file.path === 'package.json')) {
+  if ((technology === 'ANGULAR' || technology === 'REACT') && !files.some((file) => file.path === 'package.json')) {
     files.push({
       path: 'package.json',
       displayName: 'package.json',
@@ -507,6 +517,32 @@ function buildResultCodeFiles(technology: string, codeFiles: EditableCodeFile[] 
     if (right.path === 'package.json') return 1;
     return (left.sortOrder ?? 0) - (right.sortOrder ?? 0);
   });
+}
+
+function defaultResultFilePath(technology: string) {
+  if (technology === 'REACT') return 'src/App.tsx';
+  if (technology === 'ANGULAR') return 'src/app/app.component.ts';
+  if (technology === 'PYTHON') return 'question-1.py';
+  return 'Question1.java';
+}
+
+function basename(path: string) {
+  const normalized = path.replace(/\\/g, '/');
+  const segments = normalized.split('/');
+  return segments[segments.length - 1] || normalized;
+}
+
+function resultStatusLabel(exitStatus?: number | null) {
+  if (exitStatus === 0) return 'Successful run';
+  if (typeof exitStatus === 'number') return `Failed with exit code ${exitStatus}`;
+  return 'Run captured';
+}
+
+function resultCodeTabLabel(technology: string, file: EditableCodeFile, index: number) {
+  if (technology === 'JAVA' || technology === 'PYTHON') {
+    return `Question ${index + 1}`;
+  }
+  return file.displayName;
 }
 
 function formatRecommendation(value: string) {
