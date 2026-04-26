@@ -162,7 +162,7 @@ public class WorkspaceRegistryService {
         if (entry == null) {
             return Optional.empty();
         }
-        long waitDeadline = System.currentTimeMillis() + Math.max(timeoutMs, 1_000L);
+        long waitDeadline = System.currentTimeMillis() + Math.max(timeoutMs, 1L);
         synchronized (entry.monitor) {
             while (System.currentTimeMillis() < waitDeadline) {
                 if (entry.lastBuildCompletedAt != null

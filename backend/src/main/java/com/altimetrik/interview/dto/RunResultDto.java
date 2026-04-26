@@ -9,7 +9,11 @@ import java.time.OffsetDateTime;
 @Builder
 public class RunResultDto {
     private OffsetDateTime compiledAt;
+    private String filePath;
+    private String displayName;
+    private String sourceSnapshot;
     private String stdout;
     private String stderr;
     private Integer exitStatus;
+    private Long executionTimeMs;
 }

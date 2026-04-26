@@ -16,9 +16,16 @@ public class RunResult {
     private String id;
     
     private String sessionId;
+
+    private String filePath;
+
+    private String displayName;
     
     @CreationTimestamp
     private OffsetDateTime compiledAt;
+
+    @Column(columnDefinition = "TEXT")
+    private String sourceSnapshot;
     
     @Column(columnDefinition = "TEXT")
     private String stdout;
@@ -27,4 +34,6 @@ public class RunResult {
     private String stderr;
     
     private Integer exitStatus;
+
+    private Long executionTimeMs;
 }

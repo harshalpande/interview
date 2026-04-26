@@ -34,6 +34,9 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class FrontendSandboxService {
 
+    private static final long REACT_LIVE_PREVIEW_FAILURE_SETTLE_MS = 200L;
+    private static final long ANGULAR_LIVE_PREVIEW_FAILURE_SETTLE_MS = 1_000L;
+
     private final List<FrontendRunner> runners;
     private final WorkspaceRegistryService workspaceRegistryService;
     private final ExecutorService watchLogExecutor = Executors.newCachedThreadPool(runnable -> {
@@ -251,17 +254,34 @@ public class FrontendSandboxService {
                         boolean watcherAlive = workspaceRegistryService.resolveProcess(workspaceId)
                                 .map(Process::isAlive)
                                 .orElse(false);
-                        if (watcherAlive) {
-                            workspaceRegistryService.markBuildRequested(workspaceId);
-                        }
                         if (request.getFiles() != null && !request.getFiles().isEmpty()) {
                             persistentRunner.patchWorkspaceFiles(workspaceRoot, request.getFiles());
+                        }
+                        if (watcherAlive) {
+                            workspaceRegistryService.markBuildRequested(workspaceId);
                         }
                         if (watcherAlive) {
                             FrontendBuildResult watcherResult = awaitWatchBuild(
                                     workspaceId,
                                     resolveWatchBuildTimeoutMs(request.getLanguage(), timeoutMs)
                             );
+                            if (isFrontendLivePreviewMode(request)) {
+                                if (watcherResult != null) {
+                                    if (!watcherResult.isSuccess()) {
+                                        return settleLivePreviewFailure(request.getLanguage(), workspaceId, watcherResult);
+                                    }
+                                    return watcherResult;
+                                }
+                                log.info("{} live preview build still updating for workspaceId={}, returning current warm preview",
+                                        request.getLanguage(), workspaceId);
+                                return FrontendBuildResult.success(
+                                        request.getLanguage() + " live preview is updating.",
+                                        "",
+                                        0,
+                                        resolveWatchBuildTimeoutMs(request.getLanguage(), timeoutMs),
+                                        "/workspaces/" + workspaceId + "/preview/"
+                                );
+                            }
                             if (watcherResult != null) {
                                 if (!watcherResult.isSuccess() && hasOnlyGenericWatchFailure(watcherResult)) {
                                     log.warn("Frontend watcher build produced only generic failure output for workspaceId={}, running direct build for detailed diagnostics", workspaceId);
@@ -282,6 +302,29 @@ public class FrontendSandboxService {
                     request.getLanguage(), request.getSessionId(), request.getWorkspaceId());
         }
         return runner.build(request.getFiles(), timeoutMs);
+    }
+
+    private boolean isFrontendLivePreviewMode(BuildRequest request) {
+        return request.isLivePreviewMode()
+                && (request.getLanguage() == ExecutionLanguage.REACT || request.getLanguage() == ExecutionLanguage.ANGULAR);
+    }
+
+    private FrontendBuildResult settleLivePreviewFailure(ExecutionLanguage language, String workspaceId, FrontendBuildResult initialResult) {
+        try {
+            TimeUnit.MILLISECONDS.sleep(resolveLivePreviewFailureSettleMs(language));
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            return initialResult;
+        }
+
+        FrontendBuildResult settledResult = awaitWatchBuild(workspaceId, 1L);
+        return settledResult == null ? initialResult : settledResult;
+    }
+
+    private long resolveLivePreviewFailureSettleMs(ExecutionLanguage language) {
+        return language == ExecutionLanguage.ANGULAR
+                ? ANGULAR_LIVE_PREVIEW_FAILURE_SETTLE_MS
+                : REACT_LIVE_PREVIEW_FAILURE_SETTLE_MS;
     }
 
     private FrontendBuildResult awaitWatchBuild(String workspaceId, long timeoutMs) {

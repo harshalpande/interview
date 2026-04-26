@@ -1,6 +1,7 @@
 package com.altimetrik.interview.dto;
 
 import com.altimetrik.interview.enums.ActivityEventType;
+import com.altimetrik.interview.enums.ActivityEventSeverity;
 import com.altimetrik.interview.enums.ParticipantRole;
 import lombok.Builder;
 import lombok.Data;
@@ -13,6 +14,10 @@ public class ActivityEventDto {
     private String id;
     private ParticipantRole participantRole;
     private ActivityEventType eventType;
+    private ActivityEventSeverity severity;
     private String detail;
+    private String candidateMessage;
+    private Long durationMs;
+    private Integer occurrenceCount;
     private OffsetDateTime createdAt;
 }

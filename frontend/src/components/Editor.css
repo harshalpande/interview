@@ -198,6 +198,22 @@
   color: #153a52;
 }
 
+.workspace-tab-action {
+  border: 1px solid rgba(88, 180, 195, 0.28);
+  border-radius: 999px;
+  padding: 2px 7px;
+  color: #23677a;
+  background: rgba(230, 241, 247, 0.72);
+  font-size: 0.68rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.workspace-tab-action:hover {
+  background: #d7eef5;
+  color: #12384b;
+}
+
 .workspace-add-button {
   display: inline-flex;
   align-items: center;

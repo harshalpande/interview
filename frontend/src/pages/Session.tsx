@@ -10,7 +10,7 @@ import { sessionApi } from '../services/sessionApi';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useWebRtcSession } from '../hooks/useWebRtcSession';
 import { useBackGuard } from '../hooks/useBackGuard';
-import type { ActivityEventType, EditableCodeFile, FeedbackRating, ParticipantRole, RecommendationDecision, SessionResponse, SessionSocketMessage, SessionStatus } from '../types/session';
+import type { ActivityEvent, ActivityEventType, EditableCodeFile, FeedbackRating, ParticipantRole, RecommendationDecision, SessionResponse, SessionSocketMessage, SessionStatus } from '../types/session';
 import { formatDateTime, formatTimeZoneLabel } from '../utils/dateTime';
 import { getOrCreateDeviceId } from '../utils/device';
 
@@ -18,6 +18,7 @@ import './Session.css';
 
 const FEEDBACK_COMMENT_LIMIT = 4000;
 const ALTIMETRIK_REDIRECT_URL = process.env.REACT_APP_POST_INTERVIEW_REDIRECT_URL || 'https://www.altimetrik.com/';
+const IN_APP_AV_OFF_SUSPICIOUS_MS = 15000;
 
 const STATUS_LABELS: Record<SessionStatus, string> = {
   REGISTERED: 'Registered',
@@ -59,11 +60,19 @@ const Session: React.FC = () => {
   const suspiciousRejectionNoticeShownRef = React.useRef(false);
   const interviewerRecoveryTimeoutNoticeShownRef = React.useRef(false);
   const lastTabHiddenAtRef = React.useRef(0);
+  const tabHiddenStartedAtRef = React.useRef<number | null>(null);
   const lastBlockedDropAtRef = React.useRef(0);
   const lastCameraStreamIssueRef = React.useRef('');
+  const microphoneDisabledStartedAtRef = React.useRef<number | null>(null);
+  const cameraDisabledStartedAtRef = React.useRef<number | null>(null);
+  const microphoneLongOffRecordedRef = React.useRef(false);
+  const cameraLongOffRecordedRef = React.useRef(false);
   const previousMuteStateRef = React.useRef<boolean | null>(null);
   const previousCameraStateRef = React.useRef<boolean | null>(null);
   const internalClipboardTextsRef = React.useRef<Map<string, number>>(new Map());
+  const codeVersionRef = React.useRef(0);
+  const [activeQuestionPath, setActiveQuestionPath] = React.useState('');
+  const [preStartGuideAcknowledged, setPreStartGuideAcknowledged] = React.useState(false);
 
   const { data: session, isLoading, error } = useQuery({
     queryKey: ['session', sessionId],
@@ -80,6 +89,8 @@ const Session: React.FC = () => {
   const interviewer = session?.participants.find((participant) => participant.role === 'INTERVIEWER');
   const interviewee = session?.participants.find((participant) => participant.role === 'INTERVIEWEE');
   const isFrontendWorkspaceSession = session?.technology === 'ANGULAR' || session?.technology === 'REACT';
+  const isGuidedQuestionSession = session?.technology === 'JAVA' || session?.technology === 'PYTHON';
+  const isCodeWorkspaceSession = isFrontendWorkspaceSession || isGuidedQuestionSession;
   const isInAppAvSession = session?.avMode === 'IN_APP';
   const intervieweeName = interviewee?.name?.trim() || 'Interviewee';
   const interviewerFirstName = firstName(interviewer?.name, 'Interviewer');
@@ -102,24 +113,78 @@ const Session: React.FC = () => {
   }, [role, setRole, storedRole]);
 
   React.useEffect(() => {
+    if (!sessionId || !role) {
+      setPreStartGuideAcknowledged(false);
+      return;
+    }
+
+    setPreStartGuideAcknowledged(localStorage.getItem(preStartGuideStorageKey(sessionId, role)) === 'true');
+  }, [role, sessionId]);
+
+  const handleAcknowledgePreStartGuide = React.useCallback(() => {
+    if (sessionId && role) {
+      localStorage.setItem(preStartGuideStorageKey(sessionId, role), 'true');
+    }
+    setPreStartGuideAcknowledged(true);
+  }, [role, sessionId]);
+
+  const mergeIncomingSession = React.useCallback(
+    (nextSession: SessionResponse) => {
+      const incomingVersion = normalizeCodeVersion(nextSession.codeVersion);
+      const localVersion = Math.max(codeVersionRef.current, normalizeCodeVersion(currentSession?.codeVersion));
+      if (incomingVersion < localVersion && currentSession?.id === nextSession.id) {
+        const localFiles = currentCodeFiles.length > 0 ? currentCodeFiles : (currentSession.codeFiles ?? nextSession.codeFiles ?? []);
+        const localCode = isCodeWorkspaceSession
+          ? resolvePrimaryCodeFromFiles(nextSession.technology, localFiles)
+          : currentCode;
+        return {
+          ...nextSession,
+          latestCode: localCode,
+          codeFiles: localFiles,
+          codeVersion: localVersion,
+        };
+      }
+      codeVersionRef.current = Math.max(codeVersionRef.current, incomingVersion);
+      return nextSession;
+    },
+    [currentCode, currentCodeFiles, currentSession, isCodeWorkspaceSession]
+  );
+
+  const reserveNextCodeVersion = React.useCallback(() => {
+    const nextVersion = Math.max(
+      codeVersionRef.current,
+      normalizeCodeVersion(currentSession?.codeVersion),
+      normalizeCodeVersion(session?.codeVersion)
+    ) + 1;
+    codeVersionRef.current = nextVersion;
+    return nextVersion;
+  }, [currentSession?.codeVersion, session?.codeVersion]);
+
+  React.useEffect(() => {
     if (session) {
-      setSession(session);
-      setTimeLeft(session.remainingSec);
-      if (session.feedback) {
+      const safeSession = mergeIncomingSession(session);
+      if (safeSession !== session) {
+        queryClient.setQueryData(['session', sessionId], safeSession);
+      }
+      if (currentSession !== safeSession) {
+        setSession(safeSession);
+      }
+      setTimeLeft(safeSession.remainingSec);
+      if (safeSession.feedback) {
         setFeedback({
-          rating: session.feedback.rating,
-          comments: session.feedback.comments,
-          recommendationDecision: session.feedback.recommendationDecision,
+          rating: safeSession.feedback.rating,
+          comments: safeSession.feedback.comments,
+          recommendationDecision: safeSession.feedback.recommendationDecision,
         });
-      } else if (session.feedbackDraft) {
+      } else if (safeSession.feedbackDraft) {
         setFeedback({
-          rating: session.feedbackDraft.rating,
-          comments: session.feedbackDraft.comments,
-          recommendationDecision: session.feedbackDraft.recommendationDecision,
+          rating: safeSession.feedbackDraft.rating,
+          comments: safeSession.feedbackDraft.comments,
+          recommendationDecision: safeSession.feedbackDraft.recommendationDecision,
         });
       }
     }
-  }, [session, setSession]);
+  }, [currentSession, mergeIncomingSession, queryClient, session, sessionId, setSession]);
 
   React.useEffect(() => {
     suspiciousRejectionNoticeShownRef.current = false;
@@ -206,18 +271,46 @@ const Session: React.FC = () => {
 
   const refreshSession = React.useCallback(
     (nextSession: SessionResponse) => {
-      queryClient.setQueryData(['session', sessionId], nextSession);
+      const safeSession = mergeIncomingSession(nextSession);
+      queryClient.setQueryData(['session', sessionId], safeSession);
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
-      setSession(nextSession);
-      setTimeLeft(nextSession.remainingSec);
+      setSession(safeSession);
+      setTimeLeft(safeSession.remainingSec);
     },
-    [queryClient, sessionId, setSession]
+    [mergeIncomingSession, queryClient, sessionId, setSession]
   );
 
   const pushPersistentToast = React.useCallback((message: string, tone: ToastItem['tone'] = 'warning') => {
     const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const prefixedMessage = message.startsWith('Suspicious Alert :') ? message : `Suspicious Alert : ${message}`;
     setToastItems((prev) => [...prev, { id, message: prefixedMessage, tone, persistent: true, createdAt: Date.now(), autoCloseMs: 60000 }]);
+  }, []);
+
+  const pushCandidateActivityToast = React.useCallback((event: ActivityEvent) => {
+    const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const severity = event.severity || 'WARNING';
+    const prefix = severity === 'SUSPICIOUS'
+      ? 'Suspicious Alert :'
+      : severity === 'WARNING'
+        ? 'Integrity Warning :'
+        : 'Integrity Notice :';
+    const tone: ToastItem['tone'] = severity === 'SUSPICIOUS'
+      ? 'danger'
+      : severity === 'WARNING'
+        ? 'warning'
+        : 'info';
+    const message = event.candidateMessage || event.detail;
+    setToastItems((prev) => [
+      ...prev,
+      {
+        id,
+        message: `${prefix} ${message}`,
+        tone,
+        persistent: true,
+        createdAt: Date.now(),
+        autoCloseMs: severity === 'SUSPICIOUS' ? 90000 : 60000,
+      },
+    ]);
   }, []);
 
   const dismissToast = React.useCallback((id: string) => {
@@ -254,22 +347,24 @@ const Session: React.FC = () => {
   }, [isFullscreen]);
 
   const recordActivityEvent = React.useCallback(
-    async (eventType: ActivityEventType, detail: string) => {
+    async (eventType: ActivityEventType, detail: string, durationMs?: number) => {
       if (!sessionId || role !== 'interviewee' || session?.status !== 'ACTIVE') {
         return;
       }
 
       try {
-        await sessionApi.recordActivityEvent(sessionId, {
+        const event = await sessionApi.recordActivityEvent(sessionId, {
           participantRole: 'INTERVIEWEE',
           eventType,
           detail,
+          durationMs,
         });
+        pushCandidateActivityToast(event);
       } catch {
         // best-effort only
       }
     },
-    [role, session?.status, sessionId]
+    [pushCandidateActivityToast, role, session?.status, sessionId]
   );
 
   const resolvedCodeFiles = React.useMemo(
@@ -277,8 +372,8 @@ const Session: React.FC = () => {
     [currentCodeFiles, session?.codeFiles]
   );
   const resolvedLatestCode = React.useMemo(
-    () => (isFrontendWorkspaceSession ? resolvePrimaryCodeFromFiles(session?.technology, resolvedCodeFiles) : (currentCode || session?.latestCode || '')),
-    [currentCode, isFrontendWorkspaceSession, resolvedCodeFiles, session?.latestCode, session?.technology]
+    () => (isCodeWorkspaceSession ? resolvePrimaryCodeFromFiles(session?.technology, resolvedCodeFiles) : (currentCode || session?.latestCode || '')),
+    [currentCode, isCodeWorkspaceSession, resolvedCodeFiles, session?.latestCode, session?.technology]
   );
 
   React.useEffect(() => {
@@ -304,14 +399,24 @@ const Session: React.FC = () => {
       if (message.session) {
         refreshSession(message.session);
       }
-      if (message.type === 'CODE_UPDATE' && typeof message.code === 'string') {
+      if (!message.session && message.type === 'CODE_UPDATE' && typeof message.code === 'string') {
+        const incomingVersion = normalizeCodeVersion(message.version);
+        if (incomingVersion < codeVersionRef.current) {
+          return;
+        }
+        codeVersionRef.current = Math.max(codeVersionRef.current, incomingVersion);
         setCurrentCode(message.code);
       }
       if (typeof message.timeLeft === 'number') {
         setTimeLeft(message.timeLeft);
       }
-      if (message.type === 'ACTIVITY_EVENT' && message.activityEvent && role === 'interviewer') {
-        pushPersistentToast(message.activityEvent.detail, 'warning');
+      if (
+        message.type === 'ACTIVITY_EVENT' &&
+        message.activityEvent &&
+        role === 'interviewer' &&
+        message.activityEvent.severity === 'SUSPICIOUS'
+      ) {
+        pushPersistentToast(message.activityEvent.detail, 'danger');
       }
       if (message.type === 'WEBRTC_SIGNAL') {
         setIncomingSignal(message);
@@ -373,7 +478,8 @@ const Session: React.FC = () => {
     mutationFn: () =>
       sessionApi.endSession(sessionId!, {
         finalCode: resolvedLatestCode,
-        codeFiles: isFrontendWorkspaceSession ? resolvedCodeFiles : undefined,
+        codeFiles: isCodeWorkspaceSession ? resolvedCodeFiles : undefined,
+        activeFilePath: activeQuestionPath || undefined,
       }),
     onSuccess: refreshSession,
   });
@@ -454,7 +560,7 @@ const Session: React.FC = () => {
           deviceId,
           reason: role === 'interviewee' ? 'TAB_OR_BROWSER_CLOSED' : 'MANUAL_RESUME',
           finalCode: resolvedLatestCode,
-          codeFiles: isFrontendWorkspaceSession ? resolvedCodeFiles : undefined,
+          codeFiles: isCodeWorkspaceSession ? resolvedCodeFiles : undefined,
         });
         const blob = new Blob([payload], { type: 'application/json' });
         navigator.sendBeacon(url, blob);
@@ -473,7 +579,7 @@ const Session: React.FC = () => {
       window.removeEventListener('beforeunload', beforeUnload);
       window.removeEventListener('pagehide', pageHide);
     };
-  }, [deviceId, isFrontendWorkspaceSession, resolvedCodeFiles, resolvedLatestCode, role, session, sessionId]);
+  }, [deviceId, isCodeWorkspaceSession, resolvedCodeFiles, resolvedLatestCode, role, session, sessionId]);
 
   React.useEffect(() => {
     if (role !== 'interviewee' || !sessionId || session?.status !== 'ACTIVE') {
@@ -481,17 +587,29 @@ const Session: React.FC = () => {
     }
 
     const onVisibilityChange = () => {
-      if (document.visibilityState !== 'hidden') {
+      if (document.visibilityState === 'hidden') {
+        tabHiddenStartedAtRef.current = Date.now();
         return;
       }
 
+      const hiddenStartedAt = tabHiddenStartedAtRef.current;
+      tabHiddenStartedAtRef.current = null;
+      if (!hiddenStartedAt) {
+        return;
+      }
       const now = Date.now();
       if (now - lastTabHiddenAtRef.current < 1200) {
         return;
       }
       lastTabHiddenAtRef.current = now;
+      const durationMs = Math.max(0, now - hiddenStartedAt);
+      const durationSeconds = Math.max(1, Math.round(durationMs / 1000));
 
-      void recordActivityEvent('TAB_HIDDEN', `${interviewee?.name?.trim() || 'Interviewee'} switched away from the interview tab or window.`);
+      void recordActivityEvent(
+        'TAB_HIDDEN',
+        `${interviewee?.name?.trim() || 'Interviewee'} switched away from the interview tab or window for ${durationSeconds} second${durationSeconds === 1 ? '' : 's'}.`,
+        durationMs
+      );
     };
 
     document.addEventListener('visibilitychange', onVisibilityChange);
@@ -555,22 +673,78 @@ const Session: React.FC = () => {
     }
 
     if (previousMuteStateRef.current === false && isMuted) {
+      microphoneDisabledStartedAtRef.current = Date.now();
+      microphoneLongOffRecordedRef.current = false;
       void recordActivityEvent(
         'MICROPHONE_DISABLED_MANUALLY',
         `${intervieweeName} manually turned off the microphone during the interview.`
       );
     }
+    if (previousMuteStateRef.current === true && !isMuted) {
+      microphoneDisabledStartedAtRef.current = null;
+      microphoneLongOffRecordedRef.current = false;
+    }
 
     if (previousCameraStateRef.current === true && !isCameraEnabled) {
+      cameraDisabledStartedAtRef.current = Date.now();
+      cameraLongOffRecordedRef.current = false;
       void recordActivityEvent(
         'CAMERA_DISABLED_MANUALLY',
         `${intervieweeName} manually turned off the camera during the interview.`
       );
     }
+    if (previousCameraStateRef.current === false && isCameraEnabled) {
+      cameraDisabledStartedAtRef.current = null;
+      cameraLongOffRecordedRef.current = false;
+    }
 
     previousMuteStateRef.current = isMuted;
     previousCameraStateRef.current = isCameraEnabled;
   }, [intervieweeName, isCameraEnabled, isInAppAvSession, isMuted, recordActivityEvent, role, session?.status]);
+
+  React.useEffect(() => {
+    if (!isInAppAvSession || role !== 'interviewee' || session?.status !== 'ACTIVE' || !isMuted) {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      if (!isMuted || microphoneLongOffRecordedRef.current) {
+        return;
+      }
+      const startedAt = microphoneDisabledStartedAtRef.current ?? Date.now();
+      const durationMs = Math.max(IN_APP_AV_OFF_SUSPICIOUS_MS, Date.now() - startedAt);
+      microphoneLongOffRecordedRef.current = true;
+      void recordActivityEvent(
+        'MICROPHONE_DISABLED_MANUALLY',
+        `${intervieweeName} kept the microphone switched off for ${Math.round(durationMs / 1000)} seconds during the interview.`,
+        durationMs
+      );
+    }, IN_APP_AV_OFF_SUSPICIOUS_MS);
+
+    return () => window.clearTimeout(timeout);
+  }, [intervieweeName, isInAppAvSession, isMuted, recordActivityEvent, role, session?.status]);
+
+  React.useEffect(() => {
+    if (!isInAppAvSession || role !== 'interviewee' || session?.status !== 'ACTIVE' || isCameraEnabled) {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      if (isCameraEnabled || cameraLongOffRecordedRef.current) {
+        return;
+      }
+      const startedAt = cameraDisabledStartedAtRef.current ?? Date.now();
+      const durationMs = Math.max(IN_APP_AV_OFF_SUSPICIOUS_MS, Date.now() - startedAt);
+      cameraLongOffRecordedRef.current = true;
+      void recordActivityEvent(
+        'CAMERA_DISABLED_MANUALLY',
+        `${intervieweeName} kept the camera switched off for ${Math.round(durationMs / 1000)} seconds during the interview.`,
+        durationMs
+      );
+    }, IN_APP_AV_OFF_SUSPICIOUS_MS);
+
+    return () => window.clearTimeout(timeout);
+  }, [intervieweeName, isCameraEnabled, isInAppAvSession, recordActivityEvent, role, session?.status]);
 
   if (isLoading) {
     return (
@@ -603,10 +777,11 @@ const Session: React.FC = () => {
   const waitingForFeedback = isInterviewer && session.status === 'ENDED' && !session.feedback;
   const lockDisqualificationOutcome = waitingForFeedback && Boolean(session.suspiciousRejected);
   const suspiciousActivityEvents = (session.activityEvents || []).filter((event) =>
-    (isInAppAvSession
+    event.severity === 'SUSPICIOUS' ||
+    (!event.severity && (isInAppAvSession
       ? ['TAB_HIDDEN', 'PASTE_IN_EDITOR', 'EXTERNAL_DROP_BLOCKED', 'CAMERA_STREAM_LOST', 'MICROPHONE_DISABLED_MANUALLY', 'CAMERA_DISABLED_MANUALLY', 'NO_FACE_DETECTED', 'MULTIPLE_FACES_DETECTED']
       : ['TAB_HIDDEN', 'PASTE_IN_EDITOR', 'EXTERNAL_DROP_BLOCKED']
-    ).includes(event.eventType)
+    ).includes(event.eventType))
   );
   const waitingJoinLabel = `Waiting for ${interviewee?.name || 'Interviewee'} to join`;
   const hasCompleteFeedback = Boolean(feedback.rating && feedback.recommendationDecision && feedback.comments.trim());
@@ -674,6 +849,13 @@ const Session: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+      {showPreStartState && !preStartGuideAcknowledged && (
+        <PreStartGuidanceOverlay
+          role={role}
+          technology={session.technology}
+          onAcknowledge={handleAcknowledgePreStartGuide}
+        />
       )}
 
       {!isFullscreen && showEditor ? (
@@ -876,6 +1058,7 @@ const Session: React.FC = () => {
 
           <Editor
             sessionId={sessionId}
+            participantRole={role}
             executionLanguage={
               session.technology === 'PYTHON'
                 ? 'PYTHON'
@@ -942,13 +1125,15 @@ const Session: React.FC = () => {
             }
             initialCodeFiles={resolvedCodeFiles}
             initialCode={resolvedLatestCode}
+            initialCodeVersion={normalizeCodeVersion(currentSession?.codeVersion ?? session.codeVersion)}
+            onActiveFileChange={setActiveQuestionPath}
             showFullscreenToggle={canFullscreen}
             isFullscreen={isFullscreen}
             onToggleFullscreen={toggleFullscreen}
             onCodeChange={(code) => {
               setCurrentCode(code);
               if (session.status === 'ACTIVE') {
-                const nextVersion = ((currentSession?.codeVersion ?? session.codeVersion) || 0) + 1;
+                const nextVersion = reserveNextCodeVersion();
                 const nextSession = {
                   ...session,
                   latestCode: code,
@@ -961,7 +1146,7 @@ const Session: React.FC = () => {
             onCodeFilesChange={(files) => {
               setCurrentCodeFiles(files);
               if (session.status === 'ACTIVE') {
-                const nextVersion = ((currentSession?.codeVersion ?? session.codeVersion) || 0) + 1;
+                const nextVersion = reserveNextCodeVersion();
                 const nextCode = resolvePrimaryCodeFromFiles(session.technology, files);
                 const nextSession = {
                   ...session,
@@ -1092,6 +1277,109 @@ const Session: React.FC = () => {
   );
 };
 
+function PreStartGuidanceOverlay({
+  role,
+  technology,
+  onAcknowledge,
+}: {
+  role: 'interviewer' | 'interviewee';
+  technology: SessionResponse['technology'];
+  onAcknowledge: () => void;
+}) {
+  const isInterviewer = role === 'interviewer';
+  const isGuidedQuestionSession = technology === 'JAVA' || technology === 'PYTHON';
+  const isFrontendWorkspaceSession = technology === 'ANGULAR' || technology === 'REACT';
+  const guidanceItems = buildPreStartGuidanceItems(role, technology);
+
+  return (
+    <div className="prestart-guide-backdrop" role="presentation">
+      <section
+        className="prestart-guide-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="prestart-guide-title"
+      >
+        <div className="prestart-guide-kicker">Before The Interview Starts</div>
+        <h2 id="prestart-guide-title">Quick button map</h2>
+        <p>
+          {isInterviewer
+            ? 'Review these controls before starting the live timer for both participants.'
+            : 'The editor is read-only until the interviewer starts; these controls become useful during the live interview.'}
+        </p>
+        <div className="prestart-guide-list" aria-label="Editor control explanations">
+          {guidanceItems.map((item) => (
+            <div className="prestart-guide-item" key={item.label}>
+              <span className="prestart-guide-button-label">{item.label}</span>
+              <span>{item.description}</span>
+            </div>
+          ))}
+        </div>
+        <div className="prestart-guide-note">
+          {isGuidedQuestionSession
+            ? 'Java/Python questions are revealed one at a time; submitted tabs stay read-only.'
+            : isFrontendWorkspaceSession
+              ? 'Frontend workspaces build the current saved files and show output or preview on the right.'
+              : 'The editor will unlock when the live session begins.'}
+        </div>
+        <button type="button" className="control-btn btn-start prestart-guide-action" onClick={onAcknowledge}>
+          I know
+        </button>
+      </section>
+    </div>
+  );
+}
+
+function buildPreStartGuidanceItems(role: 'interviewer' | 'interviewee', technology: SessionResponse['technology']) {
+  const isInterviewer = role === 'interviewer';
+  const isGuidedQuestionSession = technology === 'JAVA' || technology === 'PYTHON';
+  const isFrontendWorkspaceSession = technology === 'ANGULAR' || technology === 'REACT';
+  const runLabel = isFrontendWorkspaceSession ? 'Build' : isGuidedQuestionSession ? 'Run Active Tab' : 'Run';
+  const runDescription = isFrontendWorkspaceSession
+    ? 'Builds the workspace and refreshes output/preview. Shortcut: Ctrl + Enter.'
+    : isGuidedQuestionSession
+      ? 'Runs only the currently active question tab. Shortcut: Ctrl + Enter.'
+      : 'Runs the current program. Shortcut: Ctrl + Enter.';
+
+  const items = [
+    { label: `${runLabel} / Ctrl + Enter`, description: runDescription },
+    { label: 'Clear / Esc', description: 'Clears the output and error panel without changing code.' },
+    { label: 'Full Screen / Ctrl + Shift + F', description: 'Expands the coding workspace for focused editing.' },
+    { label: 'Light / Dark', description: 'Switches the editor theme based on comfort and visibility.' },
+  ];
+
+  if (isInterviewer) {
+    items.unshift({
+      label: 'Start Interview',
+      description: 'Unlocks the editor, starts the timer, and begins live collaboration.',
+    });
+    if (isGuidedQuestionSession) {
+      items.push(
+        { label: '+', description: 'Adds prepared Java/Python question tabs before showing them to the candidate.' },
+        { label: 'Prepared tabs', description: 'Lets you write future questions while the candidate solves the current one.' },
+        { label: 'Reset', description: 'Restores the active editor content when a reset is intentionally needed.' }
+      );
+    } else if (isFrontendWorkspaceSession) {
+      items.push(
+        { label: '+', description: 'Adds supported workspace files for the frontend interview.' },
+        { label: 'Reset', description: 'Restores the active editor content when a reset is intentionally needed.' }
+      );
+    } else {
+      items.push({ label: 'Reset', description: 'Restores the editor template when a reset is intentionally needed.' });
+    }
+  } else if (isGuidedQuestionSession) {
+    items.push(
+      { label: 'Freeze', description: 'Submits the active solution permanently and opens the next prepared question when one exists.' },
+      { label: 'Submitted', description: 'Marks completed question tabs that can be reviewed but not edited.' }
+    );
+  }
+
+  return items;
+}
+
+function preStartGuideStorageKey(sessionId: string, role: string) {
+  return `interview-prestart-guide:${sessionId}:${role}`;
+}
+
 export default Session;
 
 const SESSION_LOADING_MESSAGES = [
@@ -1155,6 +1443,10 @@ function formatActivityEventLabel(eventType: ActivityEventType) {
     .join(' ');
 }
 
+function normalizeCodeVersion(version: number | null | undefined) {
+  return typeof version === 'number' && Number.isFinite(version) ? version : 0;
+}
+
 function formatPossessiveLabel(name: string) {
   return name.endsWith('s') ? `${name}'` : `${name}'s`;
 }
@@ -1174,7 +1466,9 @@ function resolvePrimaryCodeFromFiles(technology: SessionResponse['technology'] |
 
   return (technology === 'REACT'
     ? files.find((file) => file.path === 'src/App.tsx')?.content
-    : files.find((file) => file.path === 'src/app/app.component.ts')?.content)
+    : technology === 'ANGULAR'
+      ? files.find((file) => file.path === 'src/app/app.component.ts')?.content
+      : files.find((file) => file.activeQuestion)?.content)
     || files.find((file) => file.editable)?.content
     || files[0]?.content
     || '';

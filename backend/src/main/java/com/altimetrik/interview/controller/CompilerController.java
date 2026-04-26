@@ -12,6 +12,7 @@ import com.altimetrik.interview.dto.ExecuteRequest;
 import com.altimetrik.interview.dto.ExecuteResponse;
 import com.altimetrik.interview.enums.ExecutionLanguage;
 import com.altimetrik.interview.service.SandboxClientService;
+import com.altimetrik.interview.service.SessionService;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -26,6 +27,7 @@ import lombok.extern.slf4j.Slf4j;
 public class CompilerController {
 
     private final SandboxClientService sandboxClientService;
+    private final SessionService sessionService;
 
     /**
      * POST /api/compile
@@ -72,6 +74,7 @@ public class CompilerController {
         }
 
         ExecuteResponse response = sandboxClientService.execute(request);
+        sessionService.recordQuestionRunResult(request, response);
         log.info("Execute response: success={}, exitCode={}, executionTime={}ms, language={}",
                 response.isSuccess(), response.getExitCode(), response.getExecutionTimeMs(), request.getLanguage());
         return ResponseEntity.ok(response);

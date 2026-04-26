@@ -457,6 +457,93 @@
   box-shadow: 0 22px 40px rgba(16, 37, 66, 0.16);
 }
 
+.prestart-guide-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 58;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background:
+    radial-gradient(circle at 18% 18%, rgba(11, 114, 133, 0.18), transparent 34%),
+    rgba(238, 246, 250, 0.82);
+  backdrop-filter: blur(5px);
+}
+
+.prestart-guide-card {
+  width: min(720px, 100%);
+  display: grid;
+  gap: 16px;
+  padding: 28px;
+  border: 1px solid rgba(199, 216, 230, 0.95);
+  border-radius: 28px;
+  background: #ffffff;
+  box-shadow: 0 30px 80px rgba(16, 37, 66, 0.2);
+}
+
+.prestart-guide-kicker {
+  justify-self: start;
+  padding: 7px 12px;
+  border-radius: 999px;
+  background: rgba(11, 114, 133, 0.1);
+  color: #0b7285;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.prestart-guide-card h2 {
+  margin: 0;
+  color: var(--text);
+}
+
+.prestart-guide-card p {
+  margin: 0;
+  color: var(--text-soft);
+  line-height: 1.6;
+}
+
+.prestart-guide-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.prestart-guide-item {
+  display: grid;
+  gap: 4px;
+  align-content: start;
+  padding: 13px 14px;
+  border: 1px solid #d9e6ef;
+  border-radius: 18px;
+  background: linear-gradient(180deg, #f9fcfe 0%, #f3f8fb 100%);
+  color: #426078;
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.prestart-guide-button-label {
+  color: #0f2f4a;
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.prestart-guide-note {
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: #f6fbf7;
+  color: #2f6747;
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+
+.prestart-guide-action {
+  justify-self: end;
+  min-width: 128px;
+}
+
 .waiting-panel,
 .session-end-card {
   padding: 24px 26px;
@@ -620,5 +707,17 @@
   .feedback-actions,
   .session-controls {
     flex-direction: column;
+  }
+
+  .prestart-guide-card {
+    padding: 22px;
+  }
+
+  .prestart-guide-list {
+    grid-template-columns: 1fr;
+  }
+
+  .prestart-guide-action {
+    justify-self: stretch;
   }
 }

@@ -19,4 +19,5 @@ public class BuildRequest {
     private ExecutionLanguage language = ExecutionLanguage.ANGULAR;
     private List<EditableCodeFileDto> files;
     private long timeoutMs;
+    private boolean livePreviewMode;
 }

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import MonacoEditor from '@monaco-editor/react';
-import { ExecuteRequest, ExecutionLanguage } from '../types/api';
+import { ExecuteRequest, ExecuteResponse, ExecutionLanguage } from '../types/api';
 import type { EditableCodeFile } from '../types/session';
 import ResizeHandle from './ResizeHandle';
 import { compilerApi } from '../services/api';
@@ -397,14 +397,25 @@ interface FileCreationModalState {
   error: string;
 }
 
+interface ConfirmationModalState {
+  title: string;
+  message: string;
+  confirmLabel: string;
+  tone?: 'normal' | 'danger';
+  onConfirm: () => void;
+}
+
 interface EditorProps {
   sessionId?: string;
   executionLanguage?: ExecutionLanguage;
+  participantRole?: 'interviewer' | 'interviewee' | null;
   readOnly?: boolean;
   initialCode?: string;
   initialCodeFiles?: EditableCodeFile[];
+  initialCodeVersion?: number;
   onCodeChange?: (code: string) => void;
   onCodeFilesChange?: (files: EditableCodeFile[]) => void;
+  onActiveFileChange?: (path: string) => void;
   onPasteInEditor?: (text: string) => boolean | void;
   onCopyFromEditor?: (text: string) => void;
   onCutFromEditor?: (text: string) => void;
@@ -421,11 +432,14 @@ interface EditorProps {
 const Editor: React.FC<EditorProps> = ({
   sessionId,
   executionLanguage = 'JAVA',
+  participantRole,
   readOnly = false,
   initialCode,
   initialCodeFiles,
+  initialCodeVersion,
   onCodeChange,
   onCodeFilesChange,
+  onActiveFileChange,
   onPasteInEditor,
   onCopyFromEditor,
   onCutFromEditor,
@@ -439,6 +453,11 @@ const Editor: React.FC<EditorProps> = ({
   headerRightSlot,
 }) => {
   const isFrontendWorkspace = executionLanguage === 'ANGULAR' || executionLanguage === 'REACT';
+  const isGuidedQuestionWorkspace = executionLanguage === 'JAVA' || executionLanguage === 'PYTHON';
+  const isWorkspaceSession = isFrontendWorkspace || isGuidedQuestionWorkspace;
+  const canManageQuestionTabs = participantRole === 'interviewer' && isGuidedQuestionWorkspace && !readOnly;
+  const canCreateWorkspaceFiles = isFrontendWorkspace ? !readOnly : canManageQuestionTabs;
+  const canDeleteWorkspaceFiles = isFrontendWorkspace && !readOnly;
   const defaultTemplate = !isFrontendWorkspace ? DEFAULT_TEMPLATES[executionLanguage] : '';
   const resolvedInitialCode = !isFrontendWorkspace && initialCode && initialCode.trim().length > 0 ? initialCode : defaultTemplate;
   const editorTitle = EDITOR_TITLES[executionLanguage];
@@ -475,6 +494,7 @@ const Editor: React.FC<EditorProps> = ({
     value: '',
     error: '',
   });
+  const [confirmationModal, setConfirmationModal] = useState<ConfirmationModalState | null>(null);
   const runLatestRef = React.useRef<(() => void) | null>(null);
   const angularExtraLibsRef = React.useRef<IDisposable[]>([]);
   const workspaceExtraLibsRef = React.useRef<IDisposable[]>([]);
@@ -482,9 +502,26 @@ const Editor: React.FC<EditorProps> = ({
   const workspaceFilesRef = React.useRef<AngularWorkspaceFile[]>(buildWorkspaceFiles(executionLanguage, initialCodeFiles));
   const dirtyWorkspacePathsRef = React.useRef<string[]>([]);
   const activeFilePathRef = React.useRef<string>(buildWorkspaceFiles(executionLanguage, initialCodeFiles)[0]?.path ?? defaultWorkspaceFiles(executionLanguage)[0].path);
+  const appliedInitialCodeVersionRef = React.useRef(initialCodeVersion ?? 0);
+  const previousExecutionLanguageRef = React.useRef(executionLanguage);
 
   useEffect(() => {
-    if (!isFrontendWorkspace) {
+    const languageChanged = previousExecutionLanguageRef.current !== executionLanguage;
+    const hasVersion = typeof initialCodeVersion === 'number';
+    const shouldApplyInitialCode = languageChanged
+      || !hasVersion
+      || initialCodeVersion > appliedInitialCodeVersionRef.current;
+
+    if (!shouldApplyInitialCode) {
+      return;
+    }
+
+    previousExecutionLanguageRef.current = executionLanguage;
+    if (hasVersion) {
+      appliedInitialCodeVersionRef.current = initialCodeVersion;
+    }
+
+    if (!isWorkspaceSession) {
       setState((prev) => ({
         ...prev,
         code: resolvedInitialCode,
@@ -503,7 +540,7 @@ const Editor: React.FC<EditorProps> = ({
       }
       return nextFiles[0]?.path ?? defaultWorkspaceFiles(executionLanguage)[0].path;
     });
-    }, [executionLanguage, initialCodeFiles, isFrontendWorkspace, resolvedInitialCode]);
+    }, [executionLanguage, initialCodeFiles, initialCodeVersion, isWorkspaceSession, resolvedInitialCode]);
 
   useEffect(() => {
     workspaceFilesRef.current = workspaceFiles;
@@ -513,9 +550,31 @@ const Editor: React.FC<EditorProps> = ({
     dirtyWorkspacePathsRef.current = dirtyWorkspacePaths;
   }, [dirtyWorkspacePaths]);
 
+  const visibleWorkspaceFiles = useMemo(
+    () => isGuidedQuestionWorkspace && participantRole === 'interviewee'
+      ? workspaceFiles.filter((file) => file.enabledForCandidate !== false)
+      : workspaceFiles,
+    [isGuidedQuestionWorkspace, participantRole, workspaceFiles]
+  );
+
   useEffect(() => {
     activeFilePathRef.current = activeFilePath;
-  }, [activeFilePath]);
+    onActiveFileChange?.(activeFilePath);
+  }, [activeFilePath, onActiveFileChange]);
+
+  useEffect(() => {
+    if (!isGuidedQuestionWorkspace || participantRole !== 'interviewee' || !visibleWorkspaceFiles.length) {
+      return;
+    }
+    const activeQuestion = visibleWorkspaceFiles.find((file) => file.activeQuestion === true && file.submitted !== true);
+    if (activeQuestion && activeQuestion.path !== activeFilePath) {
+      setActiveFilePath(activeQuestion.path);
+      return;
+    }
+    if (!visibleWorkspaceFiles.some((file) => file.path === activeFilePath)) {
+      setActiveFilePath(visibleWorkspaceFiles[0].path);
+    }
+  }, [activeFilePath, isGuidedQuestionWorkspace, participantRole, visibleWorkspaceFiles]);
 
   useEffect(() => {
     if ((executionLanguage !== 'ANGULAR' && executionLanguage !== 'REACT') || !monacoTypeDefaultsRef.current) {
@@ -546,8 +605,15 @@ const Editor: React.FC<EditorProps> = ({
   }, []);
 
   const activeAngularFile = useMemo(
-    () => workspaceFiles.find((file) => file.path === activeFilePath) ?? workspaceFiles[0] ?? defaultWorkspaceFiles(executionLanguage)[0],
-    [activeFilePath, executionLanguage, workspaceFiles]
+    () => {
+      const candidateFiles = isGuidedQuestionWorkspace && participantRole === 'interviewee'
+        ? visibleWorkspaceFiles
+        : workspaceFiles;
+      return candidateFiles.find((file) => file.path === activeFilePath)
+        ?? candidateFiles[0]
+        ?? defaultWorkspaceFiles(executionLanguage)[0];
+    },
+    [activeFilePath, executionLanguage, isGuidedQuestionWorkspace, participantRole, visibleWorkspaceFiles, workspaceFiles]
   );
 
   const monacoLanguage = useMemo(() => {
@@ -557,10 +623,26 @@ const Editor: React.FC<EditorProps> = ({
     return fileLanguage(activeAngularFile.path);
   }, [activeAngularFile.path, executionLanguage, isFrontendWorkspace]);
 
-  const activeEditorValue = isFrontendWorkspace ? activeAngularFile.content : state.code;
-  const activeEditorReadOnly = readOnly || (isFrontendWorkspace && activeAngularFile.editable === false);
-  const runButtonLabel = isFrontendWorkspace ? (state.loading ? 'Building...' : 'Build') : (state.loading ? 'Running...' : 'Run (Ctrl+Enter)');
-  const runButtonTitle = isFrontendWorkspace ? `Build ${executionLanguage === 'REACT' ? 'React' : 'Angular'} workspace (Ctrl+Enter)` : 'Run code (Ctrl+Enter)';
+  const activeEditorValue = isWorkspaceSession ? activeAngularFile.content : state.code;
+  const activeEditorReadOnly = readOnly || (isWorkspaceSession && (activeAngularFile.editable === false || activeAngularFile.submitted === true));
+  const runButtonLabel = isFrontendWorkspace
+    ? (state.loading ? 'Building...' : 'Build (Ctrl+Enter)')
+    : isGuidedQuestionWorkspace
+      ? (state.loading ? 'Running...' : 'Run Active Tab (Ctrl+Enter)')
+      : (state.loading ? 'Running...' : 'Run (Ctrl+Enter)');
+  const runButtonTitle = isFrontendWorkspace
+    ? `Build ${executionLanguage === 'REACT' ? 'React' : 'Angular'} workspace (Ctrl+Enter)`
+    : isGuidedQuestionWorkspace
+      ? 'Run the currently selected question tab (Ctrl+Enter)'
+      : 'Run code (Ctrl+Enter)';
+  const canFreezeActiveQuestion = isGuidedQuestionWorkspace
+    && participantRole === 'interviewee'
+    && !readOnly
+    && activeAngularFile.enabledForCandidate !== false
+    && activeAngularFile.activeQuestion === true
+    && activeAngularFile.submitted !== true;
+  const canRunCurrentEditor = canRun
+    && (!isGuidedQuestionWorkspace || (activeAngularFile.activeQuestion === true && activeAngularFile.submitted !== true));
 
   const handleCodeChange = useCallback(
     (value: string | undefined) => {
@@ -568,7 +650,7 @@ const Editor: React.FC<EditorProps> = ({
         return;
       }
 
-        if (isFrontendWorkspace) {
+        if (isWorkspaceSession) {
           setWorkspaceFiles((previous) => {
             const nextFiles = previous.map((file) => (
               file.path === activeFilePath
@@ -590,11 +672,26 @@ const Editor: React.FC<EditorProps> = ({
       setState((prev) => ({ ...prev, code: value }));
       onCodeChange?.(value);
     },
-    [activeEditorReadOnly, activeFilePath, executionLanguage, isFrontendWorkspace, onCodeChange, onCodeFilesChange]
+    [activeEditorReadOnly, activeFilePath, executionLanguage, isWorkspaceSession, onCodeChange, onCodeFilesChange]
   );
 
+  const executeActiveGuidedQuestion = useCallback(async (): Promise<ExecuteResponse> => {
+    const latestWorkspaceFiles = workspaceFilesRef.current;
+    const persistedFiles = toPersistedWorkspaceFiles(executionLanguage, latestWorkspaceFiles);
+    const activeFile = persistedFiles.find((file) => file.path === activeFilePathRef.current) ?? persistedFiles[0];
+    return compilerApi.execute({
+      sourceCode: activeFile?.content || '',
+      sessionId,
+      language: executionLanguage,
+      codeFiles: persistedFiles,
+      activeFilePath: activeFile?.path,
+      timeoutMs: 5000,
+      memoryLimitMb: executionLanguage === 'PYTHON' ? 512 : 512,
+    });
+  }, [executionLanguage, sessionId]);
+
   const handleRun = useCallback(async () => {
-    if (!canRun) {
+    if (!canRunCurrentEditor) {
       return;
     }
 
@@ -630,6 +727,7 @@ const Editor: React.FC<EditorProps> = ({
             codeFiles: changedFiles,
             timeoutMs: 15000,
             memoryLimitMb: 1024,
+            livePreviewMode: isFrontendWorkspace,
           });
           console.info('[frontend-build] response', {
             language: executionLanguage,
@@ -654,6 +752,29 @@ const Editor: React.FC<EditorProps> = ({
           dirtyWorkspacePathsRef.current = [];
           setDirtyWorkspacePaths([]);
         } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : 'An error occurred';
+        setState((prev) => ({
+          ...prev,
+          loading: false,
+          error: errorMessage,
+        }));
+      }
+      return;
+    }
+
+    if (isGuidedQuestionWorkspace) {
+      try {
+        const response = await executeActiveGuidedQuestion();
+
+        setState((prev) => ({
+          ...prev,
+          loading: false,
+          output: response.stdout || '',
+          error: response.stderr || (response.compileErrors?.join('\n') || ''),
+          executionTime: response.executionTimeMs || 0,
+          previewUrl: null,
+        }));
+      } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'An error occurred';
         setState((prev) => ({
           ...prev,
@@ -690,11 +811,107 @@ const Editor: React.FC<EditorProps> = ({
         error: errorMessage,
       }));
     }
-  }, [canRun, executionLanguage, isFrontendWorkspace, sessionId, state.code]);
+  }, [canRunCurrentEditor, executeActiveGuidedQuestion, executionLanguage, isFrontendWorkspace, isGuidedQuestionWorkspace, sessionId, state.code]);
 
   useEffect(() => {
     runLatestRef.current = handleRun;
   }, [handleRun]);
+
+  const freezeActiveQuestion = async () => {
+    if (!canFreezeActiveQuestion) {
+      return;
+    }
+
+    setState((prev) => ({
+      ...prev,
+      loading: true,
+      output: '',
+      error: '',
+      executionTime: 0,
+      previewUrl: null,
+    }));
+
+    try {
+      const response = await executeActiveGuidedQuestion();
+      setState((prev) => ({
+        ...prev,
+        loading: false,
+        output: response.stdout || '',
+        error: response.stderr || (response.compileErrors?.join('\n') || ''),
+        executionTime: response.executionTimeMs || 0,
+        previewUrl: null,
+      }));
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Unable to capture the final run for this question.';
+      setState((prev) => ({
+        ...prev,
+        loading: false,
+        error: errorMessage,
+      }));
+    }
+
+    setWorkspaceFiles((previous) => {
+      const activeQuestionPath = activeFilePathRef.current;
+      const questionFiles = previous.filter((file) => editableWorkspacePath(executionLanguage, file.path));
+      const currentIndex = questionFiles.findIndex((file) => file.path === activeQuestionPath);
+      const nextQuestion = currentIndex >= 0
+        ? questionFiles.slice(currentIndex + 1).find((file) => file.submitted !== true)
+        : undefined;
+      const nextFiles = previous.map((file) => {
+        if (file.path === activeQuestionPath) {
+          return {
+            ...file,
+            activeQuestion: false,
+            editable: false,
+            enabledForCandidate: true,
+            submitted: true,
+          };
+        }
+
+        if (nextQuestion && file.path === nextQuestion.path) {
+          return {
+            ...file,
+            activeQuestion: true,
+            editable: true,
+            enabledForCandidate: true,
+            submitted: false,
+          };
+        }
+
+        return {
+          ...file,
+          activeQuestion: false,
+        };
+      });
+      workspaceFilesRef.current = nextFiles;
+      if (nextQuestion) {
+        activeFilePathRef.current = nextQuestion.path;
+        setActiveFilePath(nextQuestion.path);
+      }
+      onCodeFilesChange?.(toPersistedWorkspaceFiles(executionLanguage, nextFiles));
+      return nextFiles;
+    });
+  };
+
+  const handleFreezeQuestion = () => {
+    if (!canFreezeActiveQuestion) {
+      return;
+    }
+
+    const hasChangedAfterRun = activeAngularFile.runResult && activeAngularFile.changedAfterLastRun;
+    setConfirmationModal({
+      title: 'Freeze solution?',
+      message: hasChangedAfterRun
+        ? 'This solution has changes that were not run after the last edit. Freezing will submit this answer permanently and move to the next prepared question if one exists.'
+        : 'Freezing will submit this answer permanently and move to the next prepared question if one exists. This action cannot be undone.',
+      confirmLabel: 'Freeze',
+      tone: 'danger',
+      onConfirm: () => {
+        setConfirmationModal(null);
+        void freezeActiveQuestion();
+      },
+    });
+  };
 
   useEffect(() => {
     const mountNode = editorMountRef.current;
@@ -736,15 +953,21 @@ const Editor: React.FC<EditorProps> = ({
     }));
   };
 
-  const handleReset = () => {
-      if (isFrontendWorkspace) {
-        const resetFiles = buildWorkspaceFiles(executionLanguage, undefined);
-        workspaceFilesRef.current = resetFiles;
-        dirtyWorkspacePathsRef.current = toPersistedWorkspaceFiles(executionLanguage, resetFiles).map((file) => file.path);
-        setWorkspaceFiles(resetFiles);
-        setDirtyWorkspacePaths(toPersistedWorkspaceFiles(executionLanguage, resetFiles).map((file) => file.path));
-        setActiveFilePath(resetFiles[0]?.path ?? defaultWorkspaceFiles(executionLanguage)[0].path);
-        onCodeFilesChange?.(toPersistedWorkspaceFiles(executionLanguage, resetFiles));
+  const resetActiveEditor = () => {
+    if (isWorkspaceSession) {
+      const resetContent = resetContentForWorkspaceFile(executionLanguage, activeAngularFile.path);
+      const nextFiles = workspaceFilesRef.current.map((file) => (
+        file.path === activeFilePathRef.current
+          ? { ...file, content: resetContent }
+          : file
+      ));
+      workspaceFilesRef.current = nextFiles;
+      dirtyWorkspacePathsRef.current = dirtyWorkspacePathsRef.current.includes(activeFilePathRef.current)
+        ? dirtyWorkspacePathsRef.current
+        : [...dirtyWorkspacePathsRef.current, activeFilePathRef.current];
+      setWorkspaceFiles(nextFiles);
+      setDirtyWorkspacePaths(dirtyWorkspacePathsRef.current);
+      onCodeFilesChange?.(toPersistedWorkspaceFiles(executionLanguage, nextFiles));
       setState((prev) => ({
         ...prev,
         output: '',
@@ -766,6 +989,25 @@ const Editor: React.FC<EditorProps> = ({
     onCodeChange?.(defaultTemplate);
   };
 
+  const handleReset = () => {
+    if (isWorkspaceSession && activeEditorReadOnly) {
+      return;
+    }
+
+    setConfirmationModal({
+      title: 'Reset selected tab?',
+      message: isWorkspaceSession
+        ? `This will replace only "${activeAngularFile.displayName}" with the default ${executionLanguage.toLowerCase()} template. Other tabs will not be changed.`
+        : 'This will replace the current editor content with the default template.',
+      confirmLabel: 'Reset',
+      tone: 'danger',
+      onConfirm: () => {
+        setConfirmationModal(null);
+        resetActiveEditor();
+      },
+    });
+  };
+
   const handleOpenCreateFileModal = () => {
     setCreateFileModal({
       open: true,
@@ -784,9 +1026,8 @@ const Editor: React.FC<EditorProps> = ({
 
   const handleCreateFile = () => {
     const rawName = createFileModal.value;
-    const normalizedName = executionLanguage === 'REACT'
-      ? rawName.trim().replace(/^src\//, '')
-      : rawName.trim().replace(/^src\/app\//, '');
+    const nextQuestionIndex = nextGuidedQuestionIndex(executionLanguage, workspaceFiles);
+    const normalizedName = normalizeNewWorkspaceFileName(executionLanguage, rawName, nextQuestionIndex);
     if (!normalizedName) {
       setCreateFileModal((previous) => ({
         ...previous,
@@ -795,17 +1036,15 @@ const Editor: React.FC<EditorProps> = ({
       return;
     }
 
-    if (!(executionLanguage === 'REACT' ? /\.(tsx|ts|css)$/i.test(normalizedName) : /\.(ts|html|css)$/i.test(normalizedName))) {
+    if (!isAllowedWorkspaceFileName(executionLanguage, normalizedName)) {
       setCreateFileModal((previous) => ({
         ...previous,
-        error: executionLanguage === 'REACT'
-          ? 'Only .tsx, .ts, and .css files are supported inside src.'
-          : 'Only .ts, .html, and .css files are supported inside src/app.',
+        error: workspaceFileHelpText(executionLanguage),
       }));
       return;
     }
 
-    const nextPath = executionLanguage === 'REACT' ? `src/${normalizedName}` : `src/app/${normalizedName}`;
+    const nextPath = resolveWorkspacePath(executionLanguage, normalizedName);
     if (workspaceFiles.some((file) => file.path === nextPath)) {
       setCreateFileModal((previous) => ({
         ...previous,
@@ -814,12 +1053,19 @@ const Editor: React.FC<EditorProps> = ({
       return;
     }
 
+    const shouldAutoActivateNewQuestion = isGuidedQuestionWorkspace
+      && !workspaceFiles.some((file) => file.activeQuestion === true && file.submitted !== true);
+
     const nextFile: AngularWorkspaceFile = {
       path: nextPath,
-      displayName: normalizedName,
-      content: '',
+      displayName: isGuidedQuestionWorkspace ? guidedQuestionDisplayName(nextPath, nextQuestionIndex) : normalizedName,
+      content: isGuidedQuestionWorkspace ? DEFAULT_TEMPLATES[executionLanguage] : '',
       editable: true,
       sortOrder: nextWorkspaceSortOrder(workspaceFiles),
+      enabledForCandidate: shouldAutoActivateNewQuestion,
+      activeQuestion: shouldAutoActivateNewQuestion,
+      submitted: false,
+      idealDurationMinutes: isGuidedQuestionWorkspace ? 10 : undefined,
     };
 
       setWorkspaceFiles((previous) => {
@@ -838,7 +1084,12 @@ const Editor: React.FC<EditorProps> = ({
   };
 
   const handleDeleteFile = (path: string) => {
-    if (!isDeletableWorkspaceFile(executionLanguage, path)) {
+    if (isGuidedQuestionWorkspace) {
+      const targetFile = workspaceFilesRef.current.find((file) => file.path === path);
+      if (!canManageQuestionTabs || !targetFile || !isPreparedGuidedQuestionTab(targetFile)) {
+        return;
+      }
+    } else if (!isDeletableWorkspaceFile(executionLanguage, path)) {
       return;
     }
 
@@ -892,11 +1143,11 @@ const Editor: React.FC<EditorProps> = ({
     window.addEventListener('pointerup', up);
   };
 
-  const workspaceBytes = isFrontendWorkspace
+  const workspaceBytes = isWorkspaceSession
     ? workspaceFiles.reduce((total, file) => total + new Blob([file.content]).size, 0)
     : new Blob([state.code]).size;
   const codeKbLabel = `${(workspaceBytes / 1024).toFixed(workspaceBytes / 1024 >= 10 ? 0 : 1)} KB`;
-  const monacoModelPath = isFrontendWorkspace
+  const monacoModelPath = isWorkspaceSession
     ? `file:///${activeAngularFile.path.replace(/^\/+/, '')}`
     : executionLanguage === 'PYTHON'
       ? 'file:///main.py'
@@ -932,7 +1183,7 @@ const Editor: React.FC<EditorProps> = ({
               {theme === 'vs-dark' ? 'Light' : 'Dark'}
             </button>
             {showResetButton && (
-              <button className="btn btn-secondary" onClick={handleReset} title="Reset to template" disabled={readOnly}>
+              <button className="btn btn-secondary" onClick={handleReset} title="Reset selected tab" disabled={readOnly || activeEditorReadOnly}>
                 Reset
               </button>
             )}
@@ -954,7 +1205,7 @@ const Editor: React.FC<EditorProps> = ({
             <button
               className="btn btn-primary"
               onClick={handleRun}
-              disabled={state.loading || !canRun}
+              disabled={state.loading || !canRunCurrentEditor}
               title={runButtonTitle}
             >
               {runButtonLabel}
@@ -963,10 +1214,10 @@ const Editor: React.FC<EditorProps> = ({
           </div>
         </div>
 
-        {isFrontendWorkspace && (
+        {isWorkspaceSession && (
           <div className="workspace-tabs-bar">
             <div className="workspace-tabs" role="tablist" aria-label={`${executionLanguage} workspace files`}>
-              {workspaceFiles.map((file) => {
+              {visibleWorkspaceFiles.map((file) => {
                 const isActive = file.path === activeFilePath;
                 return (
                   <button
@@ -978,8 +1229,28 @@ const Editor: React.FC<EditorProps> = ({
                     onClick={() => setActiveFilePath(file.path)}
                   >
                     <span>{file.displayName}</span>
+                    {isGuidedQuestionWorkspace && file.activeQuestion ? <span className="workspace-tab-meta">Active</span> : null}
+                    {isGuidedQuestionWorkspace && file.submitted ? <span className="workspace-tab-meta">Submitted</span> : null}
+                    {isGuidedQuestionWorkspace && file.enabledForCandidate === false ? <span className="workspace-tab-meta">Prepared</span> : null}
+                    {isGuidedQuestionWorkspace && file.runResult ? <span className="workspace-tab-meta">{file.changedAfterLastRun ? 'Changed' : 'Ran'}</span> : null}
                     {!file.editable && <span className="workspace-tab-meta">{file.readOnlyHint || 'Read only'}</span>}
-                    {isDeletableWorkspaceFile(executionLanguage, file.path) && !readOnly ? (
+                    {isGuidedQuestionWorkspace && participantRole === 'interviewee' && file.path === activeFilePath && canFreezeActiveQuestion ? (
+                      <span
+                        className="workspace-tab-action"
+                        role="button"
+                        aria-label={`Freeze ${file.displayName}`}
+                        title="Freeze this solution and submit it for review"
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          handleFreezeQuestion();
+                        }}
+                      >
+                        Freeze
+                      </span>
+                    ) : null}
+                    {((isGuidedQuestionWorkspace && canManageQuestionTabs && isPreparedGuidedQuestionTab(file))
+                      || (!isGuidedQuestionWorkspace && isDeletableWorkspaceFile(executionLanguage, file.path) && canDeleteWorkspaceFiles)) ? (
                       <span
                         className="workspace-tab-delete"
                         role="button"
@@ -997,12 +1268,12 @@ const Editor: React.FC<EditorProps> = ({
                 );
               })}
             </div>
-            {!readOnly ? (
+            {canCreateWorkspaceFiles ? (
               <button
                 type="button"
                 className="workspace-add-button"
-                aria-label="Add file"
-                title="Add file"
+                aria-label={isGuidedQuestionWorkspace ? 'Add question' : 'Add file'}
+                title={isGuidedQuestionWorkspace ? 'Add question' : 'Add file'}
                 onClick={handleOpenCreateFileModal}
               >
                 +
@@ -1045,6 +1316,7 @@ const Editor: React.FC<EditorProps> = ({
             }}
           >
             <MonacoEditor
+              key={monacoModelPath}
               height="100%"
               language={monacoLanguage}
               path={monacoModelPath}
@@ -1269,11 +1541,9 @@ const Editor: React.FC<EditorProps> = ({
             aria-labelledby="workspace-modal-title"
             onClick={(event) => event.stopPropagation()}
           >
-            <h3 id="workspace-modal-title">Create New File</h3>
+            <h3 id="workspace-modal-title">{isGuidedQuestionWorkspace ? 'Create New Question' : 'Create New File'}</h3>
             <p className="workspace-modal-copy">
-                {executionLanguage === 'REACT'
-                  ? 'Add a file inside src. React sandbox supports only .tsx, .ts, and .css files, for example components/SimpleCard.tsx.'
-                  : 'Add a file inside src/app, for example simple-card.component.ts.'}
+                {workspaceFileHelpText(executionLanguage)}
               </p>
             <input
               className="workspace-modal-input"
@@ -1294,7 +1564,7 @@ const Editor: React.FC<EditorProps> = ({
                   handleCloseCreateFileModal();
                 }
               }}
-              placeholder={executionLanguage === 'REACT' ? 'components/SimpleCard.tsx' : 'simple-card.component.ts'}
+              placeholder={workspaceFilePlaceholder(executionLanguage, nextGuidedQuestionIndex(executionLanguage, workspaceFiles))}
             />
             {createFileModal.error ? <div className="workspace-modal-error">{createFileModal.error}</div> : null}
             <div className="workspace-modal-actions">
@@ -1308,9 +1578,50 @@ const Editor: React.FC<EditorProps> = ({
           </div>
         </div>
       )}
+
+      {confirmationModal && (
+        <ConfirmationModal
+          modal={confirmationModal}
+          onCancel={() => setConfirmationModal(null)}
+        />
+      )}
     </div>
   );
 };
+
+function ConfirmationModal({
+  modal,
+  onCancel,
+}: {
+  modal: ConfirmationModalState;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="workspace-modal-backdrop" role="presentation">
+      <div
+        className="workspace-modal confirmation-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="confirmation-modal-title"
+      >
+        <h3 id="confirmation-modal-title">{modal.title}</h3>
+        <p className="workspace-modal-copy">{modal.message}</p>
+        <div className="workspace-modal-actions">
+          <button type="button" className="btn btn-secondary" onClick={onCancel}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className={modal.tone === 'danger' ? 'btn btn-danger' : 'btn btn-primary'}
+            onClick={modal.onConfirm}
+          >
+            {modal.confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function monacoSafeKey(monaco: Parameters<NonNullable<React.ComponentProps<typeof MonacoEditor>['onMount']>>[1]) {
   return monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter;
@@ -1323,15 +1634,19 @@ function buildWorkspaceFiles(executionLanguage: ExecutionLanguage, initialCodeFi
     : defaults.filter((file) => file.path !== 'package.json').map((file) => ({ ...file }));
 
   const hasPackageJson = incomingFiles.some((file) => file.path === 'package.json');
-  const normalized = incomingFiles.map((file) => ({
+  const hasActiveQuestion = incomingFiles.some((file) => file.activeQuestion === true);
+  const normalized = incomingFiles.map((file, index) => ({
     ...file,
     displayName: file.displayName || basename(file.path),
     editable: file.path === 'package.json' ? false : file.editable !== false,
     sortOrder: typeof file.sortOrder === 'number' ? file.sortOrder : nextWorkspaceSortOrder(incomingFiles),
     readOnlyHint: file.path === 'package.json' ? 'Read only' : undefined,
+    enabledForCandidate: file.enabledForCandidate !== false,
+    activeQuestion: file.activeQuestion === true || (!hasActiveQuestion && index === 0 && file.path !== 'package.json'),
+    submitted: file.submitted === true,
   }));
 
-  if (!hasPackageJson) {
+  if ((executionLanguage === 'ANGULAR' || executionLanguage === 'REACT') && !hasPackageJson) {
     const defaultPackageFile = defaults.find((file) => file.path === 'package.json')!;
     normalized.push({
       path: defaultPackageFile.path,
@@ -1340,6 +1655,9 @@ function buildWorkspaceFiles(executionLanguage: ExecutionLanguage, initialCodeFi
       editable: false,
       sortOrder: defaultPackageFile.sortOrder,
       readOnlyHint: 'Read only',
+      enabledForCandidate: true,
+      activeQuestion: false,
+      submitted: false,
     });
   }
 
@@ -1347,11 +1665,46 @@ function buildWorkspaceFiles(executionLanguage: ExecutionLanguage, initialCodeFi
 }
 
 function defaultWorkspaceFiles(executionLanguage: ExecutionLanguage) {
-  return executionLanguage === 'REACT' ? DEFAULT_REACT_FILES : DEFAULT_ANGULAR_FILES;
+  if (executionLanguage === 'REACT') return DEFAULT_REACT_FILES;
+  if (executionLanguage === 'ANGULAR') return DEFAULT_ANGULAR_FILES;
+  if (executionLanguage === 'PYTHON') {
+    return [{
+      path: 'question-1.py',
+      displayName: 'Question 1',
+      content: DEFAULT_TEMPLATES.PYTHON,
+      editable: true,
+      sortOrder: 0,
+      enabledForCandidate: true,
+      activeQuestion: true,
+      submitted: false,
+      idealDurationMinutes: 10,
+    }];
+  }
+  return [{
+    path: 'Question1.java',
+    displayName: 'Question 1',
+    content: DEFAULT_TEMPLATES.JAVA,
+    editable: true,
+    sortOrder: 0,
+    enabledForCandidate: true,
+    activeQuestion: true,
+    submitted: false,
+    idealDurationMinutes: 10,
+  }];
+}
+
+function resetContentForWorkspaceFile(executionLanguage: ExecutionLanguage, path: string) {
+  if (executionLanguage === 'JAVA') return DEFAULT_TEMPLATES.JAVA;
+  if (executionLanguage === 'PYTHON') return DEFAULT_TEMPLATES.PYTHON;
+  return defaultWorkspaceFiles(executionLanguage).find((file) => file.path === path)?.content || '';
 }
 
 function isDeletableWorkspaceFile(executionLanguage: ExecutionLanguage, path: string) {
   return !defaultWorkspaceFiles(executionLanguage).some((file) => file.path === path);
+}
+
+function isPreparedGuidedQuestionTab(file: Pick<EditableCodeFile, 'enabledForCandidate' | 'activeQuestion' | 'submitted'>) {
+  return file.enabledForCandidate === false && file.activeQuestion !== true && file.submitted !== true;
 }
 
 function sortWorkspaceFiles(files: AngularWorkspaceFile[]) {
@@ -1373,22 +1726,36 @@ function stripWorkspaceHints(file: AngularWorkspaceFile): EditableCodeFile {
     content: file.content,
     editable: file.editable,
     sortOrder: file.sortOrder,
+    enabledForCandidate: file.enabledForCandidate,
+    activeQuestion: file.activeQuestion,
+    submitted: file.submitted,
+    idealDurationMinutes: file.idealDurationMinutes,
   };
 }
 
 function toPersistedWorkspaceFiles(executionLanguage: ExecutionLanguage, files: AngularWorkspaceFile[]) {
   return files
-    .filter((file) => file.editable && editableWorkspacePath(executionLanguage, file.path))
+    .filter((file) => editableWorkspacePath(executionLanguage, file.path))
     .map(stripWorkspaceHints);
 }
 
 function editableWorkspacePath(executionLanguage: ExecutionLanguage, path: string) {
-  return executionLanguage === 'REACT' ? path.startsWith('src/') : path.startsWith('src/app/');
+  if (executionLanguage === 'REACT') return path.startsWith('src/');
+  if (executionLanguage === 'ANGULAR') return path.startsWith('src/app/');
+  if (executionLanguage === 'PYTHON') return path.endsWith('.py');
+  return path.endsWith('.java');
 }
 
 function resolvePrimaryWorkspaceCode(executionLanguage: ExecutionLanguage, files: EditableCodeFile[]) {
-  const primaryPath = executionLanguage === 'REACT' ? 'src/App.tsx' : 'src/app/app.component.ts';
-  return files.find((file) => file.path === primaryPath)?.content || files.find((file) => file.editable)?.content || '';
+  const primaryPath = executionLanguage === 'REACT'
+    ? 'src/App.tsx'
+    : executionLanguage === 'ANGULAR'
+      ? 'src/app/app.component.ts'
+      : undefined;
+  return (primaryPath ? files.find((file) => file.path === primaryPath)?.content : undefined)
+    || files.find((file) => file.activeQuestion)?.content
+    || files.find((file) => file.editable)?.content
+    || '';
 }
 
 function basename(path: string) {
@@ -1401,7 +1768,69 @@ function fileLanguage(path: string) {
   if (path.endsWith('.html')) return 'html';
   if (path.endsWith('.css')) return 'css';
   if (path.endsWith('.json')) return 'json';
+  if (path.endsWith('.py')) return 'python';
+  if (path.endsWith('.java')) return 'java';
   return 'typescript';
+}
+
+function normalizeNewWorkspaceFileName(executionLanguage: ExecutionLanguage, rawName: string, fileCount: number) {
+  const trimmed = rawName.trim();
+  if (executionLanguage === 'REACT') return trimmed.replace(/^src\//, '');
+  if (executionLanguage === 'ANGULAR') return trimmed.replace(/^src\/app\//, '');
+  if (executionLanguage === 'PYTHON') return trimmed || `question-${fileCount}.py`;
+  return trimmed || `Question${fileCount}.java`;
+}
+
+function isAllowedWorkspaceFileName(executionLanguage: ExecutionLanguage, name: string) {
+  if (executionLanguage === 'REACT') return /\.(tsx|ts|css)$/i.test(name);
+  if (executionLanguage === 'ANGULAR') return /\.(ts|html|css)$/i.test(name);
+  if (executionLanguage === 'PYTHON') return /\.py$/i.test(name);
+  return /\.java$/i.test(name);
+}
+
+function resolveWorkspacePath(executionLanguage: ExecutionLanguage, name: string) {
+  if (executionLanguage === 'REACT') return `src/${name}`;
+  if (executionLanguage === 'ANGULAR') return `src/app/${name}`;
+  return name;
+}
+
+function workspaceFileHelpText(executionLanguage: ExecutionLanguage) {
+  if (executionLanguage === 'REACT') {
+    return 'Add a file inside src. React sandbox supports only .tsx, .ts, and .css files, for example components/SimpleCard.tsx.';
+  }
+  if (executionLanguage === 'ANGULAR') {
+    return 'Add a file inside src/app, for example simple-card.component.ts.';
+  }
+  if (executionLanguage === 'PYTHON') {
+    return 'Add an interviewer-controlled Python question tab. Leave blank to create the next question automatically, or enter a .py file name.';
+  }
+  return 'Add an interviewer-controlled Java question tab. Leave blank to create the next question automatically, or enter a .java file name.';
+}
+
+function workspaceFilePlaceholder(executionLanguage: ExecutionLanguage, nextIndex: number) {
+  if (executionLanguage === 'REACT') return 'components/SimpleCard.tsx';
+  if (executionLanguage === 'ANGULAR') return 'simple-card.component.ts';
+  if (executionLanguage === 'PYTHON') return `question-${nextIndex}.py`;
+  return `Question${nextIndex}.java`;
+}
+
+function nextGuidedQuestionIndex(executionLanguage: ExecutionLanguage, files: AngularWorkspaceFile[]) {
+  if (executionLanguage !== 'JAVA' && executionLanguage !== 'PYTHON') {
+    return files.length + 1;
+  }
+
+  return files
+    .filter((file) => editableWorkspacePath(executionLanguage, file.path))
+    .reduce((highest, file, index) => Math.max(highest, guidedQuestionNumber(file.path, index + 1)), 0) + 1;
+}
+
+function guidedQuestionDisplayName(path: string, fallbackIndex: number) {
+  return `Question ${guidedQuestionNumber(path, fallbackIndex)}`;
+}
+
+function guidedQuestionNumber(path: string, fallbackIndex: number) {
+  const match = basename(path).match(/(\d+)/);
+  return match ? Number(match[1]) : fallbackIndex;
 }
 
 export default Editor;

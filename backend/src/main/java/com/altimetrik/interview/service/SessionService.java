@@ -32,6 +32,7 @@ import com.altimetrik.interview.entity.Participant;
 import com.altimetrik.interview.entity.ParticipantAccessChallenge;
 import com.altimetrik.interview.entity.RunResult;
 import com.altimetrik.interview.entity.SessionActivityEvent;
+import com.altimetrik.interview.enums.ActivityEventSeverity;
 import com.altimetrik.interview.enums.ActivityEventType;
 import com.altimetrik.interview.enums.AvMode;
 import com.altimetrik.interview.enums.CodeStorageMode;
@@ -86,6 +87,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 
 @Service
@@ -104,6 +106,9 @@ public class SessionService {
     private static final int MAX_WORKSPACE_FILE_COUNT = 20;
     private static final int MAX_WORKSPACE_TOTAL_CHARS = 300_000;
     private static final int MAX_WORKSPACE_FILE_CHARS = 100_000;
+    private static final long IN_APP_TAB_AWAY_SUSPICIOUS_MS = 10_000L;
+    private static final long EXTERNAL_TAB_AWAY_SUSPICIOUS_MS = 30_000L;
+    private static final long IN_APP_AV_OFF_SUSPICIOUS_MS = 15_000L;
     private static final String SCENARIO_REFRESH = "REFRESH_OR_REOPEN";
     private static final String SCENARIO_CONNECTION = "CONNECTION_RECOVERY";
     private static final String SCENARIO_NETWORK = "NETWORK_CHANGE";
@@ -659,16 +664,25 @@ public class SessionService {
 
     @Transactional
     public SessionResponse endSession(String sessionId, EndSessionRequest request) {
-        return endSession(sessionId, request.getFinalCode(), request.getCodeFiles(), null);
+        return endSession(sessionId, request.getFinalCode(), request.getCodeFiles(), request.getActiveFilePath(), null);
     }
 
     @Transactional
     public SessionResponse endSession(String sessionId, String finalCode, FeedbackRequest feedbackRequest) {
-        return endSession(sessionId, finalCode, null, feedbackRequest);
+        return endSession(sessionId, finalCode, null, null, feedbackRequest);
     }
 
     @Transactional
     public SessionResponse endSession(String sessionId, String finalCode, List<EditableCodeFileDto> codeFiles, FeedbackRequest feedbackRequest) {
+        return endSession(sessionId, finalCode, codeFiles, null, feedbackRequest);
+    }
+
+    @Transactional
+    public SessionResponse endSession(String sessionId,
+                                      String finalCode,
+                                      List<EditableCodeFileDto> codeFiles,
+                                      String activeFilePath,
+                                      FeedbackRequest feedbackRequest) {
         InterviewSession session = getRequiredSession(sessionId);
         if (session.getStatus() == SessionStatus.ENDED) {
             throw new IllegalArgumentException("Session is already ended");
@@ -681,14 +695,22 @@ public class SessionService {
         codeUpdateRequest.setUpdatedByRole(ParticipantRole.INTERVIEWER);
         upsertCodeState(sessionId, codeUpdateRequest);
 
-        ExecuteResponse executionResult = sandboxClientService.execute(buildExecuteRequest(sessionId, finalCode, codeFiles, session.getTechnology()));
-        RunResult runResult = runResultRepository.findTopBySessionIdOrderByCompiledAtDesc(sessionId).orElseGet(RunResult::new);
+        List<EditableCodeFileDto> effectiveFiles = codeFiles != null && !codeFiles.isEmpty()
+                ? codeFiles
+                : resolveEditableFiles(session, codeStateRepository.findBySessionId(sessionId).orElse(null));
+        String executableCode = resolveExecutableCodeForPath(effectiveFiles, activeFilePath, finalCode == null ? "" : finalCode);
+        ExecuteResponse executionResult = sandboxClientService.execute(buildExecuteRequest(sessionId, executableCode, effectiveFiles, activeFilePath, session.getTechnology()));
+        RunResult runResult = runResultRepository.findTopBySessionIdAndFilePathIsNullOrderByCompiledAtDesc(sessionId).orElseGet(RunResult::new);
         runResult.setSessionId(sessionId);
+        runResult.setFilePath(null);
+        runResult.setDisplayName(null);
+        runResult.setSourceSnapshot(null);
         runResult.setStdout(executionResult.getStdout());
         runResult.setStderr((executionResult.getStderr() == null || executionResult.getStderr().isBlank())
                 ? String.join("\n", executionResult.getCompileErrors() == null ? List.of() : executionResult.getCompileErrors())
                 : executionResult.getStderr());
         runResult.setExitStatus(executionResult.getExitCode());
+        runResult.setExecutionTimeMs(executionResult.getExecutionTimeMs());
         runResultRepository.save(runResult);
         captureFinalPreviewIfAvailable(session, executionResult);
 
@@ -713,9 +735,12 @@ public class SessionService {
 
         upsertCodeState(sessionId, finalCode == null ? "" : finalCode, ParticipantRole.INTERVIEWER);
 
-        ExecuteResponse executionResult = sandboxClientService.execute(buildExecuteRequest(sessionId, finalCode == null ? "" : finalCode, null, session.getTechnology()));
-        RunResult runResult = runResultRepository.findTopBySessionIdOrderByCompiledAtDesc(sessionId).orElseGet(RunResult::new);
+        ExecuteResponse executionResult = sandboxClientService.execute(buildExecuteRequest(sessionId, finalCode == null ? "" : finalCode, null, null, session.getTechnology()));
+        RunResult runResult = runResultRepository.findTopBySessionIdAndFilePathIsNullOrderByCompiledAtDesc(sessionId).orElseGet(RunResult::new);
         runResult.setSessionId(sessionId);
+        runResult.setFilePath(null);
+        runResult.setDisplayName(null);
+        runResult.setSourceSnapshot(null);
         runResult.setStdout(executionResult.getStdout());
         runResult.setStderr((executionResult.getStderr() == null || executionResult.getStderr().isBlank())
                 ? String.join("\n", executionResult.getCompileErrors() == null ? List.of() : executionResult.getCompileErrors())
@@ -763,11 +788,17 @@ public class SessionService {
             throw new IllegalArgumentException("Only interviewee activity is tracked");
         }
 
+        int occurrenceCount = Math.toIntExact(sessionActivityEventRepository.countBySessionIdAndEventType(sessionId, request.getEventType()) + 1);
+        ActivityEventSeverity severity = resolveActivitySeverity(session, request, occurrenceCount);
         SessionActivityEvent event = new SessionActivityEvent();
         event.setSessionId(sessionId);
         event.setParticipantRole(request.getParticipantRole());
         event.setEventType(request.getEventType());
+        event.setSeverity(severity);
         event.setDetail(buildActivityDetail(request));
+        event.setCandidateMessage(buildCandidateActivityMessage(request, severity));
+        event.setDurationMs(normalizeDurationMs(request.getDurationMs()));
+        event.setOccurrenceCount(occurrenceCount);
         event = sessionActivityEventRepository.save(event);
         return toActivityEventDto(event);
     }
@@ -1208,19 +1239,71 @@ public class SessionService {
 
     private void upsertCodeState(String sessionId, CodeUpdateRequest request) {
         CodeState codeState = codeStateRepository.findBySessionId(sessionId).orElseGet(CodeState::new);
-        if (request.getVersion() != null && codeState.getVersion() != null && request.getVersion() < codeState.getVersion()) {
-            throw new IllegalArgumentException("Code version is stale");
-        }
         CodeStorageMode storageMode = resolveStorageMode(codeState, request);
         List<EditableCodeFileDto> editableFiles = resolveEditableFilesForUpdate(sessionId, request, storageMode, codeState);
+        Long storedVersion = codeState.getVersion() == null ? 0L : codeState.getVersion();
+        Long requestedVersion = request.getVersion();
+        String nextLatestCode = resolvePrimaryCode(editableFiles, request.getCode());
+
+        if (requestedVersion != null && requestedVersion < storedVersion) {
+            log.debug("Ignoring stale code update for session {} from {}. requestedVersion={} storedVersion={}",
+                    sessionId, request.getUpdatedByRole(), requestedVersion, storedVersion);
+            return;
+        }
+        if (requestedVersion != null && requestedVersion.equals(storedVersion)) {
+            boolean sameCodeState = hasSameCodeState(sessionId, codeState, nextLatestCode, editableFiles);
+            if (sameCodeState || request.getUpdatedByRole() != ParticipantRole.INTERVIEWER) {
+                log.debug("Ignoring same-version code update for session {} from {}. requestedVersion={} storedVersion={} sameCodeState={}",
+                        sessionId, request.getUpdatedByRole(), requestedVersion, storedVersion, sameCodeState);
+                return;
+            }
+        }
+
         codeState.setSessionId(sessionId);
-        codeState.setLatestCode(resolvePrimaryCode(editableFiles, request.getCode()));
+        codeState.setLatestCode(nextLatestCode);
         codeState.setStorageMode(storageMode);
         codeState.setUpdatedAt(nowUtc());
         codeState.setUpdatedByRole(request.getUpdatedByRole().name());
-        codeState.setVersion(codeState.getVersion() == null ? 1L : codeState.getVersion() + 1);
+        codeState.setVersion(resolveAcceptedCodeVersion(storedVersion, requestedVersion));
         codeStateRepository.save(codeState);
         replaceCodeFiles(sessionId, editableFiles);
+    }
+
+    private Long resolveAcceptedCodeVersion(Long storedVersion, Long requestedVersion) {
+        if (requestedVersion == null) {
+            return storedVersion + 1;
+        }
+        return requestedVersion > storedVersion ? requestedVersion : storedVersion + 1;
+    }
+
+    private boolean hasSameCodeState(String sessionId,
+                                     CodeState codeState,
+                                     String nextLatestCode,
+                                     List<EditableCodeFileDto> nextFiles) {
+        if (!Objects.equals(codeState.getLatestCode(), nextLatestCode)) {
+            return false;
+        }
+        List<EditableCodeFileDto> existingFiles = codeFileRepository.findBySessionIdOrderBySortOrderAscCreatedAtAsc(sessionId).stream()
+                .map(this::toEditableCodeFileDto)
+                .toList();
+        if (existingFiles.size() != nextFiles.size()) {
+            return false;
+        }
+        for (int index = 0; index < existingFiles.size(); index++) {
+            EditableCodeFileDto existing = existingFiles.get(index);
+            EditableCodeFileDto next = nextFiles.get(index);
+            if (!Objects.equals(existing.getPath(), next.getPath())
+                    || !Objects.equals(existing.getContent(), next.getContent())
+                    || !Objects.equals(existing.getEditable(), next.getEditable())
+                    || !Objects.equals(existing.getSortOrder(), next.getSortOrder())
+                    || !Objects.equals(existing.getEnabledForCandidate(), next.getEnabledForCandidate())
+                    || !Objects.equals(existing.getActiveQuestion(), next.getActiveQuestion())
+                    || !Objects.equals(existing.getSubmitted(), next.getSubmitted())
+                    || !Objects.equals(existing.getIdealDurationMinutes(), next.getIdealDurationMinutes())) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private SessionResponse toSessionResponse(InterviewSession session, boolean includeDetails) {
@@ -1231,7 +1314,7 @@ public class SessionService {
 
         CodeState codeState = codeStateRepository.findBySessionId(session.getId()).orElse(null);
         List<EditableCodeFileDto> editableFiles = includeDetails ? resolveEditableFiles(session, codeState) : List.of();
-        RunResult runResult = runResultRepository.findTopBySessionIdOrderByCompiledAtDesc(session.getId()).orElse(null);
+        RunResult runResult = runResultRepository.findTopBySessionIdAndFilePathIsNullOrderByCompiledAtDesc(session.getId()).orElse(null);
         Feedback feedback = feedbackRepository.findBySessionId(session.getId()).orElse(null);
         FrontendWorkspace frontendWorkspace = frontendWorkspaceRepository.findById(session.getId()).orElse(null);
         List<ActivityEventDto> activityEvents = includeDetails
@@ -1267,12 +1350,7 @@ public class SessionService {
                 .latestCode(includeDetails && codeState != null ? codeState.getLatestCode() : null)
                 .codeFiles(editableFiles)
                 .codeVersion(codeState != null ? codeState.getVersion() : 0L)
-                .finalRunResult(runResult == null ? null : RunResultDto.builder()
-                        .compiledAt(runResult.getCompiledAt())
-                        .stdout(runResult.getStdout())
-                        .stderr(runResult.getStderr())
-                        .exitStatus(runResult.getExitStatus())
-                        .build())
+                .finalRunResult(runResult == null ? null : toRunResultDto(runResult))
                 .feedback(feedback == null ? null : FeedbackDto.builder()
                         .rating(feedback.getRating())
                         .comments(feedback.getComments())
@@ -1504,6 +1582,71 @@ public class SessionService {
         };
     }
 
+    private ActivityEventSeverity resolveActivitySeverity(InterviewSession session, ActivityEventRequest request, int occurrenceCount) {
+        long durationMs = normalizeDurationMs(request.getDurationMs());
+        boolean inAppAv = session.getAvMode() == AvMode.IN_APP;
+
+        return switch (request.getEventType()) {
+            case TAB_HIDDEN -> resolveFocusAwaySeverity(inAppAv, durationMs, occurrenceCount);
+            case PASTE_IN_EDITOR, EXTERNAL_DROP_BLOCKED -> occurrenceCount >= 2
+                    ? ActivityEventSeverity.SUSPICIOUS
+                    : ActivityEventSeverity.WARNING;
+            case MICROPHONE_DISABLED_MANUALLY, CAMERA_DISABLED_MANUALLY -> {
+                if (!inAppAv) {
+                    yield ActivityEventSeverity.INFO;
+                }
+                yield durationMs >= IN_APP_AV_OFF_SUSPICIOUS_MS || occurrenceCount >= 2
+                        ? ActivityEventSeverity.SUSPICIOUS
+                        : ActivityEventSeverity.WARNING;
+            }
+            case CAMERA_STREAM_LOST, NO_FACE_DETECTED, MULTIPLE_FACES_DETECTED -> inAppAv
+                    ? ActivityEventSeverity.SUSPICIOUS
+                    : ActivityEventSeverity.INFO;
+        };
+    }
+
+    private ActivityEventSeverity resolveFocusAwaySeverity(boolean inAppAv, long durationMs, int occurrenceCount) {
+        if (inAppAv) {
+            return durationMs >= IN_APP_TAB_AWAY_SUSPICIOUS_MS || occurrenceCount >= 2
+                    ? ActivityEventSeverity.SUSPICIOUS
+                    : ActivityEventSeverity.WARNING;
+        }
+        return durationMs >= EXTERNAL_TAB_AWAY_SUSPICIOUS_MS || occurrenceCount >= 3
+                ? ActivityEventSeverity.SUSPICIOUS
+                : ActivityEventSeverity.INFO;
+    }
+
+    private String buildCandidateActivityMessage(ActivityEventRequest request, ActivityEventSeverity severity) {
+        boolean suspicious = severity == ActivityEventSeverity.SUSPICIOUS;
+        return switch (request.getEventType()) {
+            case TAB_HIDDEN -> suspicious
+                    ? "Changing tabs during the live interview is marked as suspicious."
+                    : "Please stay on the interview tab. Repeated or long focus changes may be marked as suspicious.";
+            case MICROPHONE_DISABLED_MANUALLY, CAMERA_DISABLED_MANUALLY -> suspicious
+                    ? "Switching off audio or video during the live interview is marked as suspicious."
+                    : "Please keep your interview audio and video enabled. Repeated or extended interruptions may be marked as suspicious.";
+            case PASTE_IN_EDITOR -> suspicious
+                    ? "Pasting external content is not allowed and has been recorded."
+                    : "Pasting external content is not allowed. Repeating this action will be marked as suspicious.";
+            case EXTERNAL_DROP_BLOCKED -> suspicious
+                    ? "Dragging external content into the editor is not allowed and has been recorded."
+                    : "Dragging external content into the editor is not allowed. Repeating this action will be marked as suspicious.";
+            case CAMERA_STREAM_LOST -> suspicious
+                    ? "Camera interruption during the live interview is marked as suspicious."
+                    : "Please keep your camera active throughout the interview.";
+            case NO_FACE_DETECTED -> suspicious
+                    ? "Face not visible during the live interview is marked as suspicious."
+                    : "Please keep your face visible in the camera frame.";
+            case MULTIPLE_FACES_DETECTED -> suspicious
+                    ? "Multiple faces detected during the live interview is marked as suspicious."
+                    : "Only the candidate should be visible in the camera frame.";
+        };
+    }
+
+    private long normalizeDurationMs(Long durationMs) {
+        return durationMs == null || durationMs < 0 ? 0L : durationMs;
+    }
+
     private String buildActivityDetail(ActivityEventRequest request) {
         if (request.getDetail() != null && !request.getDetail().isBlank()) {
             return request.getDetail().trim();
@@ -1526,7 +1669,11 @@ public class SessionService {
                 .id(event.getId())
                 .participantRole(event.getParticipantRole())
                 .eventType(event.getEventType())
+                .severity(event.getSeverity() == null ? ActivityEventSeverity.WARNING : event.getSeverity())
                 .detail(event.getDetail())
+                .candidateMessage(event.getCandidateMessage())
+                .durationMs(event.getDurationMs())
+                .occurrenceCount(event.getOccurrenceCount())
                 .createdAt(event.getCreatedAt())
                 .build();
     }
@@ -1635,6 +1782,12 @@ public class SessionService {
         if (session.getFinalPreviewPath() == null || session.getFinalPreviewPath().isBlank()) {
             return null;
         }
+        if (!finalPreviewStorageService.hasPreview(session.getFinalPreviewPath())) {
+            log.debug("Final preview URL unavailable for session {} because stored preview is missing at {}",
+                    session.getId(),
+                    session.getFinalPreviewPath());
+            return null;
+        }
         String finalPreviewUrl = "/api/sessions/" + session.getId() + "/final-preview/";
         log.debug("Resolved final preview URL for session {} finalPreviewPath={} finalPreviewUrl={}",
                 session.getId(),
@@ -1701,10 +1854,12 @@ public class SessionService {
     private ExecuteRequest buildExecuteRequest(String sessionId,
                                               String sourceCode,
                                               List<EditableCodeFileDto> codeFiles,
+                                              String activeFilePath,
                                               TechnologySkill technology) {
         ExecuteRequest request = new ExecuteRequest(sourceCode);
         request.setSessionId(sessionId);
         request.setLanguage(toExecutionLanguage(technology));
+        request.setActiveFilePath(activeFilePath);
         if (supportsPersistentFrontendWorkspace(technology)) {
             request.setCodeFiles(codeFiles != null && !codeFiles.isEmpty()
                     ? codeFiles
@@ -1713,6 +1868,38 @@ public class SessionService {
                             .toList());
         }
         return request;
+    }
+
+    @Transactional
+    public void recordQuestionRunResult(ExecuteRequest request, ExecuteResponse response) {
+        if (request == null || response == null || request.getSessionId() == null || request.getSessionId().isBlank()) {
+            return;
+        }
+        if (request.getLanguage() != ExecutionLanguage.JAVA && request.getLanguage() != ExecutionLanguage.PYTHON) {
+            return;
+        }
+
+        String filePath = request.getActiveFilePath();
+        if (filePath == null || filePath.isBlank()) {
+            filePath = request.getLanguage() == ExecutionLanguage.PYTHON ? "question-1.py" : "Question1.java";
+        }
+        String normalizedPath = filePath.replace('\\', '/').trim();
+        String displayName = codeFileRepository.findBySessionIdAndFilePath(request.getSessionId(), normalizedPath)
+                .map(CodeFile::getDisplayName)
+                .orElse(normalizedPath);
+
+        RunResult runResult = new RunResult();
+        runResult.setSessionId(request.getSessionId());
+        runResult.setFilePath(normalizedPath);
+        runResult.setDisplayName(displayName);
+        runResult.setSourceSnapshot(request.getSourceCode() == null ? "" : request.getSourceCode());
+        runResult.setStdout(response.getStdout());
+        runResult.setStderr((response.getStderr() == null || response.getStderr().isBlank())
+                ? String.join("\n", response.getCompileErrors() == null ? List.of() : response.getCompileErrors())
+                : response.getStderr());
+        runResult.setExitStatus(response.getExitCode());
+        runResult.setExecutionTimeMs(response.getExecutionTimeMs());
+        runResultRepository.save(runResult);
     }
 
     private ExecutionLanguage toExecutionLanguage(TechnologySkill technology) {
@@ -1735,14 +1922,14 @@ public class SessionService {
 
     private CodeStorageMode storageModeFor(TechnologySkill technology) {
         return switch (technology) {
-            case ANGULAR, REACT -> CodeStorageMode.MULTI_FILE;
+            case JAVA, PYTHON, ANGULAR, REACT -> CodeStorageMode.MULTI_FILE;
             default -> CodeStorageMode.SINGLE_FILE;
         };
     }
 
     private List<EditableCodeFileDto> buildDefaultEditableFiles(TechnologySkill technology) {
         return switch (technology) {
-            case PYTHON -> List.of(buildEditableFile("main.py", "main.py", DEFAULT_PYTHON_TEMPLATE, 0));
+            case PYTHON -> List.of(buildEditableFile("question-1.py", "Question 1", DEFAULT_PYTHON_TEMPLATE, 0));
             case ANGULAR -> List.of(
                     buildEditableFile("src/app/app.component.ts", "app.component.ts", DEFAULT_ANGULAR_COMPONENT_TS, 0),
                     buildEditableFile("src/app/app.component.html", "app.component.html", DEFAULT_ANGULAR_COMPONENT_HTML, 1),
@@ -1753,7 +1940,7 @@ public class SessionService {
                     buildEditableFile("src/App.css", "App.css", DEFAULT_REACT_APP_CSS, 1),
                     buildEditableFile("src/main.tsx", "main.tsx", DEFAULT_REACT_MAIN_TSX, 2)
             );
-            default -> List.of(buildEditableFile("Solution.java", "Solution.java", DEFAULT_JAVA_TEMPLATE, 0));
+            default -> List.of(buildEditableFile("Question1.java", "Question 1", DEFAULT_JAVA_TEMPLATE, 0));
         };
     }
 
@@ -1764,6 +1951,9 @@ public class SessionService {
                 .content(content)
                 .editable(true)
                 .sortOrder(sortOrder)
+                .enabledForCandidate(sortOrder == 0)
+                .activeQuestion(sortOrder == 0)
+                .submitted(false)
                 .build();
     }
 
@@ -1782,19 +1972,19 @@ public class SessionService {
                                                                     CodeStorageMode storageMode,
                                                                     CodeState codeState) {
         if (request.getCodeFiles() != null && !request.getCodeFiles().isEmpty()) {
-            return request.getCodeFiles().stream()
+            return normalizeEditableFileList(request.getCodeFiles().stream()
                     .map(this::normalizeEditableFile)
-                    .toList();
+                    .toList());
         }
         if (storageMode == CodeStorageMode.MULTI_FILE) {
             List<EditableCodeFileDto> existingFiles = codeFileRepository.findBySessionIdOrderBySortOrderAscCreatedAtAsc(sessionId).stream()
                     .map(this::toEditableCodeFileDto)
                     .toList();
             if (!existingFiles.isEmpty()) {
-                return existingFiles;
+                return normalizeEditableFileList(existingFiles);
             }
         }
-        return List.of(buildEditableFile(resolveDefaultFilePath(codeState), resolveDefaultFileName(codeState), request.getCode() == null ? "" : request.getCode(), 0));
+        return normalizeEditableFileList(List.of(buildEditableFile(resolveDefaultFilePath(codeState), resolveDefaultFileName(codeState), request.getCode() == null ? "" : request.getCode(), 0)));
     }
 
     private String resolveDefaultFilePath(CodeState codeState) {
@@ -1812,7 +2002,41 @@ public class SessionService {
                 .content(file.getContent() == null ? "" : file.getContent())
                 .editable(file.getEditable() == null ? true : file.getEditable())
                 .sortOrder(file.getSortOrder() == null ? 0 : file.getSortOrder())
+                .enabledForCandidate(file.getEnabledForCandidate() == null ? true : file.getEnabledForCandidate())
+                .activeQuestion(file.getActiveQuestion() == null ? false : file.getActiveQuestion())
+                .submitted(file.getSubmitted() == null ? false : file.getSubmitted())
+                .idealDurationMinutes(file.getIdealDurationMinutes())
                 .build();
+    }
+
+    private List<EditableCodeFileDto> normalizeEditableFileList(List<EditableCodeFileDto> files) {
+        if (files == null || files.isEmpty()) {
+            return List.of();
+        }
+
+        boolean hasActive = files.stream().anyMatch(file -> Boolean.TRUE.equals(file.getActiveQuestion()));
+        List<EditableCodeFileDto> normalized = new ArrayList<>();
+        for (int index = 0; index < files.size(); index++) {
+            EditableCodeFileDto file = files.get(index);
+            if (hasActive || index > 0) {
+                normalized.add(file);
+                continue;
+            }
+            normalized.add(EditableCodeFileDto.builder()
+                    .path(file.getPath())
+                    .displayName(file.getDisplayName())
+                    .content(file.getContent())
+                    .editable(file.getEditable())
+                    .sortOrder(file.getSortOrder())
+                    .enabledForCandidate(file.getEnabledForCandidate())
+                    .activeQuestion(true)
+                    .submitted(file.getSubmitted())
+                    .idealDurationMinutes(file.getIdealDurationMinutes())
+                    .runResult(file.getRunResult())
+                    .changedAfterLastRun(file.getChangedAfterLastRun())
+                    .build());
+        }
+        return normalized;
     }
 
     private void validateWorkspaceFiles(TechnologySkill technology, List<EditableCodeFileDto> files) {
@@ -1855,6 +2079,14 @@ public class SessionService {
                 if (!(path.endsWith(".tsx") || path.endsWith(".ts") || path.endsWith(".css"))) {
                     throw new IllegalArgumentException("Only .tsx, .ts, and .css files are supported for React interviews");
                 }
+            } else if (technology == TechnologySkill.JAVA) {
+                if (!path.endsWith(".java")) {
+                    throw new IllegalArgumentException("Only .java question tabs are supported for Java interviews");
+                }
+            } else if (technology == TechnologySkill.PYTHON) {
+                if (!path.endsWith(".py")) {
+                    throw new IllegalArgumentException("Only .py question tabs are supported for Python interviews");
+                }
             }
         }
 
@@ -1865,9 +2097,28 @@ public class SessionService {
 
     private String resolvePrimaryCode(List<EditableCodeFileDto> editableFiles, String fallbackCode) {
         if (editableFiles != null && !editableFiles.isEmpty()) {
-            return editableFiles.get(0).getContent();
+            return editableFiles.stream()
+                    .filter(file -> Boolean.TRUE.equals(file.getActiveQuestion()))
+                    .findFirst()
+                    .orElse(editableFiles.get(0))
+                    .getContent();
         }
         return fallbackCode;
+    }
+
+    private String resolveExecutableCodeForPath(List<EditableCodeFileDto> editableFiles, String activeFilePath, String fallbackCode) {
+        if (editableFiles == null || editableFiles.isEmpty()) {
+            return fallbackCode;
+        }
+        if (activeFilePath != null && !activeFilePath.isBlank()) {
+            String normalizedPath = activeFilePath.replace('\\', '/').trim();
+            return editableFiles.stream()
+                    .filter(file -> normalizedPath.equals(file.getPath()))
+                    .map(EditableCodeFileDto::getContent)
+                    .findFirst()
+                    .orElse(fallbackCode);
+        }
+        return resolvePrimaryCode(editableFiles, fallbackCode);
     }
 
     private boolean supportsPersistentFrontendWorkspace(TechnologySkill technology) {
@@ -1890,6 +2141,10 @@ public class SessionService {
                     codeFile.setContent(file.getContent());
                     codeFile.setSortOrder(file.getSortOrder());
                     codeFile.setEditable(Boolean.TRUE.equals(file.getEditable()));
+                    codeFile.setEnabledForCandidate(file.getEnabledForCandidate() == null || Boolean.TRUE.equals(file.getEnabledForCandidate()));
+                    codeFile.setActiveQuestion(Boolean.TRUE.equals(file.getActiveQuestion()));
+                    codeFile.setSubmitted(Boolean.TRUE.equals(file.getSubmitted()));
+                    codeFile.setIdealDurationMinutes(file.getIdealDurationMinutes());
                     return codeFile;
                 })
                 .toList();
@@ -1901,7 +2156,7 @@ public class SessionService {
                 .map(this::toEditableCodeFileDto)
                 .toList();
         if (!persistedFiles.isEmpty()) {
-            return persistedFiles;
+            return attachRunResults(session.getId(), normalizeEditableFileList(persistedFiles));
         }
         if (codeState == null || codeState.getLatestCode() == null) {
             return List.of();
@@ -1918,7 +2173,7 @@ public class SessionService {
                 legacyFiles.add(file);
             }
         }
-        return legacyFiles;
+        return attachRunResults(session.getId(), normalizeEditableFileList(legacyFiles));
     }
 
     private EditableCodeFileDto toEditableCodeFileDto(CodeFile file) {
@@ -1928,6 +2183,51 @@ public class SessionService {
                 .content(file.getContent())
                 .editable(file.getEditable())
                 .sortOrder(file.getSortOrder())
+                .enabledForCandidate(file.getEnabledForCandidate() == null || Boolean.TRUE.equals(file.getEnabledForCandidate()))
+                .activeQuestion(Boolean.TRUE.equals(file.getActiveQuestion()))
+                .submitted(Boolean.TRUE.equals(file.getSubmitted()))
+                .idealDurationMinutes(file.getIdealDurationMinutes())
+                .build();
+    }
+
+    private List<EditableCodeFileDto> attachRunResults(String sessionId, List<EditableCodeFileDto> files) {
+        if (files == null || files.isEmpty()) {
+            return List.of();
+        }
+        Map<String, RunResult> latestByPath = new HashMap<>();
+        runResultRepository.findBySessionIdAndFilePathIsNotNullOrderByCompiledAtDesc(sessionId)
+                .forEach(result -> latestByPath.putIfAbsent(result.getFilePath(), result));
+
+        return files.stream()
+                .map(file -> {
+                    RunResult result = latestByPath.get(file.getPath());
+                    return EditableCodeFileDto.builder()
+                            .path(file.getPath())
+                            .displayName(file.getDisplayName())
+                            .content(file.getContent())
+                            .editable(file.getEditable())
+                            .sortOrder(file.getSortOrder())
+                            .enabledForCandidate(file.getEnabledForCandidate())
+                            .activeQuestion(file.getActiveQuestion())
+                            .submitted(file.getSubmitted())
+                            .idealDurationMinutes(file.getIdealDurationMinutes())
+                            .runResult(result == null ? null : toRunResultDto(result))
+                            .changedAfterLastRun(result != null && !Objects.equals(file.getContent(), result.getSourceSnapshot()))
+                            .build();
+                })
+                .toList();
+    }
+
+    private RunResultDto toRunResultDto(RunResult result) {
+        return RunResultDto.builder()
+                .compiledAt(result.getCompiledAt())
+                .filePath(result.getFilePath())
+                .displayName(result.getDisplayName())
+                .sourceSnapshot(result.getSourceSnapshot())
+                .stdout(result.getStdout())
+                .stderr(result.getStderr())
+                .exitStatus(result.getExitStatus())
+                .executionTimeMs(result.getExecutionTimeMs())
                 .build();
     }
 

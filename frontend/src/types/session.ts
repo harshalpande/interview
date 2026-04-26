@@ -10,6 +10,7 @@ export type SessionStatus =
 export type ParticipantConnectionStatus = 'DISCONNECTED' | 'CONNECTED' | 'AWAITING_APPROVAL';
 export type FeedbackRating = 'EXCELLENT' | 'GOOD' | 'FAIR' | 'BAD' | 'DISQUALIFIED';
 export type AvMode = 'IN_APP' | 'EXTERNAL';
+export type ActivityEventSeverity = 'INFO' | 'WARNING' | 'SUSPICIOUS';
 export type ActivityEventType =
   | 'TAB_HIDDEN'
   | 'PASTE_IN_EDITOR'
@@ -61,9 +62,13 @@ export interface Participant {
 
 export interface RunResult {
   compiledAt: string;
+  filePath?: string | null;
+  displayName?: string | null;
+  sourceSnapshot?: string | null;
   stdout: string;
   stderr: string;
   exitStatus: number;
+  executionTimeMs?: number | null;
 }
 
 export interface FrontendWorkspace {
@@ -88,7 +93,11 @@ export interface ActivityEvent {
   id: string;
   participantRole: ParticipantRole;
   eventType: ActivityEventType;
+  severity?: ActivityEventSeverity;
   detail: string;
+  candidateMessage?: string | null;
+  durationMs?: number | null;
+  occurrenceCount?: number | null;
   createdAt: string;
 }
 
@@ -105,6 +114,12 @@ export interface EditableCodeFile {
   content: string;
   editable: boolean;
   sortOrder: number;
+  enabledForCandidate?: boolean;
+  activeQuestion?: boolean;
+  submitted?: boolean;
+  idealDurationMinutes?: number | null;
+  runResult?: RunResult | null;
+  changedAfterLastRun?: boolean | null;
 }
 
 export interface SessionResponse {
@@ -254,12 +269,14 @@ export interface FeedbackRequest {
 export interface EndSessionRequest {
   finalCode: string;
   codeFiles?: EditableCodeFile[];
+  activeFilePath?: string;
 }
 
 export interface ActivityEventRequest {
   participantRole: ParticipantRole;
   eventType: ActivityEventType;
   detail: string;
+  durationMs?: number;
 }
 
 export interface IdentityCaptureRequest {

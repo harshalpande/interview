@@ -7,16 +7,22 @@
 - Validate interviewee identity (name/email must match what interviewer registered).
 - Live collaborative editing (WebSocket updates).
 - Run Java code through a dedicated sandbox service with basic sandboxing (timeout + memory limits).
+- Guided Java/Python question tabs let interviewers reveal one question at a time, candidates freeze completed attempts, and the platform preserves run evidence per question.
 - Sandbox internals now follow a runner-based execution path so additional language runners can be added without changing the external compile/run workflow.
 - Persist sessions and results in H2 (file-based for Docker; file-based local by default).
 
 ## Key Features
 
 - Monaco editor with Run/Reset, theme toggle, and `Ctrl+Enter` run shortcut.
+- Java/Python Guided Question Tabs with `Show` / `Freeze`, active-tab execution, and question-level run result preservation.
+- Angular/React editor builds use Warm Watcher Live Preview for fast feedback from persistent framework watchers while preserving strict final result builds.
 - Mandatory pre-interview identity capture for every session, independent of the selected live AV mode.
 - Configurable live AV mode at session creation, allowing the interviewer to choose either the built-in platform AV experience or an external channel such as Microsoft Teams or Zoom.
 - Two-way live audio/video session controls with pre-start media readiness, interviewer/interviewee toggles, explicit no-video states, and interviewer-visible suspicious activity signals during feedback when the session is configured for in-app AV.
-- Suspicious external drag attempts into the editor are blocked and surfaced as interviewer-visible monitoring activity.
+- Progressive Integrity Warnings classify candidate activity as informational, warning, or suspicious based on AV mode, repetition, and duration.
+- Paste and external drag/drop attempts are blocked for the interviewee, warned on first occurrence, and marked suspicious when repeated.
+- Focus-away events are treated strictly for in-app AV and more cautiously for external Teams/Zoom-style AV to reduce false positives.
+- Candidate-facing integrity notices explain what behavior should be corrected; interviewer alerts are reserved for confirmed suspicious events.
 - Session dashboard with status + summary.
 - Persistent session resume for active interviews, including reconnect/redeploy recovery, interviewer approval for high-risk interviewee resumes, and automatic incomplete handling after interruption timeout.
 - Token expiry handling:
@@ -28,12 +34,13 @@
 
 ## Shortcomings / Limitations
 
-- Single-file Java execution model (one public class with `main`).
-  - Multi-file projects and external dependencies are not supported.
+- Java/Python question tabs are independent active-tab executions.
+  - Full multi-file Java/Python project mode and external dependencies are not supported.
+- Guided question visibility/submission state is intentionally stored as normal tab metadata rather than database enums, reducing H2 enum drift risk during local/Docker development.
 - Sandbox is “best effort” (process + limits), not a hardened container sandbox.
 - AuthN/AuthZ is currently open (no login / RBAC).
 - H2 is fine for dev/demo; production would typically use Postgres/MySQL with migrations.
-- Current sandbox support is still Java-only, but the internal runner architecture is now in place for future language expansion.
+- Higher-environment Microsoft Exchange SMTP settings are still pending; local/Docker SMTP can be configured with Postmark or another SMTP provider.
 
 ## Future Enhancements
 

@@ -41,6 +41,14 @@ public class CodeFile {
 
     private Boolean editable;
 
+    private Boolean enabledForCandidate;
+
+    private Boolean activeQuestion;
+
+    private Boolean submitted;
+
+    private Integer idealDurationMinutes;
+
     @CreationTimestamp
     private OffsetDateTime createdAt;
 

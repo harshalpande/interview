@@ -13,10 +13,85 @@ This repo contains a small interview platform:
 - Angular sandbox: Angular 21 build workspace
 - React sandbox: React 18.3 + Vite 5 build workspace
 
+## Java/Python Guided Question Tabs
+
+Java and Python interviews use interviewer-controlled Guided Question Tabs:
+- Before the live session starts, both roles see a quick `I know` control guide that explains editor buttons and shortcuts while the editor is read-only.
+- The interviewer can add multiple prepared question tabs and edit future questions while the candidate is solving the current one.
+- The interviewer can delete prepared Java/Python question tabs before they are promoted; active and submitted tabs are retained for evidence.
+- The candidate sees and edits only enabled question tabs in the interview UI.
+- The candidate submits a completed question with `Freeze`; the action asks for an in-app confirmation, makes the tab read-only for both participants, and automatically promotes the next prepared question when one exists.
+- `Run Active Tab` executes only the selected question tab, keeping Java/Python processing close to the original single-source sandbox path.
+- Each active-tab run stores a question-level run result with output, errors, exit status, execution time, and the code snapshot used for that run.
+- Freezing a question captures the active tab output/errors even if the program has compile-time or runtime errors, so incomplete attempts are preserved.
+- The Result Workspace shows all saved Java/Python question tabs and their latest captured run evidence.
+- This is not a full multi-file project mode; Java/Python tabs are independent questions unless a later project-mode feature is added.
+- Guided tab lifecycle state is persisted as plain `code_files` metadata, not database enums. This keeps `Freeze`, automatic next-question promotion, and submitted-state saves safe from H2 enum allowed-value drift.
+
 React workspace constraints:
 - editable files are limited to `src/**/*.tsx`, `src/**/*.ts`, and `src/**/*.css`
 - `package.json` is visible in the editor but read-only
-- builds use the persistent `sandbox-frontend` workspace path, with watcher-first warm builds and direct-build fallback when clearer diagnostics are needed
+- editor builds use the persistent `sandbox-frontend` workspace path with Warm Watcher Live Preview, which patches changed files into the running workspace and reads the active watcher instead of launching a second full build
+- final/session-end builds remain strict and durable so stored result previews are only captured from successful final builds
+
+Angular workspace constraints:
+- editable files are limited to supported Angular source files under `src/app`
+- `package.json` is visible in the editor but read-only
+- editor builds use the same Warm Watcher Live Preview path as React, with a longer Angular failure-settle window because Angular CLI diagnostics can flush more slowly
+
+## Live Preview Performance
+
+Warm Watcher Live Preview is used for Angular and React editor builds:
+- A persistent workspace is created when the frontend interview session is prepared.
+- The sandbox keeps the framework watcher process alive for that workspace.
+- The editor sends only changed files with `livePreviewMode=true`.
+- The sandbox waits briefly for the watcher to report success/failure and returns that result to the editor.
+- Failure responses wait a short extra settle window to capture more diagnostic output (`200 ms` for React, `1000 ms` for Angular).
+- The slower direct-build fallback is avoided for editor live-preview builds, but final/session-end builds still use the strict durable flow.
+
+## Integrity Monitoring
+
+The interview session uses Progressive Integrity Warnings for monitored candidate activity:
+- First-time low-risk events are recorded as `WARNING` or `INFO` rather than immediately treated as suspicious.
+- Repeated events, or events that exceed duration thresholds, are elevated to `SUSPICIOUS`.
+- In-app AV is stricter because the platform owns the media experience.
+- External AV is softer for focus-away events because Teams/Zoom interaction can be legitimate.
+- Candidate-facing toasts use clear corrective language, while interviewer/result views focus on confirmed suspicious activity and overall integrity signals.
+
+Default thresholds:
+- In-app tab away: suspicious after `10 seconds` or the second occurrence.
+- External AV tab away: suspicious after `30 seconds` or the third occurrence.
+- In-app mic/camera off: suspicious after `15 seconds` or the second occurrence.
+- Paste and drag/drop: first event is a warning, second and later events are suspicious.
+
+## Email Configuration
+
+Local and Docker environments can use SMTP settings for Postmark or Mailgun. Configure both provider profiles once, then switch with `APP_EMAIL_PROVIDER=postmark` or `APP_EMAIL_PROVIDER=mailgun`:
+
+```env
+APP_EMAIL_MODE=smtp
+APP_EMAIL_PROVIDER=postmark
+APP_EMAIL_FROM_ADDRESS=noreply@interviewonline.xyz
+APP_EMAIL_FROM_NAME=Admin
+APP_EMAIL_SUBJECT_PREFIX=LOCAL
+
+POSTMARK_SPRING_MAIL_HOST=smtp.postmarkapp.com
+POSTMARK_SPRING_MAIL_PORT=2525
+POSTMARK_SPRING_MAIL_USERNAME=<postmark-server-token>
+POSTMARK_SPRING_MAIL_PASSWORD=<postmark-server-token>
+
+MAILGUN_SPRING_MAIL_HOST=smtp.mailgun.org
+MAILGUN_SPRING_MAIL_PORT=587
+MAILGUN_SPRING_MAIL_USERNAME=<mailgun-smtp-login>
+MAILGUN_SPRING_MAIL_PASSWORD=<mailgun-smtp-password>
+
+SPRING_MAIL_SMTP_AUTH=true
+SPRING_MAIL_SMTP_STARTTLS_ENABLE=true
+SPRING_MAIL_SMTP_STARTTLS_REQUIRED=false
+SPRING_MAIL_SMTP_SSL_ENABLE=false
+```
+
+Subject prefixes identify the sending environment. Use `LOCAL`, `DEV`, `UAT`, and no prefix for production as configured by deployment. Higher-environment Microsoft Exchange SMTP details are still pending and should be completed before UAT/production email rollout.
 
 ## Run With Docker (Recommended)
 
@@ -104,6 +179,7 @@ URLs (Local):
 - Default (local): file-based H2 at `C:\Users\hpande\Documents\workspace\bindmount\interviewdb`
   - Override path: set env var `H2_DB_PATH` to a different file path (without extension).
 - `docker` profile: file-based H2 at `/data/interviewdb` (persisted via bind mount).
+- On H2 startup, the backend runs a small enum-column repair pass that converts known enum-backed columns to `VARCHAR`. This protects local/Docker databases when enum values evolve, for example session status or activity severity values.
 
 Important:
 - Don’t run Docker backend and local backend against the same DB file at the same time.
