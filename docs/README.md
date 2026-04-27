@@ -8,13 +8,6 @@ This repo contains a small interview platform:
 - `sandbox-backend/`: Spring Boot compile/run service for Java and Python execution isolation
 - `sandbox-frontend/`: Spring Boot persistent frontend sandbox for Angular/React workspaces, preview hosting, and warm builds
 
-## Secure Access & Identity
-
-- Secure access sends OTP-backed participant links, records disclaimer acceptance, and routes interviewees through identity capture before the interview can start.
-- Identity capture is considered complete when the interviewee captures a photo, skips it, or records a camera issue and continues; all three states allow the interviewer to start while preserving the captured status for review.
-- The dashboard Resume action waits longer for OTP email delivery and reports status inline instead of using browser alert popups.
-- Token expiry and authentication failure states are terminal and hide the Result action until a session has truly ended.
-
 ## Frontend Interview Sandboxes
 
 - Angular sandbox: Angular 21 build workspace
@@ -27,12 +20,11 @@ Java and Python interviews use interviewer-controlled Guided Question Tabs:
 - The interviewer can add multiple prepared question tabs and edit future questions while the candidate is solving the current one.
 - The interviewer can delete prepared Java/Python question tabs before they are promoted; active and submitted tabs are retained for evidence.
 - The candidate sees and edits only enabled question tabs in the interview UI.
-- The candidate submits a completed question with `Freeze`; the action asks for an in-app confirmation, makes the tab read-only for both participants, records the question solve time, and automatically promotes the next prepared question when one exists.
-- Each candidate `Run Active Tab` press increments the question execute-attempt counter; the final Freeze capture is not counted as a manual execute attempt.
+- The candidate submits a completed question with `Freeze`; the action asks for an in-app confirmation, makes the tab read-only for both participants, and automatically promotes the next prepared question when one exists.
 - `Run Active Tab` executes only the selected question tab, keeping Java/Python processing close to the original single-source sandbox path.
 - Each active-tab run stores a question-level run result with output, errors, exit status, execution time, and the code snapshot used for that run.
 - Freezing a question captures the active tab output/errors even if the program has compile-time or runtime errors, so incomplete attempts are preserved.
-- The Result Workspace shows all saved Java/Python question tabs, solve time, execute-attempt count, and latest captured run evidence.
+- The Result Workspace shows all saved Java/Python question tabs and their latest captured run evidence.
 - This is not a full multi-file project mode; Java/Python tabs are independent questions unless a later project-mode feature is added.
 - Guided tab lifecycle state is persisted as plain `code_files` metadata, not database enums. This keeps `Freeze`, automatic next-question promotion, and submitted-state saves safe from H2 enum allowed-value drift.
 

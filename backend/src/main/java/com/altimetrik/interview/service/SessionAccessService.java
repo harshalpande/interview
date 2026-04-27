@@ -7,7 +7,6 @@ import com.altimetrik.interview.dto.VerifyOtpRequest;
 import com.altimetrik.interview.entity.InterviewSession;
 import com.altimetrik.interview.entity.Participant;
 import com.altimetrik.interview.entity.ParticipantAccessChallenge;
-import com.altimetrik.interview.enums.IdentityCaptureStatus;
 import com.altimetrik.interview.enums.ParticipantAccessStatus;
 import com.altimetrik.interview.enums.ParticipantRole;
 import com.altimetrik.interview.enums.SessionStatus;
@@ -185,7 +184,7 @@ public class SessionAccessService {
                 && interviewee.getDisclaimerAcceptedAt() != null
                 && isOtpVerified(sessionId, ParticipantRole.INTERVIEWER)
                 && isOtpVerified(sessionId, ParticipantRole.INTERVIEWEE)
-                && isIdentityCaptureComplete(interviewee.getIdentityCaptureStatus());
+                && interviewee.getIdentityCaptureStatus() == com.altimetrik.interview.enums.IdentityCaptureStatus.SUCCESS;
     }
 
     @Transactional
@@ -330,7 +329,7 @@ public class SessionAccessService {
                                                        String message) {
         boolean identityCaptureRequired = participant.getRole() == ParticipantRole.INTERVIEWEE;
         boolean identityCaptureComplete = !identityCaptureRequired
-                || isIdentityCaptureComplete(participant.getIdentityCaptureStatus());
+                || participant.getIdentityCaptureStatus() == com.altimetrik.interview.enums.IdentityCaptureStatus.SUCCESS;
         return AccessLinkResponse.builder()
                 .sessionId(session.getId())
                 .role(participant.getRole())
@@ -373,12 +372,6 @@ public class SessionAccessService {
         }
         challenge.setOtpExpiresAt(nowUtc().plusSeconds(OTP_WINDOW_SECONDS));
         participantAccessChallengeRepository.save(challenge);
-    }
-
-    private boolean isIdentityCaptureComplete(IdentityCaptureStatus status) {
-        return status == IdentityCaptureStatus.SUCCESS
-                || status == IdentityCaptureStatus.SKIPPED
-                || status == IdentityCaptureStatus.FAILED;
     }
 
     private String buildAccessUrl(String secureToken) {

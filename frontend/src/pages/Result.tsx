@@ -311,14 +311,6 @@ const Result: React.FC = () => {
                         <span>{activeCodeFile.runResult ? resultStatusLabel(activeCodeFile.runResult.exitStatus) : 'Not run'}</span>
                       </div>
                       <div className="question-result-card">
-                        <strong>Time taken</strong>
-                        <span>{formatSolveDuration(activeCodeFile.solveDurationSeconds)}</span>
-                      </div>
-                      <div className="question-result-card">
-                        <strong>Execute attempts</strong>
-                        <span>{formatExecuteAttemptCount(activeCodeFile.executeAttemptCount)}</span>
-                      </div>
-                      <div className="question-result-card">
                         <strong>Output</strong>
                         <pre>{activeCodeFile.runResult?.stdout || '(no output captured)'}</pre>
                       </div>
@@ -544,32 +536,6 @@ function resultStatusLabel(exitStatus?: number | null) {
   if (exitStatus === 0) return 'Successful run';
   if (typeof exitStatus === 'number') return `Failed with exit code ${exitStatus}`;
   return 'Run captured';
-}
-
-function formatSolveDuration(seconds?: number | null) {
-  if (typeof seconds !== 'number' || !Number.isFinite(seconds)) {
-    return 'Not captured';
-  }
-
-  const safeSeconds = Math.max(0, Math.round(seconds));
-  const minutes = Math.floor(safeSeconds / 60);
-  const remainingSeconds = safeSeconds % 60;
-  if (minutes <= 0) {
-    return `${remainingSeconds}s`;
-  }
-  if (remainingSeconds === 0) {
-    return `${minutes}m`;
-  }
-  return `${minutes}m ${remainingSeconds}s`;
-}
-
-function formatExecuteAttemptCount(count?: number | null) {
-  if (typeof count !== 'number' || !Number.isFinite(count)) {
-    return 'Not captured';
-  }
-
-  const safeCount = Math.max(0, Math.round(count));
-  return `${safeCount}`;
 }
 
 function resultCodeTabLabel(technology: string, file: EditableCodeFile, index: number) {
