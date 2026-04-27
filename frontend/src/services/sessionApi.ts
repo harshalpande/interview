@@ -21,8 +21,6 @@ import type {
 } from '../types/session';
 import { resolveApiBaseUrl } from '../utils/apiUrls';
 
-const SECURE_ACCESS_EMAIL_TIMEOUT_MS = 60000;
-
 class SessionApiClient {
   private axiosInstance: AxiosInstance;
 
@@ -56,9 +54,7 @@ class SessionApiClient {
 
   async startSecureSession(id: string): Promise<SessionResponse> {
     try {
-      const response = await this.axiosInstance.post<SessionResponse>(`/sessions/${id}/start-session`, undefined, {
-        timeout: SECURE_ACCESS_EMAIL_TIMEOUT_MS,
-      });
+      const response = await this.axiosInstance.post<SessionResponse>(`/sessions/${id}/start-session`);
       return response.data;
     } catch (error) {
       throw this.handleError(error);
@@ -312,9 +308,6 @@ class SessionApiClient {
       if (error.response) {
         const message = (error.response.data as any)?.message || `Server error: ${error.response.status}`;
         return new Error(message);
-      }
-      if (error.code === 'ECONNABORTED') {
-        return new Error('The request took longer than expected. Please refresh the dashboard; passcodes may still have been delivered.');
       }
       if (error.request) {
         return new Error('No response from server. Is the backend running?');

@@ -23,30 +23,18 @@ interface InterviewRowProps {
 
 const InterviewRow: React.FC<InterviewRowProps> = ({ session, searchTerm = '' }) => {
   const queryClient = useQueryClient();
-  const [actionMessage, setActionMessage] = React.useState<{ tone: 'success' | 'error'; text: string } | null>(null);
   const interviewer = session.participants?.find((p) => p.role === 'INTERVIEWER');
   const interviewee = session.participants?.find((p) => p.role === 'INTERVIEWEE');
   const startDate = session.startedAt ? formatDateTimeSplit(session.startedAt) : null;
   const resumeSessionMutation = useMutation({
     mutationFn: () => sessionApi.startSecureSession(session.id),
-    onMutate: () => {
-      setActionMessage(null);
-    },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['sessions'] });
       await queryClient.invalidateQueries({ queryKey: ['session', session.id] });
-      setActionMessage({
-        tone: 'success',
-        text: 'Secure access sent to both participants.',
-      });
+      window.alert('Secure session access has been sent to both participants.');
     },
-    onError: async (error) => {
-      await queryClient.invalidateQueries({ queryKey: ['sessions'] });
-      await queryClient.invalidateQueries({ queryKey: ['session', session.id] });
-      setActionMessage({
-        tone: 'error',
-        text: error instanceof Error ? error.message : 'Unable to start secure session access.',
-      });
+    onError: (error) => {
+      window.alert(error instanceof Error ? error.message : 'Unable to start secure session access.');
     },
   });
 
@@ -91,11 +79,6 @@ const InterviewRow: React.FC<InterviewRowProps> = ({ session, searchTerm = '' })
           >
             {resumeSessionMutation.isPending ? 'Sending...' : 'Resume'}
           </Button>
-        ) : null}
-        {actionMessage ? (
-          <div className={`dashboard-action-message ${actionMessage.tone}`} role="status">
-            {actionMessage.text}
-          </div>
         ) : null}
         {(session.status === 'ENDED' || session.status === 'AUTH_FAILED') ? (
           <Link to={`/java/result/${session.id}`} className="btn btn-small btn-secondary">

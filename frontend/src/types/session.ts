@@ -118,10 +118,6 @@ export interface EditableCodeFile {
   activeQuestion?: boolean;
   submitted?: boolean;
   idealDurationMinutes?: number | null;
-  candidateStartedAt?: string | null;
-  submittedAt?: string | null;
-  solveDurationSeconds?: number | null;
-  executeAttemptCount?: number | null;
   runResult?: RunResult | null;
   changedAfterLastRun?: boolean | null;
 }
