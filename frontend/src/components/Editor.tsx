@@ -502,6 +502,7 @@ const Editor: React.FC<EditorProps> = ({
   const workspaceFilesRef = React.useRef<AngularWorkspaceFile[]>(buildWorkspaceFiles(executionLanguage, initialCodeFiles));
   const dirtyWorkspacePathsRef = React.useRef<string[]>([]);
   const activeFilePathRef = React.useRef<string>(buildWorkspaceFiles(executionLanguage, initialCodeFiles)[0]?.path ?? defaultWorkspaceFiles(executionLanguage)[0].path);
+  const onCodeFilesChangeRef = React.useRef(onCodeFilesChange);
   const appliedInitialCodeVersionRef = React.useRef(initialCodeVersion ?? 0);
   const previousExecutionLanguageRef = React.useRef(executionLanguage);
 
@@ -547,6 +548,10 @@ const Editor: React.FC<EditorProps> = ({
   }, [workspaceFiles]);
 
   useEffect(() => {
+    onCodeFilesChangeRef.current = onCodeFilesChange;
+  }, [onCodeFilesChange]);
+
+  useEffect(() => {
     dirtyWorkspacePathsRef.current = dirtyWorkspacePaths;
   }, [dirtyWorkspacePaths]);
 
@@ -575,6 +580,41 @@ const Editor: React.FC<EditorProps> = ({
       setActiveFilePath(visibleWorkspaceFiles[0].path);
     }
   }, [activeFilePath, isGuidedQuestionWorkspace, participantRole, visibleWorkspaceFiles]);
+
+  useEffect(() => {
+    if (!isGuidedQuestionWorkspace || participantRole !== 'interviewee' || readOnly) {
+      return;
+    }
+
+    const startedAt = currentIsoTimestamp();
+    let changed = false;
+    const activeQuestionPath = activeFilePathRef.current;
+    const nextFiles = workspaceFilesRef.current.map((file) => {
+      if (
+        file.path === activeQuestionPath
+        && editableWorkspacePath(executionLanguage, file.path)
+        && file.enabledForCandidate !== false
+        && file.activeQuestion === true
+        && file.submitted !== true
+        && !file.candidateStartedAt
+      ) {
+        changed = true;
+        return {
+          ...file,
+          candidateStartedAt: startedAt,
+        };
+      }
+      return file;
+    });
+
+    if (!changed) {
+      return;
+    }
+
+    workspaceFilesRef.current = nextFiles;
+    setWorkspaceFiles(nextFiles);
+    onCodeFilesChangeRef.current?.(toPersistedWorkspaceFiles(executionLanguage, nextFiles));
+  }, [activeFilePath, executionLanguage, isGuidedQuestionWorkspace, participantRole, readOnly]);
 
   useEffect(() => {
     if ((executionLanguage !== 'ANGULAR' && executionLanguage !== 'REACT') || !monacoTypeDefaultsRef.current) {
@@ -690,6 +730,39 @@ const Editor: React.FC<EditorProps> = ({
     });
   }, [executionLanguage, sessionId]);
 
+  const recordActiveGuidedQuestionExecuteAttempt = useCallback(() => {
+    if (participantRole !== 'interviewee') {
+      return;
+    }
+
+    const activeQuestionPath = activeFilePathRef.current;
+    let changed = false;
+    const nextFiles = workspaceFilesRef.current.map((file) => {
+      if (
+        file.path === activeQuestionPath
+        && editableWorkspacePath(executionLanguage, file.path)
+        && file.enabledForCandidate !== false
+        && file.activeQuestion === true
+        && file.submitted !== true
+      ) {
+        changed = true;
+        return {
+          ...file,
+          executeAttemptCount: (file.executeAttemptCount ?? 0) + 1,
+        };
+      }
+      return file;
+    });
+
+    if (!changed) {
+      return;
+    }
+
+    workspaceFilesRef.current = nextFiles;
+    setWorkspaceFiles(nextFiles);
+    onCodeFilesChangeRef.current?.(toPersistedWorkspaceFiles(executionLanguage, nextFiles));
+  }, [executionLanguage, participantRole]);
+
   const handleRun = useCallback(async () => {
     if (!canRunCurrentEditor) {
       return;
@@ -763,6 +836,7 @@ const Editor: React.FC<EditorProps> = ({
     }
 
     if (isGuidedQuestionWorkspace) {
+      recordActiveGuidedQuestionExecuteAttempt();
       try {
         const response = await executeActiveGuidedQuestion();
 
@@ -811,7 +885,7 @@ const Editor: React.FC<EditorProps> = ({
         error: errorMessage,
       }));
     }
-  }, [canRunCurrentEditor, executeActiveGuidedQuestion, executionLanguage, isFrontendWorkspace, isGuidedQuestionWorkspace, sessionId, state.code]);
+  }, [canRunCurrentEditor, executeActiveGuidedQuestion, executionLanguage, isFrontendWorkspace, isGuidedQuestionWorkspace, recordActiveGuidedQuestionExecuteAttempt, sessionId, state.code]);
 
   useEffect(() => {
     runLatestRef.current = handleRun;
@@ -851,6 +925,7 @@ const Editor: React.FC<EditorProps> = ({
     }
 
     setWorkspaceFiles((previous) => {
+      const submittedAt = currentIsoTimestamp();
       const activeQuestionPath = activeFilePathRef.current;
       const questionFiles = previous.filter((file) => editableWorkspacePath(executionLanguage, file.path));
       const currentIndex = questionFiles.findIndex((file) => file.path === activeQuestionPath);
@@ -859,12 +934,16 @@ const Editor: React.FC<EditorProps> = ({
         : undefined;
       const nextFiles = previous.map((file) => {
         if (file.path === activeQuestionPath) {
+          const candidateStartedAt = file.candidateStartedAt || submittedAt;
           return {
             ...file,
             activeQuestion: false,
             editable: false,
             enabledForCandidate: true,
             submitted: true,
+            candidateStartedAt,
+            submittedAt,
+            solveDurationSeconds: solveDurationSeconds(candidateStartedAt, submittedAt),
           };
         }
 
@@ -875,6 +954,7 @@ const Editor: React.FC<EditorProps> = ({
             editable: true,
             enabledForCandidate: true,
             submitted: false,
+            candidateStartedAt: file.candidateStartedAt || submittedAt,
           };
         }
 
@@ -1066,6 +1146,10 @@ const Editor: React.FC<EditorProps> = ({
       activeQuestion: shouldAutoActivateNewQuestion,
       submitted: false,
       idealDurationMinutes: isGuidedQuestionWorkspace ? 10 : undefined,
+      candidateStartedAt: null,
+      submittedAt: null,
+      solveDurationSeconds: null,
+      executeAttemptCount: 0,
     };
 
       setWorkspaceFiles((previous) => {
@@ -1678,6 +1762,10 @@ function defaultWorkspaceFiles(executionLanguage: ExecutionLanguage) {
       activeQuestion: true,
       submitted: false,
       idealDurationMinutes: 10,
+      candidateStartedAt: null,
+      submittedAt: null,
+      solveDurationSeconds: null,
+      executeAttemptCount: 0,
     }];
   }
   return [{
@@ -1690,6 +1778,10 @@ function defaultWorkspaceFiles(executionLanguage: ExecutionLanguage) {
     activeQuestion: true,
     submitted: false,
     idealDurationMinutes: 10,
+    candidateStartedAt: null,
+    submittedAt: null,
+    solveDurationSeconds: null,
+    executeAttemptCount: 0,
   }];
 }
 
@@ -1730,7 +1822,24 @@ function stripWorkspaceHints(file: AngularWorkspaceFile): EditableCodeFile {
     activeQuestion: file.activeQuestion,
     submitted: file.submitted,
     idealDurationMinutes: file.idealDurationMinutes,
+    candidateStartedAt: file.candidateStartedAt,
+    submittedAt: file.submittedAt,
+    solveDurationSeconds: file.solveDurationSeconds,
+    executeAttemptCount: file.executeAttemptCount,
   };
+}
+
+function currentIsoTimestamp() {
+  return new Date().toISOString();
+}
+
+function solveDurationSeconds(startedAt: string | null | undefined, submittedAt: string) {
+  const startedMs = startedAt ? Date.parse(startedAt) : Number.NaN;
+  const submittedMs = Date.parse(submittedAt);
+  if (!Number.isFinite(startedMs) || !Number.isFinite(submittedMs) || submittedMs < startedMs) {
+    return 0;
+  }
+  return Math.max(0, Math.round((submittedMs - startedMs) / 1000));
 }
 
 function toPersistedWorkspaceFiles(executionLanguage: ExecutionLanguage, files: AngularWorkspaceFile[]) {

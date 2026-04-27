@@ -49,6 +49,14 @@ public class CodeFile {
 
     private Integer idealDurationMinutes;
 
+    private OffsetDateTime candidateStartedAt;
+
+    private OffsetDateTime submittedAt;
+
+    private Long solveDurationSeconds;
+
+    private Integer executeAttemptCount;
+
     @CreationTimestamp
     private OffsetDateTime createdAt;
 

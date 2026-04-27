@@ -1120,7 +1120,7 @@ public class SessionService {
         }
 
         participantRepository.save(participant);
-        if (status == IdentityCaptureStatus.SUCCESS) {
+        if (isIdentityCaptureComplete(status)) {
             participantAccessChallengeRepository.findBySessionIdAndParticipantRole(sessionId, role)
                     .ifPresent(challenge -> {
                         if (challenge.getStatus() == ParticipantAccessStatus.OTP_VERIFIED) {
@@ -1157,7 +1157,7 @@ public class SessionService {
                 && isOtpSatisfied(interviewerChallenge);
         boolean intervieweeReady = interviewee.getDisclaimerAcceptedAt() != null
                 && isOtpSatisfied(intervieweeChallenge)
-                && interviewee.getIdentityCaptureStatus() == IdentityCaptureStatus.SUCCESS;
+                && isIdentityCaptureComplete(interviewee.getIdentityCaptureStatus());
 
         if (interviewerReady && intervieweeReady) {
             session.setStatus(SessionStatus.READY_TO_START);
@@ -1299,7 +1299,11 @@ public class SessionService {
                     || !Objects.equals(existing.getEnabledForCandidate(), next.getEnabledForCandidate())
                     || !Objects.equals(existing.getActiveQuestion(), next.getActiveQuestion())
                     || !Objects.equals(existing.getSubmitted(), next.getSubmitted())
-                    || !Objects.equals(existing.getIdealDurationMinutes(), next.getIdealDurationMinutes())) {
+                    || !Objects.equals(existing.getIdealDurationMinutes(), next.getIdealDurationMinutes())
+                    || !Objects.equals(existing.getCandidateStartedAt(), next.getCandidateStartedAt())
+                    || !Objects.equals(existing.getSubmittedAt(), next.getSubmittedAt())
+                    || !Objects.equals(existing.getSolveDurationSeconds(), next.getSolveDurationSeconds())
+                    || !Objects.equals(existing.getExecuteAttemptCount(), next.getExecuteAttemptCount())) {
                 return false;
             }
         }
@@ -2006,6 +2010,10 @@ public class SessionService {
                 .activeQuestion(file.getActiveQuestion() == null ? false : file.getActiveQuestion())
                 .submitted(file.getSubmitted() == null ? false : file.getSubmitted())
                 .idealDurationMinutes(file.getIdealDurationMinutes())
+                .candidateStartedAt(file.getCandidateStartedAt())
+                .submittedAt(file.getSubmittedAt())
+                .solveDurationSeconds(file.getSolveDurationSeconds())
+                .executeAttemptCount(file.getExecuteAttemptCount() == null ? 0 : file.getExecuteAttemptCount())
                 .build();
     }
 
@@ -2032,6 +2040,10 @@ public class SessionService {
                     .activeQuestion(true)
                     .submitted(file.getSubmitted())
                     .idealDurationMinutes(file.getIdealDurationMinutes())
+                    .candidateStartedAt(file.getCandidateStartedAt())
+                    .submittedAt(file.getSubmittedAt())
+                    .solveDurationSeconds(file.getSolveDurationSeconds())
+                    .executeAttemptCount(file.getExecuteAttemptCount())
                     .runResult(file.getRunResult())
                     .changedAfterLastRun(file.getChangedAfterLastRun())
                     .build());
@@ -2145,6 +2157,10 @@ public class SessionService {
                     codeFile.setActiveQuestion(Boolean.TRUE.equals(file.getActiveQuestion()));
                     codeFile.setSubmitted(Boolean.TRUE.equals(file.getSubmitted()));
                     codeFile.setIdealDurationMinutes(file.getIdealDurationMinutes());
+                    codeFile.setCandidateStartedAt(file.getCandidateStartedAt());
+                    codeFile.setSubmittedAt(file.getSubmittedAt());
+                    codeFile.setSolveDurationSeconds(file.getSolveDurationSeconds());
+                    codeFile.setExecuteAttemptCount(file.getExecuteAttemptCount() == null ? 0 : file.getExecuteAttemptCount());
                     return codeFile;
                 })
                 .toList();
@@ -2187,6 +2203,10 @@ public class SessionService {
                 .activeQuestion(Boolean.TRUE.equals(file.getActiveQuestion()))
                 .submitted(Boolean.TRUE.equals(file.getSubmitted()))
                 .idealDurationMinutes(file.getIdealDurationMinutes())
+                .candidateStartedAt(file.getCandidateStartedAt())
+                .submittedAt(file.getSubmittedAt())
+                .solveDurationSeconds(file.getSolveDurationSeconds())
+                .executeAttemptCount(file.getExecuteAttemptCount() == null ? 0 : file.getExecuteAttemptCount())
                 .build();
     }
 
@@ -2211,6 +2231,10 @@ public class SessionService {
                             .activeQuestion(file.getActiveQuestion())
                             .submitted(file.getSubmitted())
                             .idealDurationMinutes(file.getIdealDurationMinutes())
+                            .candidateStartedAt(file.getCandidateStartedAt())
+                            .submittedAt(file.getSubmittedAt())
+                            .solveDurationSeconds(file.getSolveDurationSeconds())
+                            .executeAttemptCount(file.getExecuteAttemptCount())
                             .runResult(result == null ? null : toRunResultDto(result))
                             .changedAfterLastRun(result != null && !Objects.equals(file.getContent(), result.getSourceSnapshot()))
                             .build();
@@ -2353,6 +2377,12 @@ public class SessionService {
             return failureReason == null ? IdentityCaptureFailureReason.UNKNOWN : failureReason;
         }
         return null;
+    }
+
+    private boolean isIdentityCaptureComplete(IdentityCaptureStatus status) {
+        return status == IdentityCaptureStatus.SUCCESS
+                || status == IdentityCaptureStatus.SKIPPED
+                || status == IdentityCaptureStatus.FAILED;
     }
 
     public record ResourceWithMetadata(org.springframework.core.io.Resource resource, String contentType) {
