@@ -5,6 +5,10 @@ import type {
   AccessVerificationResponse,
   ActivityEvent,
   ActivityEventRequest,
+  AiInterviewRecommendation,
+  AiQuestionSessionResponse,
+  AiSolutionEvaluation,
+  CodeUpdateRequest,
   CreateSessionRequest, 
   DisconnectParticipantRequest,
   EndSessionRequest,
@@ -247,6 +251,48 @@ class SessionApiClient {
   async extendSession(id: string): Promise<SessionResponse> {
     try {
       const response = await this.axiosInstance.post<SessionResponse>(`/sessions/${id}/extend`);
+      return response.data;
+    } catch (error) {
+      throw this.handleError(error);
+    }
+  }
+
+  async generateNextAiQuestion(id: string): Promise<AiQuestionSessionResponse> {
+    try {
+      const response = await this.axiosInstance.post<AiQuestionSessionResponse>(`/sessions/${id}/ai/questions/next`, undefined, {
+        timeout: 90000,
+      });
+      return response.data;
+    } catch (error) {
+      throw this.handleError(error);
+    }
+  }
+
+  async updateCodeState(id: string, request: CodeUpdateRequest): Promise<SessionResponse> {
+    try {
+      const response = await this.axiosInstance.post<SessionResponse>(`/sessions/${id}/code`, request);
+      return response.data;
+    } catch (error) {
+      throw this.handleError(error);
+    }
+  }
+
+  async evaluateAiQuestion(id: string, filePath?: string): Promise<AiSolutionEvaluation> {
+    try {
+      const response = await this.axiosInstance.post<AiSolutionEvaluation>(`/sessions/${id}/ai/questions/evaluate`, filePath ? { filePath } : undefined, {
+        timeout: 90000,
+      });
+      return response.data;
+    } catch (error) {
+      throw this.handleError(error);
+    }
+  }
+
+  async generateAiRecommendation(id: string): Promise<AiInterviewRecommendation> {
+    try {
+      const response = await this.axiosInstance.post<AiInterviewRecommendation>(`/sessions/${id}/ai/recommendation`, undefined, {
+        timeout: 90000,
+      });
       return response.data;
     } catch (error) {
       throw this.handleError(error);

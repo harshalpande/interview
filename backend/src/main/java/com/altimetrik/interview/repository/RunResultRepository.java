@@ -14,4 +14,6 @@ public interface RunResultRepository extends JpaRepository<RunResult, String> {
     List<RunResult> findBySessionIdAndFilePathIsNotNullOrderByCompiledAtDesc(String sessionId);
 
     Optional<RunResult> findTopBySessionIdAndFilePathOrderByCompiledAtDesc(String sessionId, String filePath);
+
+    long deleteBySessionIdAndFilePath(String sessionId, String filePath);
 }

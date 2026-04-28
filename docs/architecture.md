@@ -33,6 +33,8 @@ flowchart LR
 
 ### Interview Session
 - Interviewer creates a session and receives a join link token.
+- The registration flow supports two modes: `HUMAN_INTERVIEWER` and `AI_INTERVIEWER`. Human mode is the default and preserves the existing two-person workflow.
+- AI mode registers an internal `AI Interviewer` system participant, captures experience/target-role/difficulty-level metadata, and sends secure access only to the candidate.
 - During session creation, the interviewer selects the live AV mode for the interview: built-in platform AV or an external channel such as Microsoft Teams or Zoom.
 - Interviewee joins using the token (name/email must match what interviewer registered).
 - Identity capture is part of the pre-session flow before the interviewee enters the live session, regardless of the selected AV mode.
@@ -41,6 +43,25 @@ flowchart LR
 - Live collaboration uses STOMP topics (`/topic/session/{sessionId}`) for code + session state.
 - When `IN_APP` AV is selected, the session also uses WebRTC signaling for the built-in media panel.
 - When `EXTERNAL` AV is selected, the coding session remains focused on the editor and session controls while live audio/video is handled outside the platform.
+
+### AI Service
+- AI orchestration is separated into `ai-service/`, a Spring Boot WebFlux service.
+- The core backend remains the source of truth for sessions, participants, code files, run results, feedback, and human override.
+- `ai-service` owns provider configuration, question generation, solution evaluation, interview recommendation prompts, and later voice/transcript analysis. It supports OpenAI and Gemini behind the `AI_PROVIDER` toggle.
+- Provider-specific models are resolved inside `ai-service`: OpenAI prefers `OPENAI_MODEL_*`, Gemini prefers `GEMINI_MODEL_*`, and generic `AI_MODEL_*` values are only backward-compatible fallbacks.
+- The service is configured only through environment variables; API keys must not be committed.
+- Initial Docker endpoint: `http://localhost:8084/api/ai/status`.
+- Live provider-readiness endpoint: `http://localhost:8084/api/ai/status/provider`.
+- Backend calls `ai-service` through `AI_SERVICE_BASE_URL` and keeps all generated questions in the existing `code_files` question-tab model.
+- For AI interviews, backend secure-access startup calls the provider-readiness endpoint before OTP emails are sent; failed readiness blocks candidate access with a friendly retry message.
+- Session-scoped AI operations are exposed by the backend under `/api/sessions/{id}/ai/...`, so the frontend does not need direct provider access.
+- AI question progression is candidate-action driven: `Freeze` persists the submitted tab, triggers background AI evaluation, and asks the AI service for the next question. The candidate does not manually request or evaluate AI questions from the interview screen and sees a loading state while generation is in progress.
+- Question Policy/Rubric Engine v1 lives in backend Java code (`AiPolicyEngineService`) and sends structured policy/rubric guidance into AI question generation, solution evaluation, and final recommendation requests. This is intentionally a phase 1 implementation; the rules should later move to DB/admin-managed tables so HR/interview owners can tune technology concept coverage, forbidden capabilities, duration guidance, and rubric weights without code changes.
+- Per-question AI evaluation is persisted on `code_files`; final AI recommendation metadata is persisted on `interview_sessions` and remains subject to human review/override. Session end also attempts backend-side recommendation generation so the result does not depend on the candidate browser staying open.
+- AI-generated Java/Python questions carry stored difficulty level, expected complexity, original problem/test snapshots, hidden reference solution metadata, and integrity notes so evaluation can detect changed problem statements or validation assertions.
+- Java/Python AI questions pass through a backend validation gate before persistence: generate problem and hidden solution, verify matching starter/reference assertions, compile/run the hidden solution through `sandbox-backend`, and only then publish the starter question to the candidate. Failed validation triggers regeneration or a validated fallback.
+- Candidate disclaimers make the same rule explicit before entry: changing, removing, or weakening problem statements, validation code, or assert statements is recorded as a question-integrity issue and may be treated as suspicious. Integrity output is intentionally boolean-style (`Healthy: TRUE` / `Healthy: FALSE`) with changed validation details when unhealthy.
+- Provider-unavailable fallback uses the `interview_question_bank` table. Startup seeding creates 100 Java/Python entries and the backend selects a technology/difficulty-appropriate unused question when Gemini/OpenAI is unavailable, varying selection by session and avoiding already used question content.
 
 ### Compile & Run
 - Java/Python interviews support Guided Question Tabs. The interviewer can prepare future hidden tabs at any time while the candidate works on the current active tab.
@@ -74,6 +95,8 @@ flowchart LR
 - In-app mic/camera disablement is warning-first and becomes suspicious after `15 seconds` or repeated disablement.
 - Candidate notifications use corrective language, while interviewer alerts are reserved for confirmed suspicious events.
 - The Result Workspace summarizes integrity activity by severity and event category.
+- Question-integrity evidence from tampered prompts, validation code, or assert statements is retained separately from browser/activity events and is considered during AI recommendation and human review.
+- In AI-interviewer mode, candidate copy/cut from the editor is blocked and recorded as integrity activity; repeated attempts are elevated to suspicious.
 
 ### End Interview / Final Preview
 - Before a session is marked ended, backend performs one final execution/build using the latest saved code/files.

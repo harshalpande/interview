@@ -51,6 +51,7 @@ logs/
 
 # Docker
 .dockerignore
+!ai-service/.dockerignore
 .docker/
 
 # Misc

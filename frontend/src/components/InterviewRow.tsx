@@ -27,6 +27,7 @@ const InterviewRow: React.FC<InterviewRowProps> = ({ session, searchTerm = '' })
   const interviewer = session.participants?.find((p) => p.role === 'INTERVIEWER');
   const interviewee = session.participants?.find((p) => p.role === 'INTERVIEWEE');
   const startDate = session.startedAt ? formatDateTimeSplit(session.startedAt) : null;
+  const isAiInterview = session.interviewMode === 'AI_INTERVIEWER';
   const resumeSessionMutation = useMutation({
     mutationFn: () => sessionApi.startSecureSession(session.id),
     onMutate: () => {
@@ -37,7 +38,7 @@ const InterviewRow: React.FC<InterviewRowProps> = ({ session, searchTerm = '' })
       await queryClient.invalidateQueries({ queryKey: ['session', session.id] });
       setActionMessage({
         tone: 'success',
-        text: 'Secure access sent to both participants.',
+        text: isAiInterview ? 'Candidate access sent.' : 'Secure access sent to both participants.',
       });
     },
     onError: async (error) => {

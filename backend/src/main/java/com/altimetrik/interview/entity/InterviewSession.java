@@ -3,6 +3,7 @@ package com.altimetrik.interview.entity;
 import com.altimetrik.interview.enums.SessionStatus;
 import com.altimetrik.interview.enums.TechnologySkill;
 import com.altimetrik.interview.enums.FeedbackRating;
+import com.altimetrik.interview.enums.InterviewMode;
 import com.altimetrik.interview.enums.ParticipantRole;
 import com.altimetrik.interview.enums.RecommendationDecision;
 import com.altimetrik.interview.enums.AvMode;
@@ -64,7 +65,40 @@ public class InterviewSession {
     private TechnologySkill technology = TechnologySkill.JAVA;
 
     @Enumerated(EnumType.STRING)
+    private InterviewMode interviewMode = InterviewMode.HUMAN_INTERVIEWER;
+
+    private Integer yearsOfExperience;
+
+    private String targetRole;
+
+    private Integer startingDifficultyLevel = 1;
+
+    private Integer maxQuestions = 5;
+
+    @Enumerated(EnumType.STRING)
     private AvMode avMode = AvMode.EXTERNAL;
+
+    private String aiRecommendationRating;
+
+    private String aiRecommendationDecision;
+
+    private Integer aiRecommendationOverallScore;
+
+    @Column(columnDefinition = "TEXT")
+    private String aiRecommendationSummary;
+
+    @Column(columnDefinition = "TEXT")
+    private String aiRecommendationStrengths;
+
+    @Column(columnDefinition = "TEXT")
+    private String aiRecommendationRisks;
+
+    @Column(columnDefinition = "TEXT")
+    private String aiRecommendationFollowUps;
+
+    private Boolean aiHumanReviewRequired;
+
+    private OffsetDateTime aiRecommendationGeneratedAt;
     
     private OffsetDateTime authStartedAt;
 

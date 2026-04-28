@@ -13,7 +13,28 @@ This repo contains a small interview platform:
 - Secure access sends OTP-backed participant links, records disclaimer acceptance, and routes interviewees through identity capture before the interview can start.
 - Identity capture is considered complete when the interviewee captures a photo, skips it, or records a camera issue and continues; all three states allow the interviewer to start while preserving the captured status for review.
 - The dashboard Resume action waits longer for OTP email delivery and reports status inline instead of using browser alert popups.
+- Human-interviewer interviews keep the existing two-participant access flow with OTPs for both interviewer and interviewee.
+- AI-interviewer interviews create an internal `AI Interviewer` participant and send secure access only to the candidate.
 - Token expiry and authentication failure states are terminal and hide the Result action until a session has truly ended.
+
+## AI Interviewer Foundation
+
+- AI mode is additive. Existing human-to-human interviews remain the default and continue to use the same guided-question and feedback workflow.
+- Registration can select `Human Interviewer` or `AI Interviewer`. AI mode captures years of experience, a technology-specific target role, starting difficulty level from 1 to 5, and max question count.
+- A standalone `ai-service/` Spring Boot WebFlux service owns the AI boundary. It is configured through `AI_PROVIDER`, provider API key/base URL variables, model names, timeout, and retry environment variables. `AI_PROVIDER=openai` uses `AI_API_KEY`/`AI_BASE_URL` and prefers `OPENAI_MODEL_QUESTION`, `OPENAI_MODEL_EVALUATION`, and `OPENAI_MODEL_RECOMMENDATION`. `AI_PROVIDER=gemini` uses `GEMINI_API_KEY`/`GEMINI_BASE_URL` and prefers `GEMINI_MODEL_QUESTION`, `GEMINI_MODEL_EVALUATION`, and `GEMINI_MODEL_RECOMMENDATION`. The generic `AI_MODEL_*` values remain fallback overrides only.
+- Docker Compose exposes the AI service on `http://localhost:8084` and connects the backend to it through `AI_SERVICE_BASE_URL`.
+- AI service endpoints now support `/api/ai/questions/generate`, `/api/ai/questions/evaluate`, `/api/ai/interviews/recommendation`, and live provider readiness through `/api/ai/status/provider`.
+- For AI interviews, the backend checks provider readiness before sending candidate access. If the model is unavailable, OTP delivery is blocked with a user-facing message.
+- The backend exposes session-scoped AI orchestration through `/api/sessions/{id}/ai/questions/next`, `/api/sessions/{id}/ai/questions/evaluate`, and `/api/sessions/{id}/ai/recommendation`.
+- In AI-interviewer mode, the first question is generated automatically when the candidate lands in an active interview. After the candidate presses `Freeze`, the frozen answer is saved, evaluated in the background, and the next AI question is generated automatically until the configured question limit or timer is reached.
+- While the first or next AI question is being generated, the candidate sees a loading state instead of the default starter template.
+- Java AI questions are instructed to include runnable `org.junit.Assert` validation checks from `main`; Python AI questions are instructed to include runnable `assert` checks.
+- Before a Java/Python AI question is shown to the candidate, the backend requires a complete hidden `referenceSolution`, verifies that it includes the same validation assertions as the starter, compiles/runs that reference solution in the sandbox, and rejects/regenerates the question if validation fails. This keeps AI hallucinated or internally inconsistent questions out of the candidate workflow.
+- Each AI-generated question stores its numeric difficulty level, expected complexity, original problem/test snapshot, and hidden reference solution metadata. The candidate sees only the editable starter question, while evaluation can compare against the hidden reference.
+- Candidate disclaimers explicitly warn that changing, removing, or weakening problem statements, validation code, or assert statements is recorded as a question-integrity issue and may be treated as suspicious during evaluation. Result integrity is shown as `Healthy: TRUE` or `Healthy: FALSE`; false results include the validation assertions that changed or disappeared.
+- AI question generation, solution evaluation, and final recommendation now receive a backend-owned Question Policy/Rubric Engine v1 package. Phase 1 stores these rules in Java classes; a future migration should move technology policies, concept coverage, forbidden capabilities, and rubric weights into DB/admin-managed tables.
+- If the external AI provider is unavailable or rate-limited, the backend falls back to a persisted Java/Python question bank instead of blocking the candidate. The seeded bank contains 100 entries across Java and Python with difficulty level, starter code, validation assertions, expected complexity, concepts, and reference solution metadata; fallback selection avoids previously used questions and varies by session.
+- The Result workspace shows question difficulty, expected complexity, question-integrity notes, execution evidence, per-question AI evaluation, and the final AI recommendation. When an AI interview ends, the backend attempts to persist the final AI recommendation automatically; if the provider is unavailable, a conservative metrics-based recommendation is stored for mandatory human review.
 
 ## Frontend Interview Sandboxes
 
@@ -65,6 +86,8 @@ The interview session uses Progressive Integrity Warnings for monitored candidat
 - In-app AV is stricter because the platform owns the media experience.
 - External AV is softer for focus-away events because Teams/Zoom interaction can be legitimate.
 - Candidate-facing toasts use clear corrective language, while interviewer/result views focus on confirmed suspicious activity and overall integrity signals.
+- Tampering with question prompts, validation code, or assert statements is preserved as question-integrity evidence and reviewed alongside other suspicious activity signals.
+- AI-interviewer mode blocks candidate copy/cut actions from the editor. The first attempt is recorded as a warning, and repeated attempts become suspicious.
 
 Default thresholds:
 - In-app tab away: suspicious after `10 seconds` or the second occurrence.

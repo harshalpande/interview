@@ -2,12 +2,14 @@ package com.altimetrik.interview.service;
 
 import com.altimetrik.interview.dto.AccessLinkResponse;
 import com.altimetrik.interview.dto.AccessVerificationResponse;
+import com.altimetrik.interview.dto.AiProviderReadinessResponse;
 import com.altimetrik.interview.dto.SessionResponse;
 import com.altimetrik.interview.dto.VerifyOtpRequest;
 import com.altimetrik.interview.entity.InterviewSession;
 import com.altimetrik.interview.entity.Participant;
 import com.altimetrik.interview.entity.ParticipantAccessChallenge;
 import com.altimetrik.interview.enums.IdentityCaptureStatus;
+import com.altimetrik.interview.enums.InterviewMode;
 import com.altimetrik.interview.enums.ParticipantAccessStatus;
 import com.altimetrik.interview.enums.ParticipantRole;
 import com.altimetrik.interview.enums.SessionStatus;
@@ -46,6 +48,7 @@ public class SessionAccessService {
     private final ParticipantRepository participantRepository;
     private final ParticipantAccessChallengeRepository participantAccessChallengeRepository;
     private final SessionService sessionService;
+    private final AiInterviewClientService aiInterviewClientService;
     private final EmailService emailService;
 
     @Value("${app.public-origin:http://localhost:3000}")
@@ -60,6 +63,7 @@ public class SessionAccessService {
                 || session.getStatus() == SessionStatus.ACTIVE) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "This session cannot enter secure pre-session authentication.");
         }
+        ensureAiProviderReadyIfNeeded(session);
 
         session.setStatus(SessionStatus.AUTH_IN_PROGRESS);
         if (session.getAuthStartedAt() == null) {
@@ -70,7 +74,9 @@ public class SessionAccessService {
         session.setAuthFailureReason(null);
         sessionRepository.save(session);
 
-        List<Participant> participants = participantRepository.findBySessionId(sessionId);
+        List<Participant> participants = participantRepository.findBySessionId(sessionId).stream()
+                .filter(participant -> shouldSendSecureAccess(session, participant))
+                .toList();
         for (Participant participant : participants) {
             ParticipantAccessChallenge challenge = participantAccessChallengeRepository
                     .findBySessionIdAndParticipantRole(sessionId, participant.getRole())
@@ -83,6 +89,19 @@ public class SessionAccessService {
         }
 
         return sessionService.getSession(sessionId);
+    }
+
+    private void ensureAiProviderReadyIfNeeded(InterviewSession session) {
+        if (session.getInterviewMode() != InterviewMode.AI_INTERVIEWER) {
+            return;
+        }
+        AiProviderReadinessResponse readiness = aiInterviewClientService.checkProviderReadiness();
+        if (readiness == null || !readiness.isReady()) {
+            String message = readiness == null || readiness.getMessage() == null || readiness.getMessage().isBlank()
+                    ? "AI interviewer is temporarily unavailable. Candidate access cannot be sent right now. Please try again in a few minutes."
+                    : readiness.getMessage();
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, message);
+        }
     }
 
     @Transactional
@@ -181,9 +200,11 @@ public class SessionAccessService {
     public boolean areAllPreSessionRequirementsComplete(String sessionId) {
         Participant interviewer = getRequiredParticipant(sessionId, ParticipantRole.INTERVIEWER);
         Participant interviewee = getRequiredParticipant(sessionId, ParticipantRole.INTERVIEWEE);
-        return interviewer.getDisclaimerAcceptedAt() != null
+        InterviewSession session = getRequiredSession(sessionId);
+        boolean interviewerReady = isAiInterview(session)
+                || (interviewer.getDisclaimerAcceptedAt() != null && isOtpVerified(sessionId, ParticipantRole.INTERVIEWER));
+        return interviewerReady
                 && interviewee.getDisclaimerAcceptedAt() != null
-                && isOtpVerified(sessionId, ParticipantRole.INTERVIEWER)
                 && isOtpVerified(sessionId, ParticipantRole.INTERVIEWEE)
                 && isIdentityCaptureComplete(interviewee.getIdentityCaptureStatus());
     }
@@ -379,6 +400,14 @@ public class SessionAccessService {
         return status == IdentityCaptureStatus.SUCCESS
                 || status == IdentityCaptureStatus.SKIPPED
                 || status == IdentityCaptureStatus.FAILED;
+    }
+
+    private boolean shouldSendSecureAccess(InterviewSession session, Participant participant) {
+        return !isAiInterview(session) || participant.getRole() == ParticipantRole.INTERVIEWEE;
+    }
+
+    private boolean isAiInterview(InterviewSession session) {
+        return session.getInterviewMode() == InterviewMode.AI_INTERVIEWER;
     }
 
     private String buildAccessUrl(String secureToken) {

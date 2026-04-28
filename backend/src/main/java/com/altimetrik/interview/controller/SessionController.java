@@ -30,6 +30,10 @@ import com.altimetrik.interview.dto.AccessLinkResponse;
 import com.altimetrik.interview.dto.AccessVerificationResponse;
 import com.altimetrik.interview.dto.ActivityEventDto;
 import com.altimetrik.interview.dto.ActivityEventRequest;
+import com.altimetrik.interview.dto.AiEvaluateQuestionRequest;
+import com.altimetrik.interview.dto.AiInterviewRecommendationResponse;
+import com.altimetrik.interview.dto.AiQuestionSessionResponse;
+import com.altimetrik.interview.dto.AiSolutionEvaluationResponse;
 import com.altimetrik.interview.dto.CodeUpdateRequest;
 import com.altimetrik.interview.dto.CreateSessionRequest;
 import com.altimetrik.interview.dto.DisconnectParticipantRequest;
@@ -228,6 +232,32 @@ public class SessionController {
         SessionResponse response = sessionService.startSession(id);
         broadcastSession(response, "SESSION_START", "Interview started");
         return ResponseEntity.ok(response);
+    }
+
+    @PostMapping("/{id}/ai/questions/next")
+    public ResponseEntity<AiQuestionSessionResponse> generateNextAiQuestion(@PathVariable String id) {
+        AiQuestionSessionResponse response = sessionService.generateNextAiQuestion(id);
+        broadcastSession(response.getSession(), "CODE_UPDATE", "AI question generated");
+        return ResponseEntity.ok(response);
+    }
+
+    @PostMapping("/{id}/code")
+    public ResponseEntity<SessionResponse> updateCodeState(@PathVariable String id,
+                                                           @Valid @RequestBody CodeUpdateRequest request) {
+        SessionResponse response = sessionService.updateCodeState(id, request);
+        broadcastSession(response, "CODE_UPDATE", "Code updated");
+        return ResponseEntity.ok(response);
+    }
+
+    @PostMapping("/{id}/ai/questions/evaluate")
+    public ResponseEntity<AiSolutionEvaluationResponse> evaluateAiQuestion(@PathVariable String id,
+                                                                           @RequestBody(required = false) @Nullable AiEvaluateQuestionRequest request) {
+        return ResponseEntity.ok(sessionService.evaluateAiQuestion(id, request));
+    }
+
+    @PostMapping("/{id}/ai/recommendation")
+    public ResponseEntity<AiInterviewRecommendationResponse> recommendAiInterview(@PathVariable String id) {
+        return ResponseEntity.ok(sessionService.recommendAiInterview(id));
     }
 
     @PostMapping("/{id}/extend")

@@ -556,6 +556,119 @@
   line-height: 1.7;
 }
 
+.ai-question-progress-panel {
+  display: grid;
+  gap: 12px;
+  width: min(720px, 100%);
+  margin: 0 auto;
+  padding: 16px 18px;
+  border: 1px solid #cfe1ec;
+  border-radius: 16px;
+  background: #ffffff;
+  box-shadow: 0 16px 34px rgba(16, 37, 66, 0.12);
+}
+
+.ai-question-progress-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.ai-question-progress-kicker {
+  color: #0b7285;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.ai-question-progress-copy h3,
+.ai-question-progress-copy p {
+  animation: ai-progress-text 0.34s ease both;
+}
+
+.ai-question-progress-copy h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.ai-question-progress-copy p {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.ai-question-progress-track {
+  overflow: hidden;
+  height: 9px;
+  border-radius: 999px;
+  background: #e7eef5;
+}
+
+.ai-question-progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #0b7285 0%, #2aaebf 55%, #45b36b 100%);
+  transition: width 0.45s ease;
+}
+
+.ai-question-progress-fill-saving {
+  width: 20%;
+}
+
+.ai-question-progress-fill-evaluating {
+  width: 42%;
+}
+
+.ai-question-progress-fill-generating {
+  width: 56%;
+}
+
+.ai-question-progress-fill-validating {
+  width: 84%;
+}
+
+.ai-question-progress-fill-ready {
+  width: 100%;
+}
+
+.ai-question-progress-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ai-question-progress-step {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #eef4f8;
+  color: #6c8193;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.ai-question-progress-step.is-done {
+  background: #edf8ef;
+  color: #267448;
+}
+
+.ai-question-progress-step.is-active {
+  background: #e7f6f9;
+  color: #0b7285;
+}
+
+@keyframes ai-progress-text {
+  0% {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .feedback-section.end-screen {
   margin-top: 18px;
 }
@@ -618,6 +731,11 @@
   gap: 12px;
   justify-content: flex-start;
   margin-top: 10px;
+}
+
+.ai-recommendation-panel {
+  border-color: #b8d7e3;
+  background: #f6fbfd;
 }
 
 .share-url-container {

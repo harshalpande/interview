@@ -15,6 +15,7 @@
 
 - Monaco editor with Run/Reset, theme toggle, and `Ctrl+Enter` run shortcut.
 - Java/Python Guided Question Tabs with `Show` / `Freeze`, active-tab execution, and question-level run result preservation.
+- AI-generated Java/Python questions are validated before candidate visibility by running the hidden reference solution and its assertions in the sandbox.
 - Angular/React editor builds use Warm Watcher Live Preview for fast feedback from persistent framework watchers while preserving strict final result builds.
 - Mandatory pre-interview identity capture for every session, independent of the selected live AV mode.
 - Configurable live AV mode at session creation, allowing the interviewer to choose either the built-in platform AV experience or an external channel such as Microsoft Teams or Zoom.
@@ -23,6 +24,8 @@
 - Paste and external drag/drop attempts are blocked for the interviewee, warned on first occurrence, and marked suspicious when repeated.
 - Focus-away events are treated strictly for in-app AV and more cautiously for external Teams/Zoom-style AV to reduce false positives.
 - Candidate-facing integrity notices explain what behavior should be corrected; interviewer alerts are reserved for confirmed suspicious events.
+- Candidate disclaimers warn that tampering with problem statements, validation code, or assert statements is a question-integrity issue that may be treated as suspicious during evaluation.
+- AI-interviewer sessions block candidate copy/cut from the editor and record attempts as integrity activity.
 - Session dashboard with status + summary.
 - Persistent session resume for active interviews, including reconnect/redeploy recovery, interviewer approval for high-risk interviewee resumes, and automatic incomplete handling after interruption timeout.
 - Token expiry handling:
@@ -44,6 +47,7 @@
 
 ## Future Enhancements
 
+- Move the phase 1 Question Policy/Rubric Engine from backend Java classes into DB/admin-managed tables. The future schema should capture technology-specific concept coverage, difficulty-level rules, forbidden sandbox capabilities, required validation patterns, duration guidance, rubric weights, and human-review recommendation rules.
 - Based on the product demo held on April 22, 2026, the recommended standard operating position is to keep external AV as the default session mode, using Microsoft Teams or Zoom based on interviewer availability, so the platform experience remains centered on the interview editor, collaboration workflow, and evaluation journey rather than on embedded AV.
 - In-app AV remains available as a supported option for sessions that explicitly require it, but it should be treated as an exception path rather than the default operating model.
 - Shift the next product phase toward performance analysis and future-scope enhancements while preserving this editor-first interview workflow.

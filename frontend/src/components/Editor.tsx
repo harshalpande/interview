@@ -416,9 +416,10 @@ interface EditorProps {
   onCodeChange?: (code: string) => void;
   onCodeFilesChange?: (files: EditableCodeFile[]) => void;
   onActiveFileChange?: (path: string) => void;
+  onQuestionFrozen?: (files: EditableCodeFile[], frozenFilePath: string) => void | Promise<void>;
   onPasteInEditor?: (text: string) => boolean | void;
-  onCopyFromEditor?: (text: string) => void;
-  onCutFromEditor?: (text: string) => void;
+  onCopyFromEditor?: (text: string) => boolean | void;
+  onCutFromEditor?: (text: string) => boolean | void;
   onExternalDropBlocked?: () => void;
   showResetButton?: boolean;
   canRun?: boolean;
@@ -440,6 +441,7 @@ const Editor: React.FC<EditorProps> = ({
   onCodeChange,
   onCodeFilesChange,
   onActiveFileChange,
+  onQuestionFrozen,
   onPasteInEditor,
   onCopyFromEditor,
   onCutFromEditor,
@@ -924,53 +926,54 @@ const Editor: React.FC<EditorProps> = ({
       }));
     }
 
-    setWorkspaceFiles((previous) => {
-      const submittedAt = currentIsoTimestamp();
-      const activeQuestionPath = activeFilePathRef.current;
-      const questionFiles = previous.filter((file) => editableWorkspacePath(executionLanguage, file.path));
-      const currentIndex = questionFiles.findIndex((file) => file.path === activeQuestionPath);
-      const nextQuestion = currentIndex >= 0
-        ? questionFiles.slice(currentIndex + 1).find((file) => file.submitted !== true)
-        : undefined;
-      const nextFiles = previous.map((file) => {
-        if (file.path === activeQuestionPath) {
-          const candidateStartedAt = file.candidateStartedAt || submittedAt;
-          return {
-            ...file,
-            activeQuestion: false,
-            editable: false,
-            enabledForCandidate: true,
-            submitted: true,
-            candidateStartedAt,
-            submittedAt,
-            solveDurationSeconds: solveDurationSeconds(candidateStartedAt, submittedAt),
-          };
-        }
-
-        if (nextQuestion && file.path === nextQuestion.path) {
-          return {
-            ...file,
-            activeQuestion: true,
-            editable: true,
-            enabledForCandidate: true,
-            submitted: false,
-            candidateStartedAt: file.candidateStartedAt || submittedAt,
-          };
-        }
-
+    const submittedAt = currentIsoTimestamp();
+    const activeQuestionPath = activeFilePathRef.current;
+    const previous = workspaceFilesRef.current;
+    const questionFiles = previous.filter((file) => editableWorkspacePath(executionLanguage, file.path));
+    const currentIndex = questionFiles.findIndex((file) => file.path === activeQuestionPath);
+    const nextQuestion = currentIndex >= 0
+      ? questionFiles.slice(currentIndex + 1).find((file) => file.submitted !== true)
+      : undefined;
+    const nextFiles = previous.map((file) => {
+      if (file.path === activeQuestionPath) {
+        const candidateStartedAt = file.candidateStartedAt || submittedAt;
         return {
           ...file,
           activeQuestion: false,
+          editable: false,
+          enabledForCandidate: true,
+          submitted: true,
+          candidateStartedAt,
+          submittedAt,
+          solveDurationSeconds: solveDurationSeconds(candidateStartedAt, submittedAt),
         };
-      });
-      workspaceFilesRef.current = nextFiles;
-      if (nextQuestion) {
-        activeFilePathRef.current = nextQuestion.path;
-        setActiveFilePath(nextQuestion.path);
       }
-      onCodeFilesChange?.(toPersistedWorkspaceFiles(executionLanguage, nextFiles));
-      return nextFiles;
+
+      if (nextQuestion && file.path === nextQuestion.path) {
+        return {
+          ...file,
+          activeQuestion: true,
+          editable: true,
+          enabledForCandidate: true,
+          submitted: false,
+          candidateStartedAt: file.candidateStartedAt || submittedAt,
+        };
+      }
+
+      return {
+        ...file,
+        activeQuestion: false,
+      };
     });
+    workspaceFilesRef.current = nextFiles;
+    setWorkspaceFiles(nextFiles);
+    if (nextQuestion) {
+      activeFilePathRef.current = nextQuestion.path;
+      setActiveFilePath(nextQuestion.path);
+    }
+    const persistedFiles = toPersistedWorkspaceFiles(executionLanguage, nextFiles);
+    onCodeFilesChange?.(persistedFiles);
+    void onQuestionFrozen?.(persistedFiles, activeQuestionPath);
   };
 
   const handleFreezeQuestion = () => {
@@ -1314,6 +1317,7 @@ const Editor: React.FC<EditorProps> = ({
                   >
                     <span>{file.displayName}</span>
                     {isGuidedQuestionWorkspace && file.activeQuestion ? <span className="workspace-tab-meta">Active</span> : null}
+                    {isGuidedQuestionWorkspace && file.difficultyLevel ? <span className="workspace-tab-meta">Level {file.difficultyLevel}</span> : null}
                     {isGuidedQuestionWorkspace && file.submitted ? <span className="workspace-tab-meta">Submitted</span> : null}
                     {isGuidedQuestionWorkspace && file.enabledForCandidate === false ? <span className="workspace-tab-meta">Prepared</span> : null}
                     {isGuidedQuestionWorkspace && file.runResult ? <span className="workspace-tab-meta">{file.changedAfterLastRun ? 'Changed' : 'Ran'}</span> : null}
@@ -1563,16 +1567,24 @@ const Editor: React.FC<EditorProps> = ({
 
                 const domNode = editor.getDomNode();
                 if (domNode) {
-                  domNode.addEventListener('copy', () => {
+                  domNode.addEventListener('copy', (event: ClipboardEvent) => {
                     const copiedText = getSelectedEditorText();
                     if (copiedText) {
-                      onCopyFromEditor?.(copiedText);
+                      const allowCopy = onCopyFromEditor?.(copiedText);
+                      if (allowCopy === false) {
+                        event.preventDefault();
+                        event.stopPropagation();
+                      }
                     }
                   }, true);
-                  domNode.addEventListener('cut', () => {
+                  domNode.addEventListener('cut', (event: ClipboardEvent) => {
                     const cutText = getSelectedEditorText();
                     if (cutText) {
-                      onCutFromEditor?.(cutText);
+                      const allowCut = onCutFromEditor?.(cutText);
+                      if (allowCut === false) {
+                        event.preventDefault();
+                        event.stopPropagation();
+                      }
                     }
                   }, true);
                   domNode.addEventListener('dragover', (event: DragEvent) => {
@@ -1821,7 +1833,11 @@ function stripWorkspaceHints(file: AngularWorkspaceFile): EditableCodeFile {
     enabledForCandidate: file.enabledForCandidate,
     activeQuestion: file.activeQuestion,
     submitted: file.submitted,
+    difficultyLevel: file.difficultyLevel,
     idealDurationMinutes: file.idealDurationMinutes,
+    expectedTimeComplexity: file.expectedTimeComplexity,
+    expectedSpaceComplexity: file.expectedSpaceComplexity,
+    questionIntegrityNotes: file.questionIntegrityNotes,
     candidateStartedAt: file.candidateStartedAt,
     submittedAt: file.submittedAt,
     solveDurationSeconds: file.solveDurationSeconds,

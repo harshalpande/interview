@@ -1,0 +1,15 @@
+info:
+  name: AI -Service - Ready
+  type: http
+
+http:
+  method: GET
+  url: http://localhost:8084/api/ai/status
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+​

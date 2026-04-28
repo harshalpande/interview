@@ -2,6 +2,7 @@ package com.altimetrik.interview.dto;
 
 import com.altimetrik.interview.enums.SessionStatus;
 import com.altimetrik.interview.enums.TechnologySkill;
+import com.altimetrik.interview.enums.InterviewMode;
 import com.altimetrik.interview.enums.ParticipantRole;
 import com.altimetrik.interview.enums.AvMode;
 import lombok.Builder;
@@ -15,6 +16,11 @@ import java.util.List;
 public class SessionResponse {
     private String id;
     private TechnologySkill technology;
+    private InterviewMode interviewMode;
+    private Integer yearsOfExperience;
+    private String targetRole;
+    private Integer startingDifficultyLevel;
+    private Integer maxQuestions;
     private AvMode avMode;
     private SessionStatus status;
     private OffsetDateTime createdAt;
@@ -34,6 +40,7 @@ public class SessionResponse {
     private RunResultDto finalRunResult;
     private FeedbackDto feedback;
     private FeedbackDto feedbackDraft;
+    private AiPersistedRecommendationDto aiRecommendation;
     private List<ActivityEventDto> activityEvents;
     private List<AuthAuditEventDto> authAuditEvents;
     private String summary;

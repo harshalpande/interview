@@ -29,4 +29,14 @@ public class SandboxClientConfig {
                 .defaultHeaders(headers -> headers.setContentType(MediaType.APPLICATION_JSON))
                 .build();
     }
+
+    @Bean
+    @Qualifier("aiServiceRestClient")
+    public RestClient aiServiceRestClient(RestClient.Builder restClientBuilder,
+                                          @Value("${ai-service.base-url:http://localhost:8084/api}") String aiServiceBaseUrl) {
+        return restClientBuilder
+                .baseUrl(aiServiceBaseUrl)
+                .defaultHeaders(headers -> headers.setContentType(MediaType.APPLICATION_JSON))
+                .build();
+    }
 }

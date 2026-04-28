@@ -2,6 +2,7 @@ package com.altimetrik.interview.enums;
 
 public enum ActivityEventType {
     TAB_HIDDEN,
+    COPY_FROM_EDITOR,
     PASTE_IN_EDITOR,
     EXTERNAL_DROP_BLOCKED,
     CAMERA_STREAM_LOST,

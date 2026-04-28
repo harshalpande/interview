@@ -1,0 +1,17 @@
+info:
+  name: AI-Service - Next Question
+  type: http
+
+http:
+  method: POST
+  url: http://localhost:8081/api/sessions/6af8da19-aec3-4e56-b6f2-de1d3d47e3b3/ai/questions/next
+  headers:
+    - name: Accept
+      value: application/json
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
