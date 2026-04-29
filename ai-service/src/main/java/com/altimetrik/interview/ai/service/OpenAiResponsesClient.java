@@ -80,7 +80,7 @@ public class OpenAiResponsesClient {
             return objectMapper.readValue(outputText, responseType);
         } catch (Exception exception) {
             log.error("Unable to parse OpenAI JSON output as {}", responseType.getSimpleName(), exception);
-            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "OpenAI response was not valid JSON for this operation.");
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "OpenAI returned incomplete JSON. Please retry.");
         }
     }
 
@@ -102,12 +102,21 @@ public class OpenAiResponsesClient {
         if (throwable instanceof WebClientResponseException exception) {
             return exception.getStatusCode().is5xxServerError();
         }
+        if (throwable instanceof ResponseStatusException exception) {
+            return exception.getStatusCode().is5xxServerError();
+        }
         return false;
     }
 
     private Throwable mapOpenAiThrowable(Throwable throwable) {
+        if (throwable instanceof ResponseStatusException) {
+            return throwable;
+        }
         if (throwable instanceof WebClientResponseException exception) {
             return mapOpenAiError(exception);
+        }
+        if (Exceptions.isRetryExhausted(throwable) && throwable.getCause() instanceof ResponseStatusException exception) {
+            return exception;
         }
         if (Exceptions.isRetryExhausted(throwable) && throwable.getCause() instanceof WebClientResponseException exception) {
             return mapOpenAiError(exception);

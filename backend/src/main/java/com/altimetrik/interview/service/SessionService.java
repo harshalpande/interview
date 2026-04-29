@@ -320,6 +320,8 @@ public class SessionService {
     public AiQuestionSessionResponse generateNextAiQuestion(String sessionId) {
         InterviewSession session = getRequiredSession(sessionId);
         ensureAiInterview(session);
+        log.info("AI next-question request received sessionId={} status={} technology={} maxQuestions={}",
+                sessionId, session.getStatus(), session.getTechnology(), session.getMaxQuestions());
         if (session.getStatus() != SessionStatus.ACTIVE) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "AI questions can be generated only while the interview is active.");
         }
@@ -332,6 +334,17 @@ public class SessionService {
 
         long submittedCount = questionFiles.stream().filter(file -> Boolean.TRUE.equals(file.getSubmitted())).count();
         int maxQuestions = session.getMaxQuestions() == null ? 5 : session.getMaxQuestions();
+        log.info("AI next-question state sessionId={} totalFiles={} managedQuestions={} submitted={} activePath={} files={}",
+                sessionId,
+                files.size(),
+                questionFiles.size(),
+                submittedCount,
+                questionFiles.stream()
+                        .filter(file -> Boolean.TRUE.equals(file.getActiveQuestion()) && !Boolean.TRUE.equals(file.getSubmitted()))
+                        .map(EditableCodeFileDto::getPath)
+                        .findFirst()
+                        .orElse("none"),
+                describeAiQuestionFiles(questionFiles));
         if (submittedCount >= maxQuestions) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "AI interview has already reached the configured question limit.");
         }
@@ -341,6 +354,8 @@ public class SessionService {
                 .findFirst()
                 .orElse(null);
         if (activeQuestion != null) {
+            log.info("AI next-question returning existing active question sessionId={} path={} displayName={} difficulty={}",
+                    sessionId, activeQuestion.getPath(), activeQuestion.getDisplayName(), activeQuestion.getDifficultyLevel());
             return AiQuestionSessionResponse.builder()
                     .question(toAiQuestionResponse(activeQuestion))
                     .session(toSessionResponse(session, true))
@@ -378,6 +393,13 @@ public class SessionService {
                 .requiredQuestionElements(policyPlan.requiredQuestionElements())
                 .sandboxRules(policyPlan.sandboxRules())
                 .build();
+        log.info("AI next-question generating sessionId={} questionNumber={} difficulty={} remainingSec={} submittedCount={} previousTitles={}",
+                sessionId,
+                questionNumber,
+                currentDifficulty,
+                generationRequest.getTimeRemainingSeconds(),
+                submittedCount,
+                generationRequest.getPreviousQuestionTitles());
         AiQuestionResponse generated = generateValidatedAiQuestion(session, generationRequest, questionFiles);
 
         EditableCodeFileDto generatedFile = buildAiQuestionFile(session.getTechnology(), generated, questionNumber, activeQuestion, files.size());
@@ -385,12 +407,70 @@ public class SessionService {
         validateWorkspaceFiles(session.getTechnology(), nextFiles);
         runResultRepository.deleteBySessionIdAndFilePath(sessionId, generatedFile.getPath());
         replaceCodeFiles(sessionId, nextFiles);
+        Long generatedCodeVersion = advanceCodeVersionForGeneratedAiQuestion(sessionId, nextFiles, generatedFile.getContent());
+        log.info("AI next-question persisted sessionId={} generatedPath={} displayName={} difficulty={} nextFiles={}",
+                sessionId,
+                generatedFile.getPath(),
+                generatedFile.getDisplayName(),
+                generatedFile.getDifficultyLevel(),
+                describeAiQuestionFiles(nextFiles.stream()
+                        .filter(file -> isManagedAiQuestionFile(session.getTechnology(), file))
+                        .toList()));
 
         SessionResponse refreshed = getSession(sessionId);
+        log.info("AI next-question response sessionId={} responseQuestionPath={} refreshedActivePath={} refreshedCodeVersion={} refreshedFiles={}",
+                sessionId,
+                generatedFile.getPath(),
+                refreshed.getCodeFiles() == null ? "none" : refreshed.getCodeFiles().stream()
+                        .filter(file -> Boolean.TRUE.equals(file.getActiveQuestion()) && !Boolean.TRUE.equals(file.getSubmitted()))
+                        .map(EditableCodeFileDto::getPath)
+                        .findFirst()
+                        .orElse("none"),
+                refreshed.getCodeVersion(),
+                refreshed.getCodeFiles() == null ? "[]" : describeAiQuestionFiles(refreshed.getCodeFiles().stream()
+                        .filter(file -> isManagedAiQuestionFile(session.getTechnology(), file))
+                        .toList()));
+        log.info("AI next-question code version advanced sessionId={} generatedCodeVersion={} refreshedCodeVersion={}",
+                sessionId, generatedCodeVersion, refreshed.getCodeVersion());
         return AiQuestionSessionResponse.builder()
                 .question(toAiQuestionResponse(generatedFile))
                 .session(refreshed)
                 .build();
+    }
+
+    private Long advanceCodeVersionForGeneratedAiQuestion(String sessionId,
+                                                          List<EditableCodeFileDto> files,
+                                                          String fallbackLatestCode) {
+        CodeState codeState = codeStateRepository.findBySessionId(sessionId).orElseGet(CodeState::new);
+        long storedVersion = codeState.getVersion() == null ? 0L : codeState.getVersion();
+        long nextVersion = storedVersion + 1;
+        codeState.setSessionId(sessionId);
+        codeState.setLatestCode(resolvePrimaryCode(files, fallbackLatestCode));
+        codeState.setStorageMode(CodeStorageMode.MULTI_FILE);
+        codeState.setUpdatedAt(nowUtc());
+        codeState.setUpdatedByRole(ParticipantRole.INTERVIEWER.name());
+        codeState.setVersion(nextVersion);
+        codeStateRepository.save(codeState);
+        return nextVersion;
+    }
+
+    private String describeAiQuestionFiles(List<EditableCodeFileDto> files) {
+        if (files == null || files.isEmpty()) {
+            return "[]";
+        }
+        return files.stream()
+                .map(file -> "%s{submitted=%s,active=%s,enabled=%s,editable=%s,difficulty=%s,versionMeta=%s}"
+                        .formatted(
+                                file.getPath(),
+                                Boolean.TRUE.equals(file.getSubmitted()),
+                                Boolean.TRUE.equals(file.getActiveQuestion()),
+                                file.getEnabledForCandidate() == null || Boolean.TRUE.equals(file.getEnabledForCandidate()),
+                                Boolean.TRUE.equals(file.getEditable()),
+                                file.getDifficultyLevel(),
+                                file.getSubmittedAt() == null ? "open" : "submitted"
+                        ))
+                .toList()
+                .toString();
     }
 
     public AiSolutionEvaluationResponse evaluateAiQuestion(String sessionId, AiEvaluateQuestionRequest request) {
@@ -436,7 +516,7 @@ public class SessionService {
                 .questionResults(questionResults)
                 .build();
         AiInterviewRecommendationResponse response = recommendAiInterviewOrFallback(session, recommendationRequest, questionResults);
-        response = applyRecommendationGuardrails(session, response, questionResults);
+        response = applyRecommendationGuardrails(session, response, questionResults, files);
         applyAiRecommendation(session, response);
         sessionRepository.save(session);
         return response;
@@ -506,8 +586,10 @@ public class SessionService {
 
     private AiInterviewRecommendationResponse applyRecommendationGuardrails(InterviewSession session,
                                                                             AiInterviewRecommendationResponse response,
-                                                                            List<AiSolutionEvaluationRequest> questionResults) {
+                                                                            List<AiSolutionEvaluationRequest> questionResults,
+                                                                            List<EditableCodeFileDto> submittedFiles) {
         List<AiSolutionEvaluationRequest> results = questionResults == null ? List.of() : questionResults;
+        List<EditableCodeFileDto> files = submittedFiles == null ? List.of() : submittedFiles;
         int expectedClean = Math.min(3, Math.max(1, session.getMaxQuestions() == null ? 5 : session.getMaxQuestions()));
         long cleanSolved = results.stream().filter(this::isCleanSolvedQuestion).count();
         long successfulRuns = results.stream().filter(this::hasSuccessfulQuestionRun).count();
@@ -518,22 +600,24 @@ public class SessionService {
                 .count();
 
         int originalScore = response.getOverallScore() == null ? scoreFromRating(response.getRating()) : response.getOverallScore();
+        int evidenceScore = partialEvidenceScore(files, results, expectedClean);
         int cleanScore = Math.round((cleanSolved * 100f) / expectedClean);
-        int guardedScore = Math.min(originalScore, cleanScore);
+        int policyCap = cleanScore;
         if (cleanSolved < expectedClean) {
-            guardedScore = Math.min(guardedScore, cleanSolved == 0 ? 25 : cleanSolved == 1 ? 45 : 65);
+            policyCap = Math.min(policyCap, cleanSolved == 0 ? 25 : cleanSolved == 1 ? 45 : 65);
         }
         if (integrityIssues > 0) {
-            guardedScore = Math.min(guardedScore, 45);
+            policyCap = Math.min(policyCap, 45);
         }
         if (missingTime > 0) {
-            guardedScore = Math.min(guardedScore, 70);
+            policyCap = Math.min(policyCap, 70);
         }
         if (suspiciousCount >= 5) {
-            guardedScore = Math.min(guardedScore, 50);
+            policyCap = Math.min(policyCap, 35);
         } else if (suspiciousCount >= 3) {
-            guardedScore = Math.min(guardedScore, 65);
+            policyCap = Math.min(policyCap, 65);
         }
+        int guardedScore = Math.min(Math.max(originalScore, evidenceScore), Math.max(0, policyCap));
 
         response.setOverallScore(Math.max(0, Math.min(100, guardedScore)));
         response.setRating(ratingForScore(response.getOverallScore()));
@@ -569,9 +653,28 @@ public class SessionService {
 
     private boolean isCleanSolvedQuestion(AiSolutionEvaluationRequest result) {
         return hasSuccessfulQuestionRun(result)
-                && !hasQuestionIntegrityViolation(result)
-                && result.getSolveDurationSeconds() != null
-                && result.getSolveDurationSeconds() > 0;
+                && !hasQuestionIntegrityViolation(result);
+    }
+
+    private int partialEvidenceScore(List<EditableCodeFileDto> files,
+                                     List<AiSolutionEvaluationRequest> results,
+                                     int expectedClean) {
+        int submittedCount = Math.max(0, files.size());
+        double coverageRatio = expectedClean <= 0 ? 1.0 : Math.min(1.0, (double) submittedCount / expectedClean);
+        double averageAiScore = files.stream()
+                .map(EditableCodeFileDto::getAiEvaluation)
+                .filter(Objects::nonNull)
+                .map(AiSolutionEvaluationResponse::getOverallScore)
+                .filter(Objects::nonNull)
+                .mapToInt(Integer::intValue)
+                .average()
+                .orElseGet(() -> results.stream().filter(this::hasSuccessfulQuestionRun).count() > 0 ? 50.0 : 0.0);
+        int evidenceScore = (int) Math.round(averageAiScore * coverageRatio);
+        long successfulRuns = results.stream().filter(this::hasSuccessfulQuestionRun).count();
+        if (successfulRuns > 0) {
+            evidenceScore = Math.max(evidenceScore, (int) Math.min(30, 12 + successfulRuns * 4));
+        }
+        return Math.max(0, Math.min(100, evidenceScore));
     }
 
     private boolean hasQuestionIntegrityViolation(AiSolutionEvaluationRequest result) {
@@ -2032,7 +2135,7 @@ public class SessionService {
                 .referenceSolution(generated.getReferenceSolution())
                 .questionConcepts(joinList(generated.getConcepts()))
                 .questionEvaluationFocus(joinList(generated.getEvaluationFocus()))
-                .candidateStartedAt(null)
+                .candidateStartedAt(nowUtc())
                 .submittedAt(null)
                 .solveDurationSeconds(null)
                 .executeAttemptCount(0)
@@ -2064,7 +2167,7 @@ public class SessionService {
                     .referenceSolution(isTarget ? generatedFile.getReferenceSolution() : file.getReferenceSolution())
                     .questionConcepts(isTarget ? generatedFile.getQuestionConcepts() : file.getQuestionConcepts())
                     .questionEvaluationFocus(isTarget ? generatedFile.getQuestionEvaluationFocus() : file.getQuestionEvaluationFocus())
-                    .candidateStartedAt(isTarget ? null : file.getCandidateStartedAt())
+                    .candidateStartedAt(isTarget ? generatedFile.getCandidateStartedAt() : file.getCandidateStartedAt())
                     .submittedAt(isTarget ? null : file.getSubmittedAt())
                     .solveDurationSeconds(isTarget ? null : file.getSolveDurationSeconds())
                     .executeAttemptCount(isTarget ? 0 : file.getExecuteAttemptCount())
@@ -3552,6 +3655,7 @@ public class SessionService {
     private void replaceCodeFiles(String sessionId, List<EditableCodeFileDto> editableFiles) {
         Map<String, CodeFile> existingByPath = codeFileRepository.findBySessionIdOrderBySortOrderAscCreatedAtAsc(sessionId).stream()
                 .collect(java.util.stream.Collectors.toMap(CodeFile::getFilePath, file -> file, (left, right) -> left));
+        OffsetDateTime persistedAt = nowUtc();
         codeFileRepository.deleteAllBySessionId(sessionId);
         codeFileRepository.flush();
         List<CodeFile> persistedFiles = editableFiles.stream()
@@ -3577,15 +3681,62 @@ public class SessionService {
                     codeFile.setQuestionConcepts(firstNonBlank(file.getQuestionConcepts(), existing == null ? null : existing.getQuestionConcepts()));
                     codeFile.setQuestionEvaluationFocus(firstNonBlank(file.getQuestionEvaluationFocus(), existing == null ? null : existing.getQuestionEvaluationFocus()));
                     codeFile.setQuestionIntegrityNotes(firstNonBlank(file.getQuestionIntegrityNotes(), existing == null ? null : existing.getQuestionIntegrityNotes()));
-                    codeFile.setCandidateStartedAt(file.getCandidateStartedAt());
-                    codeFile.setSubmittedAt(file.getSubmittedAt());
-                    codeFile.setSolveDurationSeconds(file.getSolveDurationSeconds());
+                    OffsetDateTime candidateStartedAt = resolveCandidateStartedAt(file, existing, persistedAt);
+                    OffsetDateTime submittedAt = file.getSubmittedAt();
+                    codeFile.setCandidateStartedAt(candidateStartedAt);
+                    codeFile.setSubmittedAt(submittedAt);
+                    codeFile.setSolveDurationSeconds(resolveSolveDurationSeconds(file, candidateStartedAt, submittedAt));
                     codeFile.setExecuteAttemptCount(file.getExecuteAttemptCount() == null ? 0 : file.getExecuteAttemptCount());
                     applyAiEvaluationSnapshot(codeFile, file.getAiEvaluation(), existing);
                     return codeFile;
                 })
                 .toList();
         codeFileRepository.saveAll(persistedFiles);
+    }
+
+    private OffsetDateTime resolveCandidateStartedAt(EditableCodeFileDto file, CodeFile existing, OffsetDateTime fallbackStartedAt) {
+        OffsetDateTime incomingStartedAt = file.getCandidateStartedAt();
+        OffsetDateTime submittedAt = file.getSubmittedAt();
+        if (Boolean.TRUE.equals(file.getSubmitted()) && submittedAt != null && !hasPositiveDuration(incomingStartedAt, submittedAt)) {
+            OffsetDateTime persistedStartedAt = existing == null
+                    ? null
+                    : existing.getCandidateStartedAt() == null ? existing.getCreatedAt() : existing.getCandidateStartedAt();
+            if (hasPositiveDuration(persistedStartedAt, submittedAt)) {
+                return persistedStartedAt;
+            }
+        }
+        if (incomingStartedAt != null) {
+            return incomingStartedAt;
+        }
+        if (existing != null && existing.getCandidateStartedAt() != null) {
+            return existing.getCandidateStartedAt();
+        }
+        if (Boolean.TRUE.equals(file.getActiveQuestion()) && !Boolean.TRUE.equals(file.getSubmitted())) {
+            return existing != null && existing.getCreatedAt() != null ? existing.getCreatedAt() : fallbackStartedAt;
+        }
+        return null;
+    }
+
+    private Long resolveSolveDurationSeconds(EditableCodeFileDto file,
+                                             OffsetDateTime candidateStartedAt,
+                                             OffsetDateTime submittedAt) {
+        if (file.getSolveDurationSeconds() != null && file.getSolveDurationSeconds() > 0) {
+            return file.getSolveDurationSeconds();
+        }
+        if (!Boolean.TRUE.equals(file.getSubmitted()) || candidateStartedAt == null || submittedAt == null) {
+            return file.getSolveDurationSeconds();
+        }
+        long durationSeconds = Duration.between(candidateStartedAt, submittedAt).getSeconds();
+        if (durationSeconds < 0) {
+            return file.getSolveDurationSeconds();
+        }
+        return Math.max(1L, durationSeconds);
+    }
+
+    private boolean hasPositiveDuration(OffsetDateTime candidateStartedAt, OffsetDateTime submittedAt) {
+        return candidateStartedAt != null
+                && submittedAt != null
+                && Duration.between(candidateStartedAt, submittedAt).getSeconds() > 0;
     }
 
     private Integer resolvePersistedDifficultyLevel(EditableCodeFileDto file, CodeFile existing) {
@@ -3628,6 +3779,8 @@ public class SessionService {
     }
 
     private EditableCodeFileDto toEditableCodeFileDto(CodeFile file) {
+        OffsetDateTime candidateStartedAt = resolveDisplayCandidateStartedAt(file);
+        Long solveDurationSeconds = resolveDisplaySolveDurationSeconds(file, candidateStartedAt);
         return EditableCodeFileDto.builder()
                 .path(file.getFilePath())
                 .displayName(file.getDisplayName())
@@ -3647,12 +3800,37 @@ public class SessionService {
                 .referenceSolution(file.getReferenceSolution())
                 .questionConcepts(file.getQuestionConcepts())
                 .questionEvaluationFocus(file.getQuestionEvaluationFocus())
-                .candidateStartedAt(file.getCandidateStartedAt())
+                .candidateStartedAt(candidateStartedAt)
                 .submittedAt(file.getSubmittedAt())
-                .solveDurationSeconds(file.getSolveDurationSeconds())
+                .solveDurationSeconds(solveDurationSeconds)
                 .executeAttemptCount(file.getExecuteAttemptCount() == null ? 0 : file.getExecuteAttemptCount())
                 .aiEvaluation(toAiEvaluationDto(file))
                 .build();
+    }
+
+    private OffsetDateTime resolveDisplayCandidateStartedAt(CodeFile file) {
+        OffsetDateTime submittedAt = file.getSubmittedAt();
+        if (Boolean.TRUE.equals(file.getSubmitted())
+                && submittedAt != null
+                && !hasPositiveDuration(file.getCandidateStartedAt(), submittedAt)
+                && hasPositiveDuration(file.getCreatedAt(), submittedAt)) {
+            return file.getCreatedAt();
+        }
+        return file.getCandidateStartedAt();
+    }
+
+    private Long resolveDisplaySolveDurationSeconds(CodeFile file, OffsetDateTime candidateStartedAt) {
+        if (file.getSolveDurationSeconds() != null && file.getSolveDurationSeconds() > 0) {
+            return file.getSolveDurationSeconds();
+        }
+        if (!Boolean.TRUE.equals(file.getSubmitted()) || candidateStartedAt == null || file.getSubmittedAt() == null) {
+            return file.getSolveDurationSeconds();
+        }
+        long durationSeconds = Duration.between(candidateStartedAt, file.getSubmittedAt()).getSeconds();
+        if (durationSeconds < 0) {
+            return file.getSolveDurationSeconds();
+        }
+        return Math.max(1L, durationSeconds);
     }
 
     private List<EditableCodeFileDto> attachRunResults(String sessionId, List<EditableCodeFileDto> files) {

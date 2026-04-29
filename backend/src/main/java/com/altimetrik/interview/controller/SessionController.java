@@ -54,10 +54,12 @@ import com.altimetrik.interview.service.SessionService;
 import jakarta.validation.Valid;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 @RestController
 @RequestMapping("/sessions")
 @RequiredArgsConstructor
+@Slf4j
 public class SessionController {
 
     private final SessionService sessionService;
@@ -237,6 +239,17 @@ public class SessionController {
     @PostMapping("/{id}/ai/questions/next")
     public ResponseEntity<AiQuestionSessionResponse> generateNextAiQuestion(@PathVariable String id) {
         AiQuestionSessionResponse response = sessionService.generateNextAiQuestion(id);
+        log.info("AI next-question controller response sessionId={} questionPath={} sessionCodeVersion={} activePath={}",
+                id,
+                response.getQuestion() == null ? "none" : response.getQuestion().getFilePath(),
+                response.getSession() == null ? null : response.getSession().getCodeVersion(),
+                response.getSession() == null || response.getSession().getCodeFiles() == null
+                        ? "none"
+                        : response.getSession().getCodeFiles().stream()
+                        .filter(file -> Boolean.TRUE.equals(file.getActiveQuestion()) && !Boolean.TRUE.equals(file.getSubmitted()))
+                        .map(file -> file.getPath())
+                        .findFirst()
+                        .orElse("none"));
         broadcastSession(response.getSession(), "CODE_UPDATE", "AI question generated");
         return ResponseEntity.ok(response);
     }
@@ -377,6 +390,18 @@ public class SessionController {
     }
 
     private void broadcastSession(SessionResponse response, String type, String message) {
+        log.info("Broadcasting session update sessionId={} type={} version={} activePath={} message={}",
+                response.getId(),
+                type,
+                response.getCodeVersion(),
+                response.getCodeFiles() == null
+                        ? "none"
+                        : response.getCodeFiles().stream()
+                        .filter(file -> Boolean.TRUE.equals(file.getActiveQuestion()) && !Boolean.TRUE.equals(file.getSubmitted()))
+                        .map(file -> file.getPath())
+                        .findFirst()
+                        .orElse("none"),
+                message);
         messagingTemplate.convertAndSend("/topic/session/" + response.getId(), SessionSocketMessage.builder()
                 .type(type)
                 .sessionId(response.getId())

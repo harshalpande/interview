@@ -40,6 +40,28 @@ const isAiQuotaOrCredentialError = (message: string) =>
 
 type AiQuestionProgressStage = 'idle' | 'saving' | 'evaluating' | 'generating' | 'validating' | 'ready';
 
+const logAiQuestionFlow = (message: string, details?: unknown) => {
+  if (details === undefined) {
+    console.info(`[AI Question Flow] ${message}`);
+    return;
+  }
+  console.info(`[AI Question Flow] ${message}`, details);
+};
+
+const summarizeAiQuestionFiles = (files: EditableCodeFile[]) =>
+  files
+    .filter(isManagedAiQuestionFile)
+    .map((file) => ({
+      path: file.path,
+      displayName: file.displayName,
+      activeQuestion: file.activeQuestion === true,
+      submitted: file.submitted === true,
+      editable: file.editable === true,
+      enabledForCandidate: file.enabledForCandidate !== false,
+      difficultyLevel: file.difficultyLevel,
+      executeAttemptCount: file.executeAttemptCount,
+    }));
+
 const Session: React.FC = () => {
   const { sessionId } = useParams<{ sessionId: string }>();
   const [searchParams] = useSearchParams();
@@ -414,10 +436,25 @@ const Session: React.FC = () => {
     () => resolvedCodeFiles.some(isManagedAiQuestionFile),
     [resolvedCodeFiles]
   );
+  const resolvedActiveQuestionPath = React.useMemo(
+    () => resolvedCodeFiles.find((file) => file.activeQuestion && !file.submitted)?.path || '',
+    [resolvedCodeFiles]
+  );
   const resolvedLatestCode = React.useMemo(
     () => (isCodeWorkspaceSession ? resolvePrimaryCodeFromFiles(session?.technology, resolvedCodeFiles) : (currentCode || session?.latestCode || '')),
     [currentCode, isCodeWorkspaceSession, resolvedCodeFiles, session?.latestCode, session?.technology]
   );
+
+  React.useEffect(() => {
+    if (resolvedActiveQuestionPath && resolvedActiveQuestionPath !== activeQuestionPath) {
+      logAiQuestionFlow('syncing active question path from session state', {
+        previousActiveQuestionPath: activeQuestionPath || null,
+        resolvedActiveQuestionPath,
+        files: summarizeAiQuestionFiles(resolvedCodeFiles),
+      });
+      setActiveQuestionPath(resolvedActiveQuestionPath);
+    }
+  }, [activeQuestionPath, resolvedActiveQuestionPath, resolvedCodeFiles]);
 
   React.useEffect(() => {
     if (!sessionId || !role || session?.status !== 'ACTIVE' || !hadStoredSession) {
@@ -531,13 +568,26 @@ const Session: React.FC = () => {
     mutationFn: () => sessionApi.generateNextAiQuestion(sessionId!),
     onMutate: () => {
       setAiQuestionProgressStage('generating');
+      logAiQuestionFlow('first question generation started', { sessionId });
     },
     onSuccess: (response) => {
       setAiQuestionProgressStage('ready');
+      logAiQuestionFlow('first question generation completed', {
+        sessionId,
+        responseQuestionPath: response.question.filePath,
+        responseQuestionTitle: response.question.displayName || response.question.title,
+        refreshedCodeVersion: response.session.codeVersion,
+        refreshedActivePath: response.session.codeFiles?.find((file) => file.activeQuestion && !file.submitted)?.path || null,
+        files: summarizeAiQuestionFiles(response.session.codeFiles || []),
+      });
       refreshSession(response.session);
       setActiveQuestionPath(response.question.filePath);
     },
     onError: (mutationError) => {
+      logAiQuestionFlow('first question generation failed', {
+        sessionId,
+        error: mutationErrorMessage(mutationError),
+      });
       pushSessionToast(`AI question generation failed: ${mutationErrorMessage(mutationError)}`, 'warning');
     },
     onSettled: () => {
@@ -570,13 +620,28 @@ const Session: React.FC = () => {
 
       const frozenFile = files.find((file) => file.path === frozenFilePath);
       if (!frozenFile || !isManagedAiQuestionFile(frozenFile)) {
+        logAiQuestionFlow('freeze ignored because frozen file is not a managed AI question', {
+          sessionId,
+          frozenFilePath,
+          files: summarizeAiQuestionFiles(files),
+        });
         return;
       }
 
+      logAiQuestionFlow('freeze processing started', {
+        sessionId,
+        frozenFilePath,
+        files: summarizeAiQuestionFiles(files),
+      });
       try {
         setAiQuestionProgressStage('saving');
         const latestCode = resolvePrimaryCodeFromFiles(session.technology, files);
         const nextVersion = reserveNextCodeVersion();
+        logAiQuestionFlow('saving frozen answer before follow-up generation', {
+          sessionId,
+          frozenFilePath,
+          nextVersion,
+        });
         const savedSession = await sessionApi.updateCodeState(sessionId, {
           code: latestCode,
           codeFiles: files,
@@ -584,18 +649,36 @@ const Session: React.FC = () => {
           version: nextVersion,
           updatedByRole: wsRole,
         });
+        logAiQuestionFlow('frozen answer saved', {
+          sessionId,
+          savedCodeVersion: savedSession.codeVersion,
+          activePathAfterSave: savedSession.codeFiles?.find((file) => file.activeQuestion && !file.submitted)?.path || null,
+          files: summarizeAiQuestionFiles(savedSession.codeFiles || []),
+        });
         refreshSession(savedSession);
       } catch (saveError) {
         setAiQuestionProgressStage('idle');
+        logAiQuestionFlow('saving frozen answer failed', {
+          sessionId,
+          frozenFilePath,
+          error: mutationErrorMessage(saveError),
+        });
         pushSessionToast(`Unable to save the frozen answer: ${mutationErrorMessage(saveError)}`, 'warning');
         return;
       }
 
       try {
         setAiQuestionProgressStage('evaluating');
+        logAiQuestionFlow('AI evaluation started for frozen question', { sessionId, frozenFilePath });
         await sessionApi.evaluateAiQuestion(sessionId, frozenFilePath);
+        logAiQuestionFlow('AI evaluation completed for frozen question', { sessionId, frozenFilePath });
       } catch (evaluationError) {
         const message = mutationErrorMessage(evaluationError);
+        logAiQuestionFlow('AI evaluation failed for frozen question', {
+          sessionId,
+          frozenFilePath,
+          error: message,
+        });
         pushSessionToast(`AI evaluation failed: ${message}`, 'warning');
         if (isAiQuotaOrCredentialError(message)) {
           setAiQuestionProgressStage('idle');
@@ -607,6 +690,13 @@ const Session: React.FC = () => {
       const maxQuestions = session.maxQuestions ?? 5;
       if (submittedAiQuestionCount >= maxQuestions || (timeLeft ?? session.remainingSec) <= 0) {
         const refreshed = await sessionApi.getSession(sessionId);
+        logAiQuestionFlow('follow-up generation skipped because interview reached limit or time ended', {
+          sessionId,
+          submittedAiQuestionCount,
+          maxQuestions,
+          timeLeft: timeLeft ?? session.remainingSec,
+          files: summarizeAiQuestionFiles(refreshed.codeFiles || []),
+        });
         refreshSession(refreshed);
         return;
       }
@@ -615,16 +705,40 @@ const Session: React.FC = () => {
         const latestSession = await sessionApi.getSession(sessionId);
         refreshSession(latestSession);
         if (latestSession.status !== 'ACTIVE') {
+          logAiQuestionFlow('follow-up generation skipped because refreshed session is not active', {
+            sessionId,
+            status: latestSession.status,
+          });
           setAiQuestionProgressStage('idle');
           return;
         }
         setAiQuestionProgressStage('generating');
         setIsGeneratingFollowupAiQuestion(true);
+        logAiQuestionFlow('follow-up question generation started', {
+          sessionId,
+          frozenFilePath,
+          latestCodeVersion: latestSession.codeVersion,
+          latestActivePath: latestSession.codeFiles?.find((file) => file.activeQuestion && !file.submitted)?.path || null,
+          files: summarizeAiQuestionFiles(latestSession.codeFiles || []),
+        });
         const response = await sessionApi.generateNextAiQuestion(sessionId);
         setAiQuestionProgressStage('ready');
+        logAiQuestionFlow('follow-up question generation completed', {
+          sessionId,
+          responseQuestionPath: response.question.filePath,
+          responseQuestionTitle: response.question.displayName || response.question.title,
+          refreshedCodeVersion: response.session.codeVersion,
+          refreshedActivePath: response.session.codeFiles?.find((file) => file.activeQuestion && !file.submitted)?.path || null,
+          files: summarizeAiQuestionFiles(response.session.codeFiles || []),
+        });
         refreshSession(response.session);
         setActiveQuestionPath(response.question.filePath);
       } catch (generationError) {
+        logAiQuestionFlow('follow-up question generation failed', {
+          sessionId,
+          frozenFilePath,
+          error: mutationErrorMessage(generationError),
+        });
         pushSessionToast(`AI question generation failed: ${mutationErrorMessage(generationError)}`, 'warning');
       } finally {
         setIsGeneratingFollowupAiQuestion(false);
@@ -1339,6 +1453,7 @@ const Session: React.FC = () => {
             initialCodeFiles={resolvedCodeFiles}
             initialCode={resolvedLatestCode}
             initialCodeVersion={normalizeCodeVersion(currentSession?.codeVersion ?? session.codeVersion)}
+            preferredActiveFilePath={resolvedActiveQuestionPath || activeQuestionPath}
             onActiveFileChange={setActiveQuestionPath}
             onQuestionFrozen={handleAiQuestionFrozen}
             showFullscreenToggle={canFullscreen}
@@ -1684,8 +1799,8 @@ function aiQuestionProgressSteps(firstQuestion: boolean) {
     {
       stage: 'validating' as const,
       shortLabel: 'Validate',
-      title: 'Validating hidden reference solution',
-      description: 'The platform is compiling and running the hidden solution before the question is shown.',
+      title: 'Finalizing question checks',
+      description: 'The platform is making sure the next question is ready for the coding environment.',
     },
     {
       stage: 'ready' as const,

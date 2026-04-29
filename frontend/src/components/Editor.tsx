@@ -318,6 +318,27 @@ type AngularWorkspaceFile = EditableCodeFile & {
   readOnlyHint?: string;
 };
 
+const logEditorQuestionFlow = (message: string, details?: unknown) => {
+  if (details === undefined) {
+    console.info(`[Editor Question Flow] ${message}`);
+    return;
+  }
+  console.info(`[Editor Question Flow] ${message}`, details);
+};
+
+const summarizeWorkspaceQuestions = (files: EditableCodeFile[]) =>
+  files
+    .filter((file) => /^Question\d+\.(java|py)$/i.test(file.path) || file.content?.includes('AI Generated Problem Statement:'))
+    .map((file) => ({
+      path: file.path,
+      displayName: file.displayName,
+      activeQuestion: file.activeQuestion === true,
+      submitted: file.submitted === true,
+      editable: file.editable === true,
+      enabledForCandidate: file.enabledForCandidate !== false,
+      difficultyLevel: file.difficultyLevel,
+    }));
+
 const DEFAULT_ANGULAR_FILES: AngularWorkspaceFile[] = [
   {
     path: 'src/app/app.component.ts',
@@ -413,6 +434,7 @@ interface EditorProps {
   initialCode?: string;
   initialCodeFiles?: EditableCodeFile[];
   initialCodeVersion?: number;
+  preferredActiveFilePath?: string;
   onCodeChange?: (code: string) => void;
   onCodeFilesChange?: (files: EditableCodeFile[]) => void;
   onActiveFileChange?: (path: string) => void;
@@ -438,6 +460,7 @@ const Editor: React.FC<EditorProps> = ({
   initialCode,
   initialCodeFiles,
   initialCodeVersion,
+  preferredActiveFilePath,
   onCodeChange,
   onCodeFilesChange,
   onActiveFileChange,
@@ -538,12 +561,43 @@ const Editor: React.FC<EditorProps> = ({
     setWorkspaceFiles(nextFiles);
     setDirtyWorkspacePaths([]);
     setActiveFilePath((previous) => {
-      if (nextFiles.some((file) => file.path === previous)) {
-        return previous;
-      }
-      return nextFiles[0]?.path ?? defaultWorkspaceFiles(executionLanguage)[0].path;
+      const activeQuestion = nextFiles.find((file) => file.activeQuestion === true && file.submitted !== true);
+      const nextActivePath = preferredActiveFilePath && nextFiles.some((file) => file.path === preferredActiveFilePath)
+        ? preferredActiveFilePath
+        : activeQuestion
+          ? activeQuestion.path
+          : nextFiles.some((file) => file.path === previous)
+            ? previous
+            : nextFiles[0]?.path ?? defaultWorkspaceFiles(executionLanguage)[0].path;
+      logEditorQuestionFlow('workspace files applied from session payload', {
+        executionLanguage,
+        initialCodeVersion: hasVersion ? initialCodeVersion : null,
+        preferredActiveFilePath: preferredActiveFilePath || null,
+        previousActiveFilePath: previous || null,
+        nextActivePath,
+        files: summarizeWorkspaceQuestions(nextFiles),
+      });
+      return nextActivePath;
     });
-    }, [executionLanguage, initialCodeFiles, initialCodeVersion, isWorkspaceSession, resolvedInitialCode]);
+    }, [executionLanguage, initialCodeFiles, initialCodeVersion, isWorkspaceSession, preferredActiveFilePath, resolvedInitialCode]);
+
+  useEffect(() => {
+    if (!preferredActiveFilePath || !isWorkspaceSession) {
+      return;
+    }
+    if (workspaceFilesRef.current.some((file) => file.path === preferredActiveFilePath)) {
+      logEditorQuestionFlow('preferred active path selected', {
+        preferredActiveFilePath,
+        files: summarizeWorkspaceQuestions(workspaceFilesRef.current),
+      });
+      setActiveFilePath(preferredActiveFilePath);
+    } else {
+      logEditorQuestionFlow('preferred active path missing from editor workspace', {
+        preferredActiveFilePath,
+        files: summarizeWorkspaceQuestions(workspaceFilesRef.current),
+      });
+    }
+  }, [isWorkspaceSession, preferredActiveFilePath]);
 
   useEffect(() => {
     workspaceFilesRef.current = workspaceFiles;
@@ -575,10 +629,20 @@ const Editor: React.FC<EditorProps> = ({
     }
     const activeQuestion = visibleWorkspaceFiles.find((file) => file.activeQuestion === true && file.submitted !== true);
     if (activeQuestion && activeQuestion.path !== activeFilePath) {
+      logEditorQuestionFlow('candidate visible active question selected', {
+        previousActiveFilePath: activeFilePath,
+        nextActiveFilePath: activeQuestion.path,
+        files: summarizeWorkspaceQuestions(visibleWorkspaceFiles),
+      });
       setActiveFilePath(activeQuestion.path);
       return;
     }
     if (!visibleWorkspaceFiles.some((file) => file.path === activeFilePath)) {
+      logEditorQuestionFlow('current active file hidden, falling back to first visible file', {
+        previousActiveFilePath: activeFilePath,
+        nextActiveFilePath: visibleWorkspaceFiles[0].path,
+        files: summarizeWorkspaceQuestions(visibleWorkspaceFiles),
+      });
       setActiveFilePath(visibleWorkspaceFiles[0].path);
     }
   }, [activeFilePath, isGuidedQuestionWorkspace, participantRole, visibleWorkspaceFiles]);
@@ -820,7 +884,7 @@ const Editor: React.FC<EditorProps> = ({
             ...prev,
             loading: false,
             output: response.stdout || '',
-          error: response.stderr || (response.compileErrors?.join('\n') || ''),
+            error: executionErrorText(response),
             executionTime: response.executionTimeMs || 0,
             previewUrl: response.previewUrl ? `${response.previewUrl}${response.previewUrl.includes('?') ? '&' : '?'}ts=${Date.now()}` : null,
           }));
@@ -846,7 +910,7 @@ const Editor: React.FC<EditorProps> = ({
           ...prev,
           loading: false,
           output: response.stdout || '',
-          error: response.stderr || (response.compileErrors?.join('\n') || ''),
+          error: executionErrorText(response),
           executionTime: response.executionTimeMs || 0,
           previewUrl: null,
         }));
@@ -875,7 +939,7 @@ const Editor: React.FC<EditorProps> = ({
         ...prev,
         loading: false,
         output: response.stdout || '',
-        error: response.stderr || (response.compileErrors?.join('\n') || ''),
+        error: executionErrorText(response),
         executionTime: response.executionTimeMs || 0,
         previewUrl: null,
       }));
@@ -913,7 +977,7 @@ const Editor: React.FC<EditorProps> = ({
         ...prev,
         loading: false,
         output: response.stdout || '',
-        error: response.stderr || (response.compileErrors?.join('\n') || ''),
+        error: executionErrorText(response),
         executionTime: response.executionTimeMs || 0,
         previewUrl: null,
       }));
@@ -1721,6 +1785,35 @@ function ConfirmationModal({
 
 function monacoSafeKey(monaco: Parameters<NonNullable<React.ComponentProps<typeof MonacoEditor>['onMount']>>[1]) {
   return monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter;
+}
+
+function executionErrorText(response: ExecuteResponse) {
+  const parts: string[] = [];
+  const stderr = response.stderr?.trim();
+  if (stderr) {
+    parts.push(stderr);
+  }
+
+  const compileErrors = response.compileErrors
+    ?.map((error) => error?.trim())
+    .filter((error): error is string => Boolean(error)) ?? [];
+  for (const compileError of compileErrors) {
+    const alreadyShown = parts.some((part) => normalizeConsoleText(part).includes(normalizeConsoleText(compileError)));
+    if (!alreadyShown) {
+      parts.push(compileError);
+    }
+  }
+
+  const message = response.message?.trim();
+  if (!parts.length && response.success === false && message) {
+    parts.push(message);
+  }
+
+  return parts.join('\n');
+}
+
+function normalizeConsoleText(value: string) {
+  return value.replace(/\s+/g, ' ').trim();
 }
 
 function buildWorkspaceFiles(executionLanguage: ExecutionLanguage, initialCodeFiles?: EditableCodeFile[]) {

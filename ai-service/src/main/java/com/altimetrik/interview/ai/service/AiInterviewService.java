@@ -29,7 +29,7 @@ public class AiInterviewService {
                 properties.getQuestionModel(),
                 questionInstructions(),
                 toJson(request),
-                1600,
+                5000,
                 questionResponseFormat(),
                 AiQuestionResponse.class
         );
