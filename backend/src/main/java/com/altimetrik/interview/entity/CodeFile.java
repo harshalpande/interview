@@ -47,7 +47,70 @@ public class CodeFile {
 
     private Boolean submitted;
 
+    private Integer difficultyLevel;
+
     private Integer idealDurationMinutes;
+
+    @Column(columnDefinition = "TEXT")
+    private String originalProblemStatement;
+
+    @Column(columnDefinition = "TEXT")
+    private String originalStarterCode;
+
+    @Column(columnDefinition = "TEXT")
+    private String referenceSolution;
+
+    private String expectedTimeComplexity;
+
+    private String expectedSpaceComplexity;
+
+    @Column(columnDefinition = "TEXT")
+    private String questionConcepts;
+
+    @Column(columnDefinition = "TEXT")
+    private String questionEvaluationFocus;
+
+    @Column(columnDefinition = "TEXT")
+    private String questionIntegrityNotes;
+
+    private OffsetDateTime candidateStartedAt;
+
+    private OffsetDateTime submittedAt;
+
+    private Long solveDurationSeconds;
+
+    private Integer executeAttemptCount;
+
+    private Integer aiCorrectnessScore;
+
+    private Integer aiCodeQualityScore;
+
+    private Integer aiEdgeCaseScore;
+
+    private Integer aiEfficiencyScore;
+
+    private Integer aiOverallScore;
+
+    private String aiVerdict;
+
+    private String aiNextDifficulty;
+
+    @Column(columnDefinition = "TEXT")
+    private String aiEvaluationSummary;
+
+    @Column(columnDefinition = "TEXT")
+    private String aiComplexityAssessment;
+
+    @Column(columnDefinition = "TEXT")
+    private String aiQuestionIntegrityNotes;
+
+    @Column(columnDefinition = "TEXT")
+    private String aiEvaluationStrengths;
+
+    @Column(columnDefinition = "TEXT")
+    private String aiEvaluationConcerns;
+
+    private OffsetDateTime aiEvaluatedAt;
 
     @CreationTimestamp
     private OffsetDateTime createdAt;

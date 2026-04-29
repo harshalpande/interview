@@ -3,6 +3,15 @@ package com.altimetrik.interview.service;
 import com.altimetrik.interview.dto.AcceptDisclaimerRequest;
 import com.altimetrik.interview.dto.ActivityEventDto;
 import com.altimetrik.interview.dto.ActivityEventRequest;
+import com.altimetrik.interview.dto.AiEvaluateQuestionRequest;
+import com.altimetrik.interview.dto.AiInterviewRecommendationRequest;
+import com.altimetrik.interview.dto.AiInterviewRecommendationResponse;
+import com.altimetrik.interview.dto.AiPersistedRecommendationDto;
+import com.altimetrik.interview.dto.AiQuestionGenerationRequest;
+import com.altimetrik.interview.dto.AiQuestionResponse;
+import com.altimetrik.interview.dto.AiQuestionSessionResponse;
+import com.altimetrik.interview.dto.AiSolutionEvaluationRequest;
+import com.altimetrik.interview.dto.AiSolutionEvaluationResponse;
 import com.altimetrik.interview.dto.AuthAuditEventDto;
 import com.altimetrik.interview.dto.CreateSessionRequest;
 import com.altimetrik.interview.dto.CodeUpdateRequest;
@@ -28,6 +37,7 @@ import com.altimetrik.interview.entity.CodeFile;
 import com.altimetrik.interview.entity.Feedback;
 import com.altimetrik.interview.entity.FrontendWorkspace;
 import com.altimetrik.interview.entity.InterviewSession;
+import com.altimetrik.interview.entity.InterviewQuestionBank;
 import com.altimetrik.interview.entity.Participant;
 import com.altimetrik.interview.entity.ParticipantAccessChallenge;
 import com.altimetrik.interview.entity.RunResult;
@@ -41,6 +51,7 @@ import com.altimetrik.interview.enums.FeedbackRating;
 import com.altimetrik.interview.enums.FrontendWorkspaceStatus;
 import com.altimetrik.interview.enums.IdentityCaptureFailureReason;
 import com.altimetrik.interview.enums.IdentityCaptureStatus;
+import com.altimetrik.interview.enums.InterviewMode;
 import com.altimetrik.interview.enums.ParticipantConnectionStatus;
 import com.altimetrik.interview.enums.ParticipantAccessStatus;
 import com.altimetrik.interview.enums.ParticipantRole;
@@ -52,6 +63,7 @@ import com.altimetrik.interview.repository.CodeFileRepository;
 import com.altimetrik.interview.repository.CodeStateRepository;
 import com.altimetrik.interview.repository.FeedbackRepository;
 import com.altimetrik.interview.repository.FrontendWorkspaceRepository;
+import com.altimetrik.interview.repository.InterviewQuestionBankRepository;
 import com.altimetrik.interview.repository.ParticipantRepository;
 import com.altimetrik.interview.repository.ParticipantAccessChallengeRepository;
 import com.altimetrik.interview.repository.RunResultRepository;
@@ -246,9 +258,12 @@ public class SessionService {
     private final RunResultRepository runResultRepository;
     private final FeedbackRepository feedbackRepository;
     private final FrontendWorkspaceRepository frontendWorkspaceRepository;
+    private final InterviewQuestionBankRepository interviewQuestionBankRepository;
     private final SessionActivityEventRepository sessionActivityEventRepository;
     private final SandboxClientService sandboxClientService;
     private final FrontendSandboxClientService frontendSandboxClientService;
+    private final AiInterviewClientService aiInterviewClientService;
+    private final AiPolicyEngineService aiPolicyEngineService;
     private final IdentitySnapshotStorageService identitySnapshotStorageService;
     private final FinalPreviewStorageService finalPreviewStorageService;
 
@@ -259,11 +274,23 @@ public class SessionService {
         session.setDurationSec(DEFAULT_DURATION_SEC);
         session.setExtensionUsed(false);
         session.setTechnology(request.getTechnology() == null ? TechnologySkill.JAVA : request.getTechnology());
-        session.setAvMode(request.getAvMode() == null ? AvMode.EXTERNAL : request.getAvMode());
+        InterviewMode interviewMode = request.getInterviewMode() == null ? InterviewMode.HUMAN_INTERVIEWER : request.getInterviewMode();
+        validateInterviewerDetailsForMode(request, interviewMode);
+        session.setInterviewMode(interviewMode);
+        session.setYearsOfExperience(normalizeYearsOfExperience(request.getYearsOfExperience()));
+        session.setTargetRole(normalizeTargetRole(request.getTargetRole()));
+        session.setStartingDifficultyLevel(normalizeDifficultyLevel(request.getStartingDifficultyLevel()));
+        session.setMaxQuestions(normalizeMaxQuestions(request.getMaxQuestions()));
+        session.setAvMode(interviewMode == InterviewMode.AI_INTERVIEWER
+                ? AvMode.EXTERNAL
+                : request.getAvMode() == null ? AvMode.EXTERNAL : request.getAvMode());
         session = sessionRepository.save(session);
 
+        String interviewerName = interviewMode == InterviewMode.AI_INTERVIEWER ? "AI Interviewer" : request.getInterviewerName();
+        String interviewerEmail = interviewMode == InterviewMode.AI_INTERVIEWER ? "ai-interviewer@interview.local" : request.getInterviewerEmail();
+        String interviewerTimeZone = interviewMode == InterviewMode.AI_INTERVIEWER ? null : request.getInterviewerTimeZone();
         participantRepository.save(createParticipant(session.getId(), ParticipantRole.INTERVIEWER,
-                request.getInterviewerName(), request.getInterviewerEmail(), request.getInterviewerTimeZone()));
+                interviewerName, interviewerEmail, interviewerTimeZone));
         participantRepository.save(createParticipant(session.getId(), ParticipantRole.INTERVIEWEE,
                 request.getIntervieweeName(), request.getIntervieweeEmail(), null));
 
@@ -288,6 +315,434 @@ public class SessionService {
         InterviewSession session = getRequiredSession(id);
         ensureFrontendWorkspaceIfNeeded(session);
         return toSessionResponse(session, true);
+    }
+
+    public AiQuestionSessionResponse generateNextAiQuestion(String sessionId) {
+        InterviewSession session = getRequiredSession(sessionId);
+        ensureAiInterview(session);
+        log.info("AI next-question request received sessionId={} status={} technology={} maxQuestions={}",
+                sessionId, session.getStatus(), session.getTechnology(), session.getMaxQuestions());
+        if (session.getStatus() != SessionStatus.ACTIVE) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "AI questions can be generated only while the interview is active.");
+        }
+
+        CodeState codeState = codeStateRepository.findBySessionId(sessionId).orElse(null);
+        List<EditableCodeFileDto> files = new ArrayList<>(resolveEditableFiles(session, codeState));
+        List<EditableCodeFileDto> questionFiles = files.stream()
+                .filter(file -> isManagedAiQuestionFile(session.getTechnology(), file))
+                .toList();
+
+        long submittedCount = questionFiles.stream().filter(file -> Boolean.TRUE.equals(file.getSubmitted())).count();
+        int maxQuestions = session.getMaxQuestions() == null ? 5 : session.getMaxQuestions();
+        log.info("AI next-question state sessionId={} totalFiles={} managedQuestions={} submitted={} activePath={} files={}",
+                sessionId,
+                files.size(),
+                questionFiles.size(),
+                submittedCount,
+                questionFiles.stream()
+                        .filter(file -> Boolean.TRUE.equals(file.getActiveQuestion()) && !Boolean.TRUE.equals(file.getSubmitted()))
+                        .map(EditableCodeFileDto::getPath)
+                        .findFirst()
+                        .orElse("none"),
+                describeAiQuestionFiles(questionFiles));
+        if (submittedCount >= maxQuestions) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "AI interview has already reached the configured question limit.");
+        }
+
+        EditableCodeFileDto activeQuestion = questionFiles.stream()
+                .filter(file -> Boolean.TRUE.equals(file.getActiveQuestion()) && !Boolean.TRUE.equals(file.getSubmitted()))
+                .findFirst()
+                .orElse(null);
+        if (activeQuestion != null) {
+            log.info("AI next-question returning existing active question sessionId={} path={} displayName={} difficulty={}",
+                    sessionId, activeQuestion.getPath(), activeQuestion.getDisplayName(), activeQuestion.getDifficultyLevel());
+            return AiQuestionSessionResponse.builder()
+                    .question(toAiQuestionResponse(activeQuestion))
+                    .session(toSessionResponse(session, true))
+                    .build();
+        }
+
+        int questionNumber = (int) submittedCount + 1;
+        int currentDifficulty = resolveCurrentAiDifficultyLevel(session, submittedCount);
+        AiPolicyEngineService.QuestionPolicyPlan policyPlan = aiPolicyEngineService.questionPolicy(
+                session,
+                currentDifficulty,
+                questionNumber,
+                questionFiles,
+                calculateRemainingSec(session)
+        );
+        AiQuestionGenerationRequest generationRequest = AiQuestionGenerationRequest.builder()
+                .sessionId(sessionId)
+                .technology(session.getTechnology().name())
+                .yearsOfExperience(session.getYearsOfExperience())
+                .targetRole(session.getTargetRole())
+                .startingDifficulty(String.valueOf(session.getStartingDifficultyLevel() == null ? 1 : session.getStartingDifficultyLevel()))
+                .currentDifficulty(String.valueOf(currentDifficulty))
+                .questionNumber(questionNumber)
+                .maxQuestions(maxQuestions)
+                .timeRemainingSeconds((long) calculateRemainingSec(session))
+                .variationSeed(sessionId + "-" + questionNumber + "-" + UUID.randomUUID())
+                .idealDurationMinutes(policyPlan.idealDurationMinutes())
+                .questionPolicy(policyPlan.questionPolicy())
+                .evaluationRubric(policyPlan.evaluationRubric())
+                .targetConcepts(policyPlan.targetConcepts())
+                .previousQuestionTitles(aiQuestionHistoryForGeneration(questionFiles))
+                .previousConcepts(policyPlan.previousConcepts())
+                .avoidConcepts(policyPlan.avoidConcepts())
+                .forbiddenCapabilities(policyPlan.forbiddenCapabilities())
+                .requiredQuestionElements(policyPlan.requiredQuestionElements())
+                .sandboxRules(policyPlan.sandboxRules())
+                .build();
+        log.info("AI next-question generating sessionId={} questionNumber={} difficulty={} remainingSec={} submittedCount={} previousTitles={}",
+                sessionId,
+                questionNumber,
+                currentDifficulty,
+                generationRequest.getTimeRemainingSeconds(),
+                submittedCount,
+                generationRequest.getPreviousQuestionTitles());
+        AiQuestionResponse generated = generateValidatedAiQuestion(session, generationRequest, questionFiles);
+
+        EditableCodeFileDto generatedFile = buildAiQuestionFile(session.getTechnology(), generated, questionNumber, activeQuestion, files.size());
+        List<EditableCodeFileDto> nextFiles = upsertAiQuestionFile(files, generatedFile);
+        validateWorkspaceFiles(session.getTechnology(), nextFiles);
+        runResultRepository.deleteBySessionIdAndFilePath(sessionId, generatedFile.getPath());
+        replaceCodeFiles(sessionId, nextFiles);
+        Long generatedCodeVersion = advanceCodeVersionForGeneratedAiQuestion(sessionId, nextFiles, generatedFile.getContent());
+        log.info("AI next-question persisted sessionId={} generatedPath={} displayName={} difficulty={} nextFiles={}",
+                sessionId,
+                generatedFile.getPath(),
+                generatedFile.getDisplayName(),
+                generatedFile.getDifficultyLevel(),
+                describeAiQuestionFiles(nextFiles.stream()
+                        .filter(file -> isManagedAiQuestionFile(session.getTechnology(), file))
+                        .toList()));
+
+        SessionResponse refreshed = getSession(sessionId);
+        log.info("AI next-question response sessionId={} responseQuestionPath={} refreshedActivePath={} refreshedCodeVersion={} refreshedFiles={}",
+                sessionId,
+                generatedFile.getPath(),
+                refreshed.getCodeFiles() == null ? "none" : refreshed.getCodeFiles().stream()
+                        .filter(file -> Boolean.TRUE.equals(file.getActiveQuestion()) && !Boolean.TRUE.equals(file.getSubmitted()))
+                        .map(EditableCodeFileDto::getPath)
+                        .findFirst()
+                        .orElse("none"),
+                refreshed.getCodeVersion(),
+                refreshed.getCodeFiles() == null ? "[]" : describeAiQuestionFiles(refreshed.getCodeFiles().stream()
+                        .filter(file -> isManagedAiQuestionFile(session.getTechnology(), file))
+                        .toList()));
+        log.info("AI next-question code version advanced sessionId={} generatedCodeVersion={} refreshedCodeVersion={}",
+                sessionId, generatedCodeVersion, refreshed.getCodeVersion());
+        return AiQuestionSessionResponse.builder()
+                .question(toAiQuestionResponse(generatedFile))
+                .session(refreshed)
+                .build();
+    }
+
+    private Long advanceCodeVersionForGeneratedAiQuestion(String sessionId,
+                                                          List<EditableCodeFileDto> files,
+                                                          String fallbackLatestCode) {
+        CodeState codeState = codeStateRepository.findBySessionId(sessionId).orElseGet(CodeState::new);
+        long storedVersion = codeState.getVersion() == null ? 0L : codeState.getVersion();
+        long nextVersion = storedVersion + 1;
+        codeState.setSessionId(sessionId);
+        codeState.setLatestCode(resolvePrimaryCode(files, fallbackLatestCode));
+        codeState.setStorageMode(CodeStorageMode.MULTI_FILE);
+        codeState.setUpdatedAt(nowUtc());
+        codeState.setUpdatedByRole(ParticipantRole.INTERVIEWER.name());
+        codeState.setVersion(nextVersion);
+        codeStateRepository.save(codeState);
+        return nextVersion;
+    }
+
+    private String describeAiQuestionFiles(List<EditableCodeFileDto> files) {
+        if (files == null || files.isEmpty()) {
+            return "[]";
+        }
+        return files.stream()
+                .map(file -> "%s{submitted=%s,active=%s,enabled=%s,editable=%s,difficulty=%s,versionMeta=%s}"
+                        .formatted(
+                                file.getPath(),
+                                Boolean.TRUE.equals(file.getSubmitted()),
+                                Boolean.TRUE.equals(file.getActiveQuestion()),
+                                file.getEnabledForCandidate() == null || Boolean.TRUE.equals(file.getEnabledForCandidate()),
+                                Boolean.TRUE.equals(file.getEditable()),
+                                file.getDifficultyLevel(),
+                                file.getSubmittedAt() == null ? "open" : "submitted"
+                        ))
+                .toList()
+                .toString();
+    }
+
+    public AiSolutionEvaluationResponse evaluateAiQuestion(String sessionId, AiEvaluateQuestionRequest request) {
+        InterviewSession session = getRequiredSession(sessionId);
+        ensureAiInterview(session);
+
+        EditableCodeFileDto question = resolveAiEvaluationTarget(session, request == null ? null : request.getFilePath());
+        AiSolutionEvaluationResponse response = aiInterviewClientService.evaluateSolution(toAiEvaluationRequest(session, question, questionIndex(session, question)));
+        CodeFile codeFile = codeFileRepository.findBySessionIdAndFilePath(sessionId, question.getPath())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "AI question file was not found."));
+        codeFile.setQuestionIntegrityNotes(resolveQuestionIntegrityNotes(question));
+        applyAiEvaluation(codeFile, response);
+        codeFileRepository.save(codeFile);
+        return response;
+    }
+
+    public AiInterviewRecommendationResponse recommendAiInterview(String sessionId) {
+        InterviewSession session = getRequiredSession(sessionId);
+        ensureAiInterview(session);
+
+        List<EditableCodeFileDto> files = resolveEditableFiles(session, codeStateRepository.findBySessionId(sessionId).orElse(null)).stream()
+                .filter(file -> isManagedAiQuestionFile(session.getTechnology(), file))
+                .filter(file -> Boolean.TRUE.equals(file.getSubmitted()))
+                .toList();
+        if (files.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "No submitted AI questions are available for recommendation.");
+        }
+
+        List<AiSolutionEvaluationRequest> questionResults = new ArrayList<>();
+        for (EditableCodeFileDto file : files) {
+            questionResults.add(toAiEvaluationRequest(session, file, questionIndex(session, file)));
+        }
+
+        AiPolicyEngineService.RecommendationPolicy recommendationPolicy = aiPolicyEngineService.recommendationPolicy(session);
+        AiInterviewRecommendationRequest recommendationRequest = AiInterviewRecommendationRequest.builder()
+                .sessionId(sessionId)
+                .technology(session.getTechnology().name())
+                .targetRole(session.getTargetRole())
+                .yearsOfExperience(session.getYearsOfExperience())
+                .maxQuestions(session.getMaxQuestions())
+                .recommendationPolicy(recommendationPolicy.recommendationPolicy())
+                .evaluationRubric(recommendationPolicy.evaluationRubric())
+                .questionResults(questionResults)
+                .build();
+        AiInterviewRecommendationResponse response = recommendAiInterviewOrFallback(session, recommendationRequest, questionResults);
+        response = applyRecommendationGuardrails(session, response, questionResults, files);
+        applyAiRecommendation(session, response);
+        sessionRepository.save(session);
+        return response;
+    }
+
+    private AiInterviewRecommendationResponse recommendAiInterviewOrFallback(InterviewSession session,
+                                                                             AiInterviewRecommendationRequest request,
+                                                                             List<AiSolutionEvaluationRequest> questionResults) {
+        try {
+            return aiInterviewClientService.recommend(request);
+        } catch (ResponseStatusException exception) {
+            if (exception.getStatusCode() == HttpStatus.SERVICE_UNAVAILABLE
+                    || exception.getStatusCode() == HttpStatus.TOO_MANY_REQUESTS
+                    || exception.getStatusCode() == HttpStatus.BAD_GATEWAY) {
+                log.warn("AI recommendation provider unavailable for session {}. Using metrics-based fallback. Reason: {}",
+                        session.getId(), exception.getReason());
+                return fallbackAiRecommendation(session, questionResults, exception.getReason());
+            }
+            throw exception;
+        }
+    }
+
+    private AiInterviewRecommendationResponse fallbackAiRecommendation(InterviewSession session,
+                                                                       List<AiSolutionEvaluationRequest> questionResults,
+                                                                       String providerReason) {
+        List<AiSolutionEvaluationRequest> results = questionResults == null ? List.of() : questionResults;
+        long successfulRuns = results.stream().filter(this::hasSuccessfulQuestionRun).count();
+        int attempted = results.size();
+        int totalAttempts = results.stream()
+                .map(AiSolutionEvaluationRequest::getExecuteAttemptCount)
+                .filter(Objects::nonNull)
+                .mapToInt(Integer::intValue)
+                .sum();
+        double successRatio = attempted == 0 ? 0.0 : (double) successfulRuns / attempted;
+        int attemptPenalty = Math.min(15, Math.max(0, totalAttempts - attempted * 3));
+        int score = Math.max(0, Math.min(100, (int) Math.round(successRatio * 90) + completionBonus(results) - attemptPenalty));
+
+        AiInterviewRecommendationResponse response = new AiInterviewRecommendationResponse();
+        response.setOverallScore(score);
+        response.setRating(score >= 85 ? "EXCELLENT" : score >= 70 ? "GOOD" : score >= 50 ? "FAIR" : score >= 35 ? "BAD" : "DISQUALIFIED");
+        response.setRecommendationDecision(score >= 70 ? "YES" : score >= 50 ? "REEVALUATION" : "NO");
+        response.setSummary("Generated from captured execution metrics because the AI provider was unavailable. "
+                + successfulRuns + " of " + attempted + " submitted question(s) had a successful captured run.");
+        response.setStrengths(List.of(
+                "Submitted " + attempted + " AI question(s) for review.",
+                successfulRuns + " question(s) show successful execution output."
+        ));
+        response.setRisks(List.of(
+                firstNonBlank(providerReason, "AI provider did not return a live recommendation."),
+                "Human review is required to validate code quality, edge cases, and communication."
+        ));
+        response.setSuggestedFollowUps(List.of(
+                "Review the submitted code, run output, errors, time taken, and execute-attempt count.",
+                "Compare the solution against the hidden reference solution and expected complexity."
+        ));
+        response.setHumanReviewRequired(true);
+        return response;
+    }
+
+    private boolean hasSuccessfulQuestionRun(AiSolutionEvaluationRequest result) {
+        String stdout = result.getStdout() == null ? "" : result.getStdout().toLowerCase(Locale.ROOT);
+        String stderr = result.getStderr() == null ? "" : result.getStderr().trim();
+        return Objects.equals(result.getExitStatus(), 0)
+                && stderr.isBlank()
+                && (stdout.contains("all assertions passed") || !stdout.isBlank());
+    }
+
+    private AiInterviewRecommendationResponse applyRecommendationGuardrails(InterviewSession session,
+                                                                            AiInterviewRecommendationResponse response,
+                                                                            List<AiSolutionEvaluationRequest> questionResults,
+                                                                            List<EditableCodeFileDto> submittedFiles) {
+        List<AiSolutionEvaluationRequest> results = questionResults == null ? List.of() : questionResults;
+        List<EditableCodeFileDto> files = submittedFiles == null ? List.of() : submittedFiles;
+        int expectedClean = Math.min(3, Math.max(1, session.getMaxQuestions() == null ? 5 : session.getMaxQuestions()));
+        long cleanSolved = results.stream().filter(this::isCleanSolvedQuestion).count();
+        long successfulRuns = results.stream().filter(this::hasSuccessfulQuestionRun).count();
+        long integrityIssues = results.stream().filter(this::hasQuestionIntegrityViolation).count();
+        long missingTime = results.stream().filter(result -> result.getSolveDurationSeconds() == null || result.getSolveDurationSeconds() <= 0).count();
+        long suspiciousCount = sessionActivityEventRepository.findBySessionIdOrderByCreatedAtAsc(session.getId()).stream()
+                .filter(event -> event.getSeverity() == ActivityEventSeverity.SUSPICIOUS)
+                .count();
+
+        int originalScore = response.getOverallScore() == null ? scoreFromRating(response.getRating()) : response.getOverallScore();
+        int evidenceScore = partialEvidenceScore(files, results, expectedClean);
+        int cleanScore = Math.round((cleanSolved * 100f) / expectedClean);
+        int policyCap = cleanScore;
+        if (cleanSolved < expectedClean) {
+            policyCap = Math.min(policyCap, cleanSolved == 0 ? 25 : cleanSolved == 1 ? 45 : 65);
+        }
+        if (integrityIssues > 0) {
+            policyCap = Math.min(policyCap, 45);
+        }
+        if (missingTime > 0) {
+            policyCap = Math.min(policyCap, 70);
+        }
+        if (suspiciousCount >= 5) {
+            policyCap = Math.min(policyCap, 35);
+        } else if (suspiciousCount >= 3) {
+            policyCap = Math.min(policyCap, 65);
+        }
+        int guardedScore = Math.min(Math.max(originalScore, evidenceScore), Math.max(0, policyCap));
+
+        response.setOverallScore(Math.max(0, Math.min(100, guardedScore)));
+        response.setRating(ratingForScore(response.getOverallScore()));
+        response.setRecommendationDecision(decisionForGuardrails(response.getOverallScore(), cleanSolved, expectedClean, integrityIssues, suspiciousCount));
+        response.setSummary("%d/%d clean question%s. %d successful run%s. Integrity issues: %d. Suspicious events: %d."
+                .formatted(
+                        cleanSolved,
+                        expectedClean,
+                        expectedClean == 1 ? "" : "s expected",
+                        successfulRuns,
+                        successfulRuns == 1 ? "" : "s",
+                        integrityIssues,
+                        suspiciousCount
+                ));
+        response.setStrengths(compactSignals(nullableSignals(
+                cleanSolved > 0 ? cleanSolved + " clean solved question" + (cleanSolved == 1 ? "" : "s") : null,
+                successfulRuns > 0 ? successfulRuns + " successful captured run" + (successfulRuns == 1 ? "" : "s") : null
+        )));
+        response.setRisks(compactSignals(nullableSignals(
+                cleanSolved < expectedClean ? "Below minimum clean-solve expectation" : null,
+                integrityIssues > 0 ? "Question/test integrity concern" : null,
+                suspiciousCount >= 3 ? "High suspicious activity" : null,
+                missingTime > 0 ? "Unsubmitted or incomplete question evidence" : null
+        )));
+        response.setSuggestedFollowUps(compactSignals(nullableSignals(
+                integrityIssues > 0 ? "Review tampered problem/assertions" : null,
+                suspiciousCount >= 3 ? "Review integrity activity" : null,
+                cleanSolved < expectedClean ? "Review failed or unattempted questions" : null
+        )));
+        response.setHumanReviewRequired(true);
+        return response;
+    }
+
+    private boolean isCleanSolvedQuestion(AiSolutionEvaluationRequest result) {
+        return hasSuccessfulQuestionRun(result)
+                && !hasQuestionIntegrityViolation(result);
+    }
+
+    private int partialEvidenceScore(List<EditableCodeFileDto> files,
+                                     List<AiSolutionEvaluationRequest> results,
+                                     int expectedClean) {
+        int submittedCount = Math.max(0, files.size());
+        double coverageRatio = expectedClean <= 0 ? 1.0 : Math.min(1.0, (double) submittedCount / expectedClean);
+        double averageAiScore = files.stream()
+                .map(EditableCodeFileDto::getAiEvaluation)
+                .filter(Objects::nonNull)
+                .map(AiSolutionEvaluationResponse::getOverallScore)
+                .filter(Objects::nonNull)
+                .mapToInt(Integer::intValue)
+                .average()
+                .orElseGet(() -> results.stream().filter(this::hasSuccessfulQuestionRun).count() > 0 ? 50.0 : 0.0);
+        int evidenceScore = (int) Math.round(averageAiScore * coverageRatio);
+        long successfulRuns = results.stream().filter(this::hasSuccessfulQuestionRun).count();
+        if (successfulRuns > 0) {
+            evidenceScore = Math.max(evidenceScore, (int) Math.min(30, 12 + successfulRuns * 4));
+        }
+        return Math.max(0, Math.min(100, evidenceScore));
+    }
+
+    private boolean hasQuestionIntegrityViolation(AiSolutionEvaluationRequest result) {
+        String notes = (result.getQuestionIntegrityNotes() == null ? "" : result.getQuestionIntegrityNotes()).toLowerCase(Locale.ROOT);
+        return notes.contains("healthy: false")
+                || notes.contains("changed")
+                || notes.contains("removed")
+                || notes.contains("tamper")
+                || notes.contains("mismatch")
+                || notes.contains("integrity concern");
+    }
+
+    private int scoreFromRating(String rating) {
+        if (rating == null) {
+            return 50;
+        }
+        return switch (rating.toUpperCase(Locale.ROOT)) {
+            case "EXCELLENT" -> 90;
+            case "GOOD" -> 75;
+            case "FAIR" -> 55;
+            case "BAD" -> 35;
+            case "DISQUALIFIED" -> 10;
+            default -> 50;
+        };
+    }
+
+    private String ratingForScore(Integer score) {
+        int safeScore = score == null ? 0 : score;
+        if (safeScore >= 85) {
+            return "EXCELLENT";
+        }
+        if (safeScore >= 70) {
+            return "GOOD";
+        }
+        if (safeScore >= 50) {
+            return "FAIR";
+        }
+        if (safeScore >= 35) {
+            return "BAD";
+        }
+        return "DISQUALIFIED";
+    }
+
+    private String decisionForGuardrails(Integer score, long cleanSolved, int expectedClean, long integrityIssues, long suspiciousCount) {
+        if (integrityIssues > 0 || suspiciousCount >= 5 || cleanSolved == 0) {
+            return "NO";
+        }
+        if (cleanSolved < expectedClean || score == null || score < 70 || suspiciousCount >= 3) {
+            return "REEVALUATION";
+        }
+        return "YES";
+    }
+
+    private List<String> compactSignals(List<String> values) {
+        return values.stream()
+                .filter(value -> value != null && !value.isBlank())
+                .limit(3)
+                .toList();
+    }
+
+    private List<String> nullableSignals(String... values) {
+        return Arrays.asList(values);
+    }
+
+    private int completionBonus(List<AiSolutionEvaluationRequest> results) {
+        return results.stream().anyMatch(result -> result.getSolveDurationSeconds() != null && result.getSolveDurationSeconds() > 0)
+                ? 10
+                : 0;
     }
 
     @Transactional(readOnly = true)
@@ -662,22 +1117,18 @@ public class SessionService {
         return toSessionResponse(session, true);
     }
 
-    @Transactional
     public SessionResponse endSession(String sessionId, EndSessionRequest request) {
         return endSession(sessionId, request.getFinalCode(), request.getCodeFiles(), request.getActiveFilePath(), null);
     }
 
-    @Transactional
     public SessionResponse endSession(String sessionId, String finalCode, FeedbackRequest feedbackRequest) {
         return endSession(sessionId, finalCode, null, null, feedbackRequest);
     }
 
-    @Transactional
     public SessionResponse endSession(String sessionId, String finalCode, List<EditableCodeFileDto> codeFiles, FeedbackRequest feedbackRequest) {
         return endSession(sessionId, finalCode, codeFiles, null, feedbackRequest);
     }
 
-    @Transactional
     public SessionResponse endSession(String sessionId,
                                       String finalCode,
                                       List<EditableCodeFileDto> codeFiles,
@@ -722,8 +1173,9 @@ public class SessionService {
         session.setStatus(SessionStatus.ENDED);
         clearRecoveryWindow(session);
         sessionRepository.save(session);
+        generateAiRecommendationAfterEndIfNeeded(session);
         cleanupFrontendWorkspaceIfNeeded(session);
-        return toSessionResponse(session, true);
+        return getSession(sessionId);
     }
 
     @Transactional
@@ -757,6 +1209,24 @@ public class SessionService {
         cleanupFrontendWorkspaceIfNeeded(session);
 
         return toSessionResponse(session, true);
+    }
+
+    private void generateAiRecommendationAfterEndIfNeeded(InterviewSession session) {
+        if (!isAiInterview(session) || session.getAiRecommendationGeneratedAt() != null) {
+            return;
+        }
+        try {
+            recommendAiInterview(session.getId());
+        } catch (ResponseStatusException exception) {
+            if (exception.getStatusCode() == HttpStatus.CONFLICT) {
+                log.info("Skipping AI recommendation for session {}: {}", session.getId(), exception.getReason());
+            } else {
+                log.warn("AI recommendation could not be generated for ended session {}: {}",
+                        session.getId(), exception.getReason());
+            }
+        } catch (RuntimeException exception) {
+            log.warn("AI recommendation could not be generated for ended session {}", session.getId(), exception);
+        }
     }
 
     @Transactional
@@ -1073,6 +1543,1017 @@ public class SessionService {
         };
     }
 
+    private Integer normalizeYearsOfExperience(Integer yearsOfExperience) {
+        if (yearsOfExperience == null) {
+            return null;
+        }
+        return Math.max(0, Math.min(50, yearsOfExperience));
+    }
+
+    private String normalizeTargetRole(String targetRole) {
+        if (targetRole == null || targetRole.isBlank()) {
+            return null;
+        }
+        String trimmed = targetRole.trim();
+        return trimmed.length() > 120 ? trimmed.substring(0, 120) : trimmed;
+    }
+
+    private void ensureAiInterview(InterviewSession session) {
+        if (!isAiInterview(session)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "AI operations are available only for AI interviewer sessions.");
+        }
+    }
+
+    private AiQuestionResponse generateAiQuestionOrFallback(InterviewSession session,
+                                                            AiQuestionGenerationRequest request,
+                                                            List<EditableCodeFileDto> previousQuestionFiles) {
+        try {
+            return aiInterviewClientService.generateQuestion(request);
+        } catch (ResponseStatusException exception) {
+            if (exception.getStatusCode() == HttpStatus.SERVICE_UNAVAILABLE
+                    || exception.getStatusCode() == HttpStatus.TOO_MANY_REQUESTS
+                    || exception.getStatusCode() == HttpStatus.BAD_GATEWAY) {
+                log.warn("AI provider unavailable for session {} question {}. Using fallback question. Reason: {}",
+                        session.getId(), request.getQuestionNumber(), exception.getReason());
+                return fallbackAiQuestion(session.getTechnology(), request, previousQuestionFiles);
+            }
+            throw exception;
+        }
+    }
+
+    private AiQuestionResponse generateValidatedAiQuestion(InterviewSession session,
+                                                           AiQuestionGenerationRequest request,
+                                                           List<EditableCodeFileDto> previousQuestionFiles) {
+        if (!requiresReferenceValidation(session.getTechnology())) {
+            return generateAiQuestionOrFallback(session, request, previousQuestionFiles);
+        }
+
+        List<String> failures = new ArrayList<>();
+        int maxAttempts = 3;
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            request.setVariationSeed(request.getSessionId() + "-" + request.getQuestionNumber() + "-validated-" + attempt + "-" + UUID.randomUUID());
+            AiQuestionResponse generated = generateAiQuestionOrFallback(session, request, previousQuestionFiles);
+            QuestionValidationResult validation = validateGeneratedQuestion(session, generated, request.getQuestionNumber());
+            if (validation.valid()) {
+                return generated;
+            }
+            failures.add("Attempt " + attempt + ": " + validation.reason());
+            log.warn("AI generated question failed validation for session {} question {} attempt {}: {}",
+                    session.getId(), request.getQuestionNumber(), attempt, validation.reason());
+        }
+
+        AiQuestionResponse fallback = hardcodedFallbackAiQuestion(session.getTechnology(), request);
+        QuestionValidationResult fallbackValidation = validateGeneratedQuestion(session, fallback, request.getQuestionNumber());
+        if (fallbackValidation.valid()) {
+            log.warn("Using validated fallback question for session {} question {} after AI validation failures: {}",
+                    session.getId(), request.getQuestionNumber(), String.join(" | ", failures));
+            return fallback;
+        }
+
+        failures.add("Fallback: " + fallbackValidation.reason());
+        throw new ResponseStatusException(
+                HttpStatus.SERVICE_UNAVAILABLE,
+                "Unable to prepare a validated AI question right now. " + String.join(" | ", failures)
+        );
+    }
+
+    private boolean requiresReferenceValidation(TechnologySkill technology) {
+        return technology == TechnologySkill.JAVA || technology == TechnologySkill.PYTHON;
+    }
+
+    private QuestionValidationResult validateGeneratedQuestion(InterviewSession session, AiQuestionResponse question, Integer questionNumber) {
+        if (question == null) {
+            return QuestionValidationResult.invalid("question response was empty");
+        }
+        String starterCode = question.getStarterCode() == null ? "" : question.getStarterCode();
+        String referenceSolution = question.getReferenceSolution() == null ? "" : question.getReferenceSolution();
+        if (referenceSolution.isBlank()) {
+            return QuestionValidationResult.invalid("referenceSolution was empty");
+        }
+
+        List<String> starterAssertions = extractValidationLines(starterCode);
+        if (starterAssertions.isEmpty()) {
+            return QuestionValidationResult.invalid("starterCode did not contain runnable validation assertions");
+        }
+        List<String> referenceAssertions = extractValidationLines(referenceSolution);
+        if (referenceAssertions.isEmpty()) {
+            return QuestionValidationResult.invalid("referenceSolution did not contain validation assertions");
+        }
+        List<String> normalizedReferenceAssertions = referenceAssertions.stream()
+                .map(this::normalizeForIntegrity)
+                .toList();
+        List<String> missingAssertions = starterAssertions.stream()
+                .filter(assertion -> !normalizedReferenceAssertions.contains(normalizeForIntegrity(assertion)))
+                .toList();
+        if (!missingAssertions.isEmpty()) {
+            return QuestionValidationResult.invalid("referenceSolution did not include starter assertions: " + String.join(" | ", missingAssertions));
+        }
+
+        String validationSessionId = session.getId() + "-question-validation";
+        String filePath = normalizeAiFilePath(session.getTechnology(), question.getFilePath(), defaultAiQuestionPath(session.getTechnology(), questionNumber == null ? 1 : questionNumber));
+        ExecuteResponse response = sandboxClientService.execute(buildExecuteRequest(
+                validationSessionId,
+                referenceSolution,
+                null,
+                filePath,
+                session.getTechnology()
+        ));
+        String stderr = firstNonBlank(response.getStderr(), String.join("\n", response.getCompileErrors() == null ? List.of() : response.getCompileErrors()));
+        if (response.getExitCode() != 0 || !stderr.isBlank()) {
+            return QuestionValidationResult.invalid("reference solution failed sandbox run with exit " + response.getExitCode() + ": " + compactValidationMessage(stderr));
+        }
+        return QuestionValidationResult.ok();
+    }
+
+    private String compactValidationMessage(String value) {
+        if (value == null || value.isBlank()) {
+            return "no error details";
+        }
+        String compact = value.replaceAll("\\s+", " ").trim();
+        return compact.length() > 240 ? compact.substring(0, 240) : compact;
+    }
+
+    private record QuestionValidationResult(boolean valid, String reason) {
+        static QuestionValidationResult ok() {
+            return new QuestionValidationResult(true, "");
+        }
+
+        static QuestionValidationResult invalid(String reason) {
+            return new QuestionValidationResult(false, reason == null || reason.isBlank() ? "validation failed" : reason);
+        }
+    }
+
+    private AiQuestionResponse fallbackAiQuestion(TechnologySkill technology,
+                                                  AiQuestionGenerationRequest request,
+                                                  List<EditableCodeFileDto> previousQuestionFiles) {
+        AiQuestionResponse questionBankFallback = questionBankFallback(technology, request, previousQuestionFiles);
+        if (questionBankFallback != null) {
+            return questionBankFallback;
+        }
+
+        return hardcodedFallbackAiQuestion(technology, request);
+    }
+
+    private AiQuestionResponse hardcodedFallbackAiQuestion(TechnologySkill technology, AiQuestionGenerationRequest request) {
+        int difficultyLevel = normalizeDifficultyLevel(null, request.getCurrentDifficulty());
+        return switch (technology) {
+            case PYTHON -> fallbackPythonQuestion(request, difficultyLevel);
+            case ANGULAR -> fallbackAngularQuestion(request, difficultyLevel);
+            case REACT -> fallbackReactQuestion(request, difficultyLevel);
+            default -> fallbackJavaQuestion(request, difficultyLevel);
+        };
+    }
+
+    private AiQuestionResponse questionBankFallback(TechnologySkill technology,
+                                                    AiQuestionGenerationRequest request,
+                                                    List<EditableCodeFileDto> previousQuestionFiles) {
+        if (technology != TechnologySkill.JAVA && technology != TechnologySkill.PYTHON) {
+            return null;
+        }
+        int requestedLevel = normalizeDifficultyLevel(null, request.getCurrentDifficulty());
+        List<String> previousTitles = request.getPreviousQuestionTitles() == null ? List.of() : request.getPreviousQuestionTitles();
+        List<InterviewQuestionBank> candidates = interviewQuestionBankRepository.findByTechnologyAndActiveTrueOrderByDifficultyLevelAscTitleAsc(technology);
+        if (candidates.isEmpty()) {
+            return null;
+        }
+
+        List<InterviewQuestionBank> exactLevelCandidates = candidates.stream()
+                .filter(question -> question.getDifficultyLevel() != null && question.getDifficultyLevel() == requestedLevel)
+                .filter(question -> previousTitles.stream().noneMatch(previous -> previous.equalsIgnoreCase(question.getTitle())))
+                .filter(question -> !matchesPreviousQuestion(question, previousQuestionFiles))
+                .toList();
+        List<InterviewQuestionBank> nearLevelCandidates = candidates.stream()
+                .filter(question -> Math.abs(normalizeDifficultyLevel(question.getDifficultyLevel()) - requestedLevel) <= 1)
+                .filter(question -> previousTitles.stream().noneMatch(previous -> previous.equalsIgnoreCase(question.getTitle())))
+                .filter(question -> !matchesPreviousQuestion(question, previousQuestionFiles))
+                .toList();
+        List<InterviewQuestionBank> selectionPool = !exactLevelCandidates.isEmpty()
+                ? exactLevelCandidates
+                : !nearLevelCandidates.isEmpty() ? nearLevelCandidates : candidates;
+        InterviewQuestionBank selected = selectionPool.get(Math.floorMod(
+                Objects.hash(request.getSessionId(), request.getQuestionNumber(), request.getVariationSeed(), requestedLevel),
+                selectionPool.size()));
+
+        return AiQuestionResponse.builder()
+                .title(selected.getTitle())
+                .filePath(selected.getFilePath())
+                .displayName("Question " + (request.getQuestionNumber() == null ? 1 : request.getQuestionNumber()))
+                .problemStatement(selected.getProblemStatement())
+                .starterCode(selected.getStarterCode())
+                .difficulty(String.valueOf(normalizeDifficultyLevel(selected.getDifficultyLevel())))
+                .difficultyLevel(normalizeDifficultyLevel(selected.getDifficultyLevel()))
+                .idealDurationMinutes(normalizeIdealDuration(selected.getIdealDurationMinutes(), normalizeDifficultyLevel(selected.getDifficultyLevel())))
+                .referenceSolution(selected.getReferenceSolution())
+                .expectedTimeComplexity(selected.getExpectedTimeComplexity())
+                .expectedSpaceComplexity(selected.getExpectedSpaceComplexity())
+                .concepts(splitList(selected.getConcepts()))
+                .evaluationFocus(splitList(selected.getEvaluationFocus()))
+                .build();
+    }
+
+    private List<String> aiQuestionHistoryForGeneration(List<EditableCodeFileDto> questionFiles) {
+        if (questionFiles == null || questionFiles.isEmpty()) {
+            return List.of();
+        }
+        return questionFiles.stream()
+                .map(file -> {
+                    String source = firstNonBlank(file.getOriginalProblemStatement(), file.getContent());
+                    String compactSource = source == null ? "" : source.replaceAll("\\s+", " ").trim();
+                    if (compactSource.length() > 320) {
+                        compactSource = compactSource.substring(0, 320);
+                    }
+                    return firstNonBlank(file.getDisplayName(), file.getPath()) + ": " + compactSource;
+                })
+                .filter(value -> value != null && !value.isBlank())
+                .toList();
+    }
+
+    private boolean matchesPreviousQuestion(InterviewQuestionBank question, List<EditableCodeFileDto> previousQuestionFiles) {
+        if (question == null || previousQuestionFiles == null || previousQuestionFiles.isEmpty()) {
+            return false;
+        }
+        String bankStarter = normalizeQuestionMatchText(question.getStarterCode());
+        String bankProblem = normalizeQuestionMatchText(question.getProblemStatement());
+        return previousQuestionFiles.stream().anyMatch(file -> {
+            String previousStarter = normalizeQuestionMatchText(firstNonBlank(file.getOriginalStarterCode(), file.getContent()));
+            String previousProblem = normalizeQuestionMatchText(firstNonBlank(file.getOriginalProblemStatement(), file.getContent()));
+            return (!bankStarter.isBlank() && bankStarter.equals(previousStarter))
+                    || (!bankProblem.isBlank() && bankProblem.equals(previousProblem));
+        });
+    }
+
+    private String normalizeQuestionMatchText(String value) {
+        return value == null ? "" : value.replaceAll("\\s+", " ").trim();
+    }
+
+    private AiQuestionResponse fallbackJavaQuestion(AiQuestionGenerationRequest request, int difficultyLevel) {
+        String methodName = difficultyLevel >= 3 ? "hasBalancedBrackets" : "countCharOccurrences";
+        String problem = difficultyLevel >= 3
+                ? """
+                Implement a Java method `hasBalancedBrackets` that receives a non-null string and returns true when all `()`, `{}`, and `[]` brackets are balanced and correctly nested. Ignore all non-bracket characters.
+
+                Examples:
+                - "{[()]}" -> true
+                - "{[(])}" -> false
+                - "abc(def)[x]" -> true
+                - "(((" -> false
+                """
+                : """
+                Implement a Java method `countCharOccurrences` that receives a non-null string `text` and a character `targetChar`, then returns how many times the character appears in the text. The comparison is case-sensitive.
+
+                Examples:
+                - "hello world", 'o' -> 2
+                - "Programming", 'g' -> 2
+                - "Test", 't' -> 1
+                - "", 'x' -> 0
+                """;
+        String starter = difficultyLevel >= 3
+                ? """
+                import org.junit.Assert;
+                import java.util.ArrayDeque;
+                import java.util.Deque;
+
+                public class Main {
+                    public static boolean hasBalancedBrackets(String text) {
+                        // TODO: implement
+                        return false;
+                    }
+
+                    public static void main(String[] args) {
+                        Assert.assertTrue(hasBalancedBrackets("{[()]}"));
+                        Assert.assertFalse(hasBalancedBrackets("{[(])}"));
+                        Assert.assertTrue(hasBalancedBrackets("abc(def)[x]"));
+                        Assert.assertFalse(hasBalancedBrackets("((("));
+                        System.out.println("All assertions passed");
+                    }
+                }
+                """
+                : """
+                import org.junit.Assert;
+
+                public class Main {
+                    public static int countCharOccurrences(String text, char targetChar) {
+                        // TODO: implement
+                        return 0;
+                    }
+
+                    public static void main(String[] args) {
+                        Assert.assertEquals(2, countCharOccurrences("hello world", 'o'));
+                        Assert.assertEquals(2, countCharOccurrences("Programming", 'g'));
+                        Assert.assertEquals(1, countCharOccurrences("Test", 't'));
+                        Assert.assertEquals(0, countCharOccurrences("", 'x'));
+                        System.out.println("All assertions passed");
+                    }
+                }
+                """;
+        String reference = difficultyLevel >= 3
+                ? """
+                import org.junit.Assert;
+                import java.util.ArrayDeque;
+                import java.util.Deque;
+
+                public class Main {
+                    public static boolean hasBalancedBrackets(String text) {
+                        Deque<Character> stack = new ArrayDeque<>();
+                        for (int i = 0; i < text.length(); i++) {
+                            char ch = text.charAt(i);
+                            if (ch == '(' || ch == '{' || ch == '[') {
+                                stack.push(ch);
+                            } else if (ch == ')' || ch == '}' || ch == ']') {
+                                if (stack.isEmpty()) {
+                                    return false;
+                                }
+                                char open = stack.pop();
+                                if ((ch == ')' && open != '(') || (ch == '}' && open != '{') || (ch == ']' && open != '[')) {
+                                    return false;
+                                }
+                            }
+                        }
+                        return stack.isEmpty();
+                    }
+
+                    public static void main(String[] args) {
+                        Assert.assertTrue(hasBalancedBrackets("{[()]}"));
+                        Assert.assertFalse(hasBalancedBrackets("{[(])}"));
+                        Assert.assertTrue(hasBalancedBrackets("abc(def)[x]"));
+                        Assert.assertFalse(hasBalancedBrackets("((("));
+                        System.out.println("All assertions passed");
+                    }
+                }
+                """
+                : """
+                import org.junit.Assert;
+
+                public class Main {
+                    public static int countCharOccurrences(String text, char targetChar) {
+                        int count = 0;
+                        for (int i = 0; i < text.length(); i++) {
+                            if (text.charAt(i) == targetChar) {
+                                count++;
+                            }
+                        }
+                        return count;
+                    }
+
+                    public static void main(String[] args) {
+                        Assert.assertEquals(2, countCharOccurrences("hello world", 'o'));
+                        Assert.assertEquals(2, countCharOccurrences("Programming", 'g'));
+                        Assert.assertEquals(1, countCharOccurrences("Test", 't'));
+                        Assert.assertEquals(0, countCharOccurrences("", 'x'));
+                        System.out.println("All assertions passed");
+                    }
+                }
+                """;
+        return fallbackQuestion(request, methodName, "Question" + request.getQuestionNumber() + ".java", problem, starter, reference,
+                difficultyLevel >= 3 ? "O(n)" : "O(n)", difficultyLevel >= 3 ? "O(n)" : "O(1)",
+                List.of(difficultyLevel >= 3 ? "stack" : "string iteration", "conditionals"),
+                List.of("Correctness", "Edge cases", "Readable implementation"));
+    }
+
+    private AiQuestionResponse fallbackPythonQuestion(AiQuestionGenerationRequest request, int difficultyLevel) {
+        String problem = """
+                Implement `count_char_occurrences(text, target_char)` and return how many times `target_char` appears in `text`. The comparison is case-sensitive.
+                """;
+        String starter = """
+                def count_char_occurrences(text, target_char):
+                    # TODO: implement
+                    return 0
+
+
+                def main():
+                    assert count_char_occurrences("hello world", "o") == 2
+                    assert count_char_occurrences("Programming", "g") == 2
+                    assert count_char_occurrences("Test", "t") == 1
+                    assert count_char_occurrences("", "x") == 0
+                    print("All assertions passed")
+
+
+                if __name__ == "__main__":
+                    main()
+                """;
+        String reference = """
+                def count_char_occurrences(text, target_char):
+                    return sum(1 for ch in text if ch == target_char)
+
+
+                def main():
+                    assert count_char_occurrences("hello world", "o") == 2
+                    assert count_char_occurrences("Programming", "g") == 2
+                    assert count_char_occurrences("Test", "t") == 1
+                    assert count_char_occurrences("", "x") == 0
+                    print("All assertions passed")
+
+
+                if __name__ == "__main__":
+                    main()
+                """;
+        return fallbackQuestion(request, "Count Character Occurrences", "question-" + request.getQuestionNumber() + ".py",
+                problem, starter, reference, "O(n)", "O(1)", List.of("string iteration"), List.of("Correctness", "Edge cases"));
+    }
+
+    private AiQuestionResponse fallbackAngularQuestion(AiQuestionGenerationRequest request, int difficultyLevel) {
+        String problem = """
+                Update the Angular component so it displays a list of tasks and shows a computed count of completed tasks. Keep the implementation inside the existing component files and do not add dependencies.
+                """;
+        String starter = """
+                import { Component } from '@angular/core';
+                import { CommonModule } from '@angular/common';
+
+                @Component({
+                  selector: 'app-root',
+                  standalone: true,
+                  imports: [CommonModule],
+                  template: `
+                    <!-- AI Generated Problem Statement:
+                    Render the tasks and show how many are completed.
+                    -->
+                    <main class="app-shell">
+                      <h1>Task Summary</h1>
+                      <!-- TODO: implement -->
+                    </main>
+                  `,
+                  styles: [`
+                    .app-shell { display: grid; gap: 12px; padding: 24px; font-family: Arial, sans-serif; }
+                  `]
+                })
+                export class AppComponent {
+                  tasks = [
+                    { title: 'Design API', done: true },
+                    { title: 'Write tests', done: false },
+                    { title: 'Review code', done: true }
+                  ];
+                }
+                """;
+        return fallbackQuestion(request, "Task Summary Component", "src/app/app.component.ts", problem, starter, null,
+                "O(n)", "O(1)", List.of("Angular templates", "computed state"), List.of("Template binding", "Simple component logic"));
+    }
+
+    private AiQuestionResponse fallbackReactQuestion(AiQuestionGenerationRequest request, int difficultyLevel) {
+        String problem = """
+                Update the React component so it displays a list of tasks and shows a computed count of completed tasks. Keep the implementation inside the existing React source files and do not add dependencies.
+                """;
+        String starter = """
+                import React from 'react';
+                import './App.css';
+
+                const tasks = [
+                  { title: 'Design API', done: true },
+                  { title: 'Write tests', done: false },
+                  { title: 'Review code', done: true },
+                ];
+
+                export default function App() {
+                  return (
+                    <main className="app-shell">
+                      {/* AI Generated Problem Statement:
+                        Render the tasks and show how many are completed.
+                      */}
+                      <h1>Task Summary</h1>
+                    </main>
+                  );
+                }
+                """;
+        return fallbackQuestion(request, "Task Summary Component", "src/App.tsx", problem, starter, null,
+                "O(n)", "O(1)", List.of("React rendering", "computed state"), List.of("JSX structure", "Simple component logic"));
+    }
+
+    private AiQuestionResponse fallbackQuestion(AiQuestionGenerationRequest request,
+                                                String title,
+                                                String filePath,
+                                                String problem,
+                                                String starter,
+                                                String referenceSolution,
+                                                String expectedTimeComplexity,
+                                                String expectedSpaceComplexity,
+                                                List<String> concepts,
+                                                List<String> evaluationFocus) {
+        int difficultyLevel = normalizeDifficultyLevel(null, request.getCurrentDifficulty());
+        return AiQuestionResponse.builder()
+                .title(title)
+                .filePath(filePath)
+                .displayName("Question " + request.getQuestionNumber())
+                .problemStatement(problem)
+                .starterCode(starter)
+                .difficulty(String.valueOf(difficultyLevel))
+                .difficultyLevel(difficultyLevel)
+                .idealDurationMinutes(normalizeIdealDuration(null, difficultyLevel))
+                .referenceSolution(referenceSolution)
+                .expectedTimeComplexity(expectedTimeComplexity)
+                .expectedSpaceComplexity(expectedSpaceComplexity)
+                .concepts(concepts)
+                .evaluationFocus(evaluationFocus)
+                .build();
+    }
+
+    private int resolveCurrentAiDifficultyLevel(InterviewSession session, long submittedCount) {
+        int startingLevel = normalizeDifficultyLevel(session.getStartingDifficultyLevel());
+        return Math.min(5, startingLevel + (int) submittedCount);
+    }
+
+    private String sandboxRulesFor(TechnologySkill technology) {
+        return switch (technology) {
+            case JAVA -> "Java 17 only. Single source execution. Use org.junit.Assert assertions from main for validation. No file IO, network IO, databases, external processes, or external dependencies.";
+            case PYTHON -> "Python standard library only. Include runnable assert statements for validation. No file IO, network IO, databases, external processes, or external packages.";
+            case ANGULAR -> "Angular source edits only under src/app. No new dependencies, file IO, network IO, or browser APIs that require unavailable services.";
+            case REACT -> "React source edits only under src. Only .tsx, .ts, and .css are editable. No new dependencies, file IO, network IO, or unavailable browser services.";
+            default -> "Generate only tasks that can execute in the configured sandbox without external systems.";
+        };
+    }
+
+    private boolean isAiQuestionFile(TechnologySkill technology, String path) {
+        if (path == null || path.isBlank()) {
+            return false;
+        }
+        String normalized = path.replace('\\', '/');
+        return switch (technology) {
+            case JAVA -> normalized.endsWith(".java");
+            case PYTHON -> normalized.endsWith(".py");
+            case ANGULAR -> normalized.equals("src/app/app.component.ts");
+            case REACT -> normalized.equals("src/App.tsx");
+            default -> false;
+        };
+    }
+
+    private boolean isManagedAiQuestionFile(TechnologySkill technology, EditableCodeFileDto file) {
+        if (file == null || !isAiQuestionFile(technology, file.getPath())) {
+            return false;
+        }
+        return file.getAiEvaluation() != null || containsAiProblemComment(file.getContent());
+    }
+
+    private boolean containsAiProblemComment(String content) {
+        return content != null && content.contains("AI Generated Problem Statement:");
+    }
+
+    private AiQuestionResponse toAiQuestionResponse(EditableCodeFileDto file) {
+        return AiQuestionResponse.builder()
+                .title(file.getDisplayName())
+                .filePath(file.getPath())
+                .displayName(file.getDisplayName())
+                .problemStatement(file.getContent())
+                .starterCode(file.getContent())
+                .difficulty(String.valueOf(normalizeDifficultyLevel(file.getDifficultyLevel())))
+                .difficultyLevel(normalizeDifficultyLevel(file.getDifficultyLevel()))
+                .idealDurationMinutes(file.getIdealDurationMinutes())
+                .expectedTimeComplexity(file.getExpectedTimeComplexity())
+                .expectedSpaceComplexity(file.getExpectedSpaceComplexity())
+                .concepts(List.of())
+                .evaluationFocus(List.of())
+                .build();
+    }
+
+    private EditableCodeFileDto buildAiQuestionFile(TechnologySkill technology,
+                                                    AiQuestionResponse generated,
+                                                    int questionNumber,
+                                                    EditableCodeFileDto existingActiveQuestion,
+                                                    int existingFileCount) {
+        String fallbackPath = defaultAiQuestionPath(technology, questionNumber);
+        String path = existingActiveQuestion != null && existingActiveQuestion.getPath() != null
+                ? existingActiveQuestion.getPath()
+                : normalizeAiFilePath(technology, generated.getFilePath(), fallbackPath);
+        String displayName = "Question " + questionNumber;
+        String content = starterWithProblemStatement(technology, generated.getProblemStatement(), generated.getStarterCode());
+        int sortOrder = existingActiveQuestion != null && existingActiveQuestion.getSortOrder() != null
+                ? existingActiveQuestion.getSortOrder()
+                : existingFileCount;
+
+        return EditableCodeFileDto.builder()
+                .path(path)
+                .displayName(displayName)
+                .content(content)
+                .editable(true)
+                .sortOrder(sortOrder)
+                .enabledForCandidate(true)
+                .activeQuestion(true)
+                .submitted(false)
+                .difficultyLevel(normalizeDifficultyLevel(generated.getDifficultyLevel(), generated.getDifficulty()))
+                .idealDurationMinutes(normalizeIdealDuration(generated.getIdealDurationMinutes(), normalizeDifficultyLevel(generated.getDifficultyLevel(), generated.getDifficulty())))
+                .expectedTimeComplexity(normalizeShortText(generated.getExpectedTimeComplexity(), 80))
+                .expectedSpaceComplexity(normalizeShortText(generated.getExpectedSpaceComplexity(), 80))
+                .originalProblemStatement(generated.getProblemStatement())
+                .originalStarterCode(content)
+                .referenceSolution(generated.getReferenceSolution())
+                .questionConcepts(joinList(generated.getConcepts()))
+                .questionEvaluationFocus(joinList(generated.getEvaluationFocus()))
+                .candidateStartedAt(nowUtc())
+                .submittedAt(null)
+                .solveDurationSeconds(null)
+                .executeAttemptCount(0)
+                .questionIntegrityNotes("Original AI problem statement and validation tests captured.")
+                .build();
+    }
+
+    private List<EditableCodeFileDto> upsertAiQuestionFile(List<EditableCodeFileDto> files, EditableCodeFileDto generatedFile) {
+        List<EditableCodeFileDto> nextFiles = new ArrayList<>();
+        boolean replaced = false;
+        for (EditableCodeFileDto file : files) {
+            boolean isTarget = generatedFile.getPath().equals(file.getPath());
+            nextFiles.add(EditableCodeFileDto.builder()
+                    .path(isTarget ? generatedFile.getPath() : file.getPath())
+                    .displayName(isTarget ? generatedFile.getDisplayName() : file.getDisplayName())
+                    .content(isTarget ? generatedFile.getContent() : file.getContent())
+                    .editable(isTarget ? generatedFile.getEditable() : file.getEditable())
+                    .sortOrder(isTarget ? generatedFile.getSortOrder() : file.getSortOrder())
+                    .enabledForCandidate(isTarget ? true : file.getEnabledForCandidate())
+                    .activeQuestion(isTarget)
+                    .submitted(isTarget ? false : file.getSubmitted())
+                    .difficultyLevel(isTarget ? generatedFile.getDifficultyLevel() : file.getDifficultyLevel())
+                    .idealDurationMinutes(isTarget ? generatedFile.getIdealDurationMinutes() : file.getIdealDurationMinutes())
+                    .expectedTimeComplexity(isTarget ? generatedFile.getExpectedTimeComplexity() : file.getExpectedTimeComplexity())
+                    .expectedSpaceComplexity(isTarget ? generatedFile.getExpectedSpaceComplexity() : file.getExpectedSpaceComplexity())
+                    .questionIntegrityNotes(isTarget ? generatedFile.getQuestionIntegrityNotes() : file.getQuestionIntegrityNotes())
+                    .originalProblemStatement(isTarget ? generatedFile.getOriginalProblemStatement() : file.getOriginalProblemStatement())
+                    .originalStarterCode(isTarget ? generatedFile.getOriginalStarterCode() : file.getOriginalStarterCode())
+                    .referenceSolution(isTarget ? generatedFile.getReferenceSolution() : file.getReferenceSolution())
+                    .questionConcepts(isTarget ? generatedFile.getQuestionConcepts() : file.getQuestionConcepts())
+                    .questionEvaluationFocus(isTarget ? generatedFile.getQuestionEvaluationFocus() : file.getQuestionEvaluationFocus())
+                    .candidateStartedAt(isTarget ? generatedFile.getCandidateStartedAt() : file.getCandidateStartedAt())
+                    .submittedAt(isTarget ? null : file.getSubmittedAt())
+                    .solveDurationSeconds(isTarget ? null : file.getSolveDurationSeconds())
+                    .executeAttemptCount(isTarget ? 0 : file.getExecuteAttemptCount())
+                    .runResult(isTarget ? null : file.getRunResult())
+                    .aiEvaluation(isTarget ? generatedFile.getAiEvaluation() : file.getAiEvaluation())
+                    .changedAfterLastRun(isTarget ? false : file.getChangedAfterLastRun())
+                    .build());
+            replaced = replaced || isTarget;
+        }
+        if (!replaced) {
+            nextFiles.add(generatedFile);
+        }
+        return normalizeEditableFileList(nextFiles);
+    }
+
+    private String normalizeAiFilePath(TechnologySkill technology, String requestedPath, String fallbackPath) {
+        String path = requestedPath == null || requestedPath.isBlank()
+                ? fallbackPath
+                : requestedPath.replace('\\', '/').trim();
+        return switch (technology) {
+            case JAVA, PYTHON -> fallbackPath;
+            case ANGULAR -> path.startsWith("src/app/") && (path.endsWith(".ts") || path.endsWith(".html") || path.endsWith(".css"))
+                    ? path
+                    : fallbackPath;
+            case REACT -> path.startsWith("src/") && (path.endsWith(".tsx") || path.endsWith(".ts") || path.endsWith(".css"))
+                    ? path
+                    : fallbackPath;
+            default -> fallbackPath;
+        };
+    }
+
+    private String defaultAiQuestionPath(TechnologySkill technology, int questionNumber) {
+        return switch (technology) {
+            case PYTHON -> "question-" + questionNumber + ".py";
+            case ANGULAR -> "src/app/app.component.ts";
+            case REACT -> "src/App.tsx";
+            default -> "Question" + questionNumber + ".java";
+        };
+    }
+
+    private int normalizeIdealDuration(Integer idealDurationMinutes, int difficultyLevel) {
+        if (idealDurationMinutes != null && idealDurationMinutes > 0) {
+            return Math.max(5, Math.min(20, idealDurationMinutes));
+        }
+        if (difficultyLevel >= 4) {
+            return 15;
+        }
+        if (difficultyLevel >= 3) {
+            return 12;
+        }
+        return 10;
+    }
+
+    private int normalizeDifficultyLevel(Integer difficultyLevel) {
+        if (difficultyLevel == null) {
+            return 1;
+        }
+        return Math.max(1, Math.min(5, difficultyLevel));
+    }
+
+    private int normalizeDifficultyLevel(Integer difficultyLevel, String legacyDifficulty) {
+        if (difficultyLevel != null) {
+            return normalizeDifficultyLevel(difficultyLevel);
+        }
+        if (legacyDifficulty == null || legacyDifficulty.isBlank()) {
+            return 1;
+        }
+        String trimmed = legacyDifficulty.trim();
+        try {
+            return normalizeDifficultyLevel(Integer.parseInt(trimmed));
+        } catch (NumberFormatException ignored) {
+            // fall through to legacy labels
+        }
+        if ("HARD".equalsIgnoreCase(trimmed)) {
+            return 4;
+        }
+        if ("MEDIUM".equalsIgnoreCase(trimmed)) {
+            return 3;
+        }
+        return 1;
+    }
+
+    private String normalizeShortText(String value, int maxLength) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.length() <= maxLength ? trimmed : trimmed.substring(0, maxLength);
+    }
+
+    private String firstNonBlank(String primary, String fallback) {
+        if (primary != null && !primary.isBlank()) {
+            return primary;
+        }
+        return fallback;
+    }
+
+    private String resolveQuestionIntegrityNotes(EditableCodeFileDto question) {
+        List<String> notes = new ArrayList<>();
+        String content = question.getContent() == null ? "" : question.getContent();
+        String originalProblem = question.getOriginalProblemStatement();
+        String originalStarter = question.getOriginalStarterCode();
+
+        if (originalProblem != null && !originalProblem.isBlank() && !normalizeForIntegrity(content).contains(normalizeForIntegrity(originalProblem))) {
+            notes.add("Problem statement text appears changed or removed.");
+        }
+
+        if (originalStarter != null && !originalStarter.isBlank()) {
+            List<String> originalAssertions = extractValidationLines(originalStarter);
+            List<String> currentAssertions = extractValidationLines(content);
+            List<String> normalizedCurrentAssertions = currentAssertions.stream()
+                    .map(this::normalizeForIntegrity)
+                    .toList();
+            List<String> missingAssertions = originalAssertions.stream()
+                    .filter(assertion -> !normalizedCurrentAssertions.contains(normalizeForIntegrity(assertion)))
+                    .toList();
+            if (!missingAssertions.isEmpty()) {
+                notes.add("Validation assertions changed or removed.");
+                notes.add("Expected active assertions: " + String.join(" | ", missingAssertions));
+                notes.add("Current active assertions: " + (currentAssertions.isEmpty() ? "none" : String.join(" | ", currentAssertions)));
+            }
+        }
+
+        if (notes.isEmpty()) {
+            return "Healthy: TRUE";
+        }
+        return "Healthy: FALSE. " + String.join(" ", notes);
+    }
+
+    private String normalizeForIntegrity(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value.replaceAll("\\s+", " ").trim().toLowerCase(Locale.ROOT);
+    }
+
+    private List<String> extractValidationLines(String content) {
+        if (content == null || content.isBlank()) {
+            return List.of();
+        }
+        List<String> lines = new ArrayList<>();
+        boolean inBlockComment = false;
+        for (String rawLine : content.split("\\R")) {
+            String line = rawLine.trim();
+            if (line.isBlank()) {
+                continue;
+            }
+            if (inBlockComment) {
+                if (line.contains("*/")) {
+                    inBlockComment = false;
+                }
+                continue;
+            }
+            if (line.startsWith("/*")) {
+                if (!line.contains("*/")) {
+                    inBlockComment = true;
+                }
+                continue;
+            }
+            if (line.startsWith("*") || line.startsWith("//") || line.startsWith("#")) {
+                continue;
+            }
+            if (line.contains("Assert.") || line.startsWith("assert ") || line.contains(" assert ")) {
+                lines.add(line);
+            }
+        }
+        return lines;
+    }
+
+    private String starterWithProblemStatement(TechnologySkill technology, String problemStatement, String starterCode) {
+        String problem = problemStatement == null || problemStatement.isBlank()
+                ? "Implement the requested solution."
+                : problemStatement.trim();
+        String starter = starterCode == null ? "" : starterCode.trim();
+        String problemComment = switch (technology) {
+            case PYTHON -> "\"\"\"\nAI Generated Problem Statement:\n" + problem + "\n\"\"\"\n\n";
+            default -> "/*\nAI Generated Problem Statement:\n" + problem + "\n*/\n\n";
+        };
+        if (!starter.isBlank()) {
+            return problemComment + starter;
+        }
+        return switch (technology) {
+            case PYTHON, ANGULAR, REACT -> problemComment;
+            default -> problemComment + "public class Main {\n    public static void main(String[] args) {\n        // TODO: implement\n    }\n}\n";
+        };
+    }
+
+    private EditableCodeFileDto resolveAiEvaluationTarget(InterviewSession session, String requestedFilePath) {
+        List<EditableCodeFileDto> files = resolveEditableFiles(session, codeStateRepository.findBySessionId(session.getId()).orElse(null)).stream()
+                .filter(file -> isManagedAiQuestionFile(session.getTechnology(), file))
+                .toList();
+        if (files.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "No AI question files are available for evaluation.");
+        }
+        if (requestedFilePath != null && !requestedFilePath.isBlank()) {
+            String normalizedPath = requestedFilePath.replace('\\', '/').trim();
+            return files.stream()
+                    .filter(file -> normalizedPath.equals(file.getPath()))
+                    .findFirst()
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Requested AI question file was not found."));
+        }
+        return files.stream()
+                .filter(file -> Boolean.TRUE.equals(file.getSubmitted()))
+                .reduce((first, second) -> second)
+                .orElseGet(() -> files.stream()
+                        .filter(file -> Boolean.TRUE.equals(file.getActiveQuestion()))
+                        .findFirst()
+                        .orElse(files.get(0)));
+    }
+
+    private AiSolutionEvaluationRequest toAiEvaluationRequest(InterviewSession session, EditableCodeFileDto question, int questionNumber) {
+        RunResultDto result = question.getRunResult();
+        AiPolicyEngineService.EvaluationPolicy evaluationPolicy = aiPolicyEngineService.evaluationPolicy(session, question);
+        return AiSolutionEvaluationRequest.builder()
+                .sessionId(session.getId())
+                .technology(session.getTechnology().name())
+                .targetRole(session.getTargetRole())
+                .yearsOfExperience(session.getYearsOfExperience())
+                .difficulty(String.valueOf(normalizeDifficultyLevel(question.getDifficultyLevel())))
+                .questionNumber(questionNumber)
+                .questionTitle(question.getDisplayName())
+                .problemStatement(question.getContent())
+                .code(question.getContent())
+                .stdout(result == null ? null : result.getStdout())
+                .stderr(result == null ? null : result.getStderr())
+                .exitStatus(result == null ? null : result.getExitStatus())
+                .executionTimeMs(result == null ? null : result.getExecutionTimeMs())
+                .solveDurationSeconds(question.getSolveDurationSeconds())
+                .executeAttemptCount(question.getExecuteAttemptCount())
+                .originalProblemStatement(question.getOriginalProblemStatement())
+                .originalStarterCode(question.getOriginalStarterCode())
+                .referenceSolution(question.getReferenceSolution())
+                .expectedTimeComplexity(question.getExpectedTimeComplexity())
+                .expectedSpaceComplexity(question.getExpectedSpaceComplexity())
+                .questionIntegrityNotes(resolveQuestionIntegrityNotes(question))
+                .questionPolicy(evaluationPolicy.questionPolicy())
+                .evaluationRubric(evaluationPolicy.evaluationRubric())
+                .expectedConcepts(evaluationPolicy.expectedConcepts())
+                .nonNegotiableSignals(evaluationPolicy.nonNegotiableSignals())
+                .build();
+    }
+
+    private void applyAiEvaluation(CodeFile codeFile, AiSolutionEvaluationResponse response) {
+        codeFile.setAiCorrectnessScore(response.getCorrectnessScore());
+        codeFile.setAiCodeQualityScore(response.getCodeQualityScore());
+        codeFile.setAiEdgeCaseScore(response.getEdgeCaseScore());
+        codeFile.setAiEfficiencyScore(response.getEfficiencyScore());
+        codeFile.setAiOverallScore(response.getOverallScore());
+        codeFile.setAiVerdict(response.getVerdict());
+        codeFile.setAiNextDifficulty(String.valueOf(normalizeDifficultyLevel(response.getNextDifficultyLevel(), response.getNextDifficulty())));
+        codeFile.setAiEvaluationSummary(response.getSummary());
+        codeFile.setAiComplexityAssessment(response.getComplexityAssessment());
+        codeFile.setAiQuestionIntegrityNotes(firstNonBlank(response.getQuestionIntegrityNotes(), codeFile.getQuestionIntegrityNotes()));
+        codeFile.setAiEvaluationStrengths(joinList(response.getStrengths()));
+        codeFile.setAiEvaluationConcerns(joinList(response.getConcerns()));
+        codeFile.setAiEvaluatedAt(nowUtc());
+    }
+
+    private void applyAiEvaluationSnapshot(CodeFile target, AiSolutionEvaluationResponse incoming, CodeFile existing) {
+        if (incoming != null) {
+            applyAiEvaluation(target, incoming);
+            return;
+        }
+        if (existing == null) {
+            return;
+        }
+        target.setAiCorrectnessScore(existing.getAiCorrectnessScore());
+        target.setAiCodeQualityScore(existing.getAiCodeQualityScore());
+        target.setAiEdgeCaseScore(existing.getAiEdgeCaseScore());
+        target.setAiEfficiencyScore(existing.getAiEfficiencyScore());
+        target.setAiOverallScore(existing.getAiOverallScore());
+        target.setAiVerdict(existing.getAiVerdict());
+        target.setAiNextDifficulty(existing.getAiNextDifficulty());
+        target.setAiEvaluationSummary(existing.getAiEvaluationSummary());
+        target.setAiComplexityAssessment(existing.getAiComplexityAssessment());
+        target.setAiQuestionIntegrityNotes(existing.getAiQuestionIntegrityNotes());
+        target.setAiEvaluationStrengths(existing.getAiEvaluationStrengths());
+        target.setAiEvaluationConcerns(existing.getAiEvaluationConcerns());
+        target.setAiEvaluatedAt(existing.getAiEvaluatedAt());
+    }
+
+    private void applyAiRecommendation(InterviewSession session, AiInterviewRecommendationResponse response) {
+        session.setAiRecommendationRating(response.getRating());
+        session.setAiRecommendationDecision(response.getRecommendationDecision());
+        session.setAiRecommendationOverallScore(response.getOverallScore());
+        session.setAiRecommendationSummary(response.getSummary());
+        session.setAiRecommendationStrengths(joinList(response.getStrengths()));
+        session.setAiRecommendationRisks(joinList(response.getRisks()));
+        session.setAiRecommendationFollowUps(joinList(response.getSuggestedFollowUps()));
+        session.setAiHumanReviewRequired(response.getHumanReviewRequired());
+        session.setAiRecommendationGeneratedAt(nowUtc());
+    }
+
+    private String joinList(List<String> values) {
+        if (values == null || values.isEmpty()) {
+            return null;
+        }
+        return values.stream()
+                .filter(value -> value != null && !value.isBlank())
+                .map(String::trim)
+                .reduce((left, right) -> left + "\n" + right)
+                .orElse(null);
+    }
+
+    private List<String> splitList(String value) {
+        if (value == null || value.isBlank()) {
+            return List.of();
+        }
+        return Arrays.stream(value.split("\\R"))
+                .map(String::trim)
+                .filter(item -> !item.isBlank())
+                .toList();
+    }
+
+    private AiSolutionEvaluationResponse toAiEvaluationDto(CodeFile file) {
+        if (file.getAiEvaluatedAt() == null
+                && file.getAiOverallScore() == null
+                && (file.getAiEvaluationSummary() == null || file.getAiEvaluationSummary().isBlank())) {
+            return null;
+        }
+        return AiSolutionEvaluationResponse.builder()
+                .correctnessScore(file.getAiCorrectnessScore())
+                .codeQualityScore(file.getAiCodeQualityScore())
+                .edgeCaseScore(file.getAiEdgeCaseScore())
+                .efficiencyScore(file.getAiEfficiencyScore())
+                .overallScore(file.getAiOverallScore())
+                .verdict(file.getAiVerdict())
+                .nextDifficulty(file.getAiNextDifficulty())
+                .summary(file.getAiEvaluationSummary())
+                .complexityAssessment(file.getAiComplexityAssessment())
+                .questionIntegrityNotes(file.getAiQuestionIntegrityNotes())
+                .strengths(splitList(file.getAiEvaluationStrengths()))
+                .concerns(splitList(file.getAiEvaluationConcerns()))
+                .build();
+    }
+
+    private AiPersistedRecommendationDto toAiRecommendationDto(InterviewSession session) {
+        if (session.getAiRecommendationGeneratedAt() == null
+                && session.getAiRecommendationOverallScore() == null
+                && (session.getAiRecommendationSummary() == null || session.getAiRecommendationSummary().isBlank())) {
+            return null;
+        }
+        return AiPersistedRecommendationDto.builder()
+                .rating(session.getAiRecommendationRating())
+                .recommendationDecision(session.getAiRecommendationDecision())
+                .overallScore(session.getAiRecommendationOverallScore())
+                .summary(session.getAiRecommendationSummary())
+                .strengths(splitList(session.getAiRecommendationStrengths()))
+                .risks(splitList(session.getAiRecommendationRisks()))
+                .suggestedFollowUps(splitList(session.getAiRecommendationFollowUps()))
+                .humanReviewRequired(session.getAiHumanReviewRequired())
+                .generatedAt(session.getAiRecommendationGeneratedAt())
+                .build();
+    }
+
+    private int questionIndex(InterviewSession session, EditableCodeFileDto question) {
+        List<EditableCodeFileDto> files = resolveEditableFiles(session, codeStateRepository.findBySessionId(session.getId()).orElse(null)).stream()
+                .filter(file -> isManagedAiQuestionFile(session.getTechnology(), file))
+                .toList();
+        for (int index = 0; index < files.size(); index++) {
+            if (files.get(index).getPath().equals(question.getPath())) {
+                return index + 1;
+            }
+        }
+        return 1;
+    }
+
+    private void validateInterviewerDetailsForMode(CreateSessionRequest request, InterviewMode interviewMode) {
+        if (interviewMode == InterviewMode.AI_INTERVIEWER) {
+            return;
+        }
+        if (request.getInterviewerName() == null || request.getInterviewerName().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Interviewer name is required for human interviews.");
+        }
+        if (request.getInterviewerEmail() == null || request.getInterviewerEmail().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Interviewer email is required for human interviews.");
+        }
+    }
+
+    private Integer normalizeMaxQuestions(Integer maxQuestions) {
+        if (maxQuestions == null) {
+            return 5;
+        }
+        return Math.max(1, Math.min(5, maxQuestions));
+    }
+
     @Transactional
     public SessionResponse updateIdentityCapture(String sessionId,
                                                  ParticipantRole role,
@@ -1120,7 +2601,7 @@ public class SessionService {
         }
 
         participantRepository.save(participant);
-        if (status == IdentityCaptureStatus.SUCCESS) {
+        if (isIdentityCaptureComplete(status)) {
             participantAccessChallengeRepository.findBySessionIdAndParticipantRole(sessionId, role)
                     .ifPresent(challenge -> {
                         if (challenge.getStatus() == ParticipantAccessStatus.OTP_VERIFIED) {
@@ -1153,11 +2634,11 @@ public class SessionService {
                 .findBySessionIdAndParticipantRole(sessionId, ParticipantRole.INTERVIEWEE)
                 .orElse(null);
 
-        boolean interviewerReady = interviewer.getDisclaimerAcceptedAt() != null
-                && isOtpSatisfied(interviewerChallenge);
+        boolean interviewerReady = isAiInterview(session)
+                || (interviewer.getDisclaimerAcceptedAt() != null && isOtpSatisfied(interviewerChallenge));
         boolean intervieweeReady = interviewee.getDisclaimerAcceptedAt() != null
                 && isOtpSatisfied(intervieweeChallenge)
-                && interviewee.getIdentityCaptureStatus() == IdentityCaptureStatus.SUCCESS;
+                && isIdentityCaptureComplete(interviewee.getIdentityCaptureStatus());
 
         if (interviewerReady && intervieweeReady) {
             session.setStatus(SessionStatus.READY_TO_START);
@@ -1299,7 +2780,11 @@ public class SessionService {
                     || !Objects.equals(existing.getEnabledForCandidate(), next.getEnabledForCandidate())
                     || !Objects.equals(existing.getActiveQuestion(), next.getActiveQuestion())
                     || !Objects.equals(existing.getSubmitted(), next.getSubmitted())
-                    || !Objects.equals(existing.getIdealDurationMinutes(), next.getIdealDurationMinutes())) {
+                    || !Objects.equals(existing.getIdealDurationMinutes(), next.getIdealDurationMinutes())
+                    || !Objects.equals(existing.getCandidateStartedAt(), next.getCandidateStartedAt())
+                    || !Objects.equals(existing.getSubmittedAt(), next.getSubmittedAt())
+                    || !Objects.equals(existing.getSolveDurationSeconds(), next.getSolveDurationSeconds())
+                    || !Objects.equals(existing.getExecuteAttemptCount(), next.getExecuteAttemptCount())) {
                 return false;
             }
         }
@@ -1329,6 +2814,11 @@ public class SessionService {
         return SessionResponse.builder()
                 .id(session.getId())
                 .technology(session.getTechnology())
+                .interviewMode(session.getInterviewMode() == null ? InterviewMode.HUMAN_INTERVIEWER : session.getInterviewMode())
+                .yearsOfExperience(session.getYearsOfExperience())
+                .targetRole(session.getTargetRole())
+                .startingDifficultyLevel(normalizeDifficultyLevel(session.getStartingDifficultyLevel()))
+                .maxQuestions(session.getMaxQuestions() == null ? 5 : session.getMaxQuestions())
                 .avMode(session.getAvMode() == null ? AvMode.EXTERNAL : session.getAvMode())
                 .status(session.getStatus())
                 .createdAt(session.getCreatedAt())
@@ -1363,6 +2853,7 @@ public class SessionService {
                         .recommendationDecision(session.getFeedbackDraftRecommendationDecision())
                         .submittedAt(null)
                         .build())
+                .aiRecommendation(toAiRecommendationDto(session))
                 .activityEvents(activityEvents)
                 .authAuditEvents(authAuditEvents)
                 .summary(buildSummary(session, feedback))
@@ -1588,7 +3079,7 @@ public class SessionService {
 
         return switch (request.getEventType()) {
             case TAB_HIDDEN -> resolveFocusAwaySeverity(inAppAv, durationMs, occurrenceCount);
-            case PASTE_IN_EDITOR, EXTERNAL_DROP_BLOCKED -> occurrenceCount >= 2
+            case COPY_FROM_EDITOR, PASTE_IN_EDITOR, EXTERNAL_DROP_BLOCKED -> occurrenceCount >= 2
                     ? ActivityEventSeverity.SUSPICIOUS
                     : ActivityEventSeverity.WARNING;
             case MICROPHONE_DISABLED_MANUALLY, CAMERA_DISABLED_MANUALLY -> {
@@ -1622,6 +3113,9 @@ public class SessionService {
             case TAB_HIDDEN -> suspicious
                     ? "Changing tabs during the live interview is marked as suspicious."
                     : "Please stay on the interview tab. Repeated or long focus changes may be marked as suspicious.";
+            case COPY_FROM_EDITOR -> suspicious
+                    ? "Copying content from the editor is not allowed in AI interview mode and has been recorded."
+                    : "Copying content from the editor is not allowed in AI interview mode. Repeating this action will be marked as suspicious.";
             case MICROPHONE_DISABLED_MANUALLY, CAMERA_DISABLED_MANUALLY -> suspicious
                     ? "Switching off audio or video during the live interview is marked as suspicious."
                     : "Please keep your interview audio and video enabled. Repeated or extended interruptions may be marked as suspicious.";
@@ -1654,6 +3148,7 @@ public class SessionService {
 
         return switch (request.getEventType()) {
             case TAB_HIDDEN -> "Interviewee switched away from the interview tab or window.";
+            case COPY_FROM_EDITOR -> "Interviewee tried to copy content from the editor.";
             case EXTERNAL_DROP_BLOCKED -> "Interviewee tried to drag text into the editor.";
             case CAMERA_STREAM_LOST -> "Interviewee's camera stream was interrupted.";
             case MICROPHONE_DISABLED_MANUALLY -> "Interviewee manually turned off the microphone during the interview.";
@@ -2005,7 +3500,21 @@ public class SessionService {
                 .enabledForCandidate(file.getEnabledForCandidate() == null ? true : file.getEnabledForCandidate())
                 .activeQuestion(file.getActiveQuestion() == null ? false : file.getActiveQuestion())
                 .submitted(file.getSubmitted() == null ? false : file.getSubmitted())
+                .difficultyLevel(file.getDifficultyLevel())
                 .idealDurationMinutes(file.getIdealDurationMinutes())
+                .expectedTimeComplexity(file.getExpectedTimeComplexity())
+                .expectedSpaceComplexity(file.getExpectedSpaceComplexity())
+                .questionIntegrityNotes(file.getQuestionIntegrityNotes())
+                .originalProblemStatement(file.getOriginalProblemStatement())
+                .originalStarterCode(file.getOriginalStarterCode())
+                .referenceSolution(file.getReferenceSolution())
+                .questionConcepts(file.getQuestionConcepts())
+                .questionEvaluationFocus(file.getQuestionEvaluationFocus())
+                .candidateStartedAt(file.getCandidateStartedAt())
+                .submittedAt(file.getSubmittedAt())
+                .solveDurationSeconds(file.getSolveDurationSeconds())
+                .executeAttemptCount(file.getExecuteAttemptCount() == null ? 0 : file.getExecuteAttemptCount())
+                .aiEvaluation(file.getAiEvaluation())
                 .build();
     }
 
@@ -2032,7 +3541,21 @@ public class SessionService {
                     .activeQuestion(true)
                     .submitted(file.getSubmitted())
                     .idealDurationMinutes(file.getIdealDurationMinutes())
+                    .difficultyLevel(file.getDifficultyLevel())
+                    .expectedTimeComplexity(file.getExpectedTimeComplexity())
+                    .expectedSpaceComplexity(file.getExpectedSpaceComplexity())
+                    .questionIntegrityNotes(file.getQuestionIntegrityNotes())
+                    .originalProblemStatement(file.getOriginalProblemStatement())
+                    .originalStarterCode(file.getOriginalStarterCode())
+                    .referenceSolution(file.getReferenceSolution())
+                    .questionConcepts(file.getQuestionConcepts())
+                    .questionEvaluationFocus(file.getQuestionEvaluationFocus())
+                    .candidateStartedAt(file.getCandidateStartedAt())
+                    .submittedAt(file.getSubmittedAt())
+                    .solveDurationSeconds(file.getSolveDurationSeconds())
+                    .executeAttemptCount(file.getExecuteAttemptCount())
                     .runResult(file.getRunResult())
+                    .aiEvaluation(file.getAiEvaluation())
                     .changedAfterLastRun(file.getChangedAfterLastRun())
                     .build());
         }
@@ -2130,11 +3653,15 @@ public class SessionService {
     }
 
     private void replaceCodeFiles(String sessionId, List<EditableCodeFileDto> editableFiles) {
+        Map<String, CodeFile> existingByPath = codeFileRepository.findBySessionIdOrderBySortOrderAscCreatedAtAsc(sessionId).stream()
+                .collect(java.util.stream.Collectors.toMap(CodeFile::getFilePath, file -> file, (left, right) -> left));
+        OffsetDateTime persistedAt = nowUtc();
         codeFileRepository.deleteAllBySessionId(sessionId);
         codeFileRepository.flush();
         List<CodeFile> persistedFiles = editableFiles.stream()
                 .map(file -> {
                     CodeFile codeFile = new CodeFile();
+                    CodeFile existing = existingByPath.get(file.getPath());
                     codeFile.setSessionId(sessionId);
                     codeFile.setFilePath(file.getPath());
                     codeFile.setDisplayName(file.getDisplayName());
@@ -2144,11 +3671,86 @@ public class SessionService {
                     codeFile.setEnabledForCandidate(file.getEnabledForCandidate() == null || Boolean.TRUE.equals(file.getEnabledForCandidate()));
                     codeFile.setActiveQuestion(Boolean.TRUE.equals(file.getActiveQuestion()));
                     codeFile.setSubmitted(Boolean.TRUE.equals(file.getSubmitted()));
-                    codeFile.setIdealDurationMinutes(file.getIdealDurationMinutes());
+                    codeFile.setDifficultyLevel(resolvePersistedDifficultyLevel(file, existing));
+                    codeFile.setIdealDurationMinutes(file.getIdealDurationMinutes() == null && existing != null ? existing.getIdealDurationMinutes() : file.getIdealDurationMinutes());
+                    codeFile.setOriginalProblemStatement(firstNonBlank(file.getOriginalProblemStatement(), existing == null ? null : existing.getOriginalProblemStatement()));
+                    codeFile.setOriginalStarterCode(firstNonBlank(file.getOriginalStarterCode(), existing == null ? null : existing.getOriginalStarterCode()));
+                    codeFile.setReferenceSolution(firstNonBlank(file.getReferenceSolution(), existing == null ? null : existing.getReferenceSolution()));
+                    codeFile.setExpectedTimeComplexity(firstNonBlank(file.getExpectedTimeComplexity(), existing == null ? null : existing.getExpectedTimeComplexity()));
+                    codeFile.setExpectedSpaceComplexity(firstNonBlank(file.getExpectedSpaceComplexity(), existing == null ? null : existing.getExpectedSpaceComplexity()));
+                    codeFile.setQuestionConcepts(firstNonBlank(file.getQuestionConcepts(), existing == null ? null : existing.getQuestionConcepts()));
+                    codeFile.setQuestionEvaluationFocus(firstNonBlank(file.getQuestionEvaluationFocus(), existing == null ? null : existing.getQuestionEvaluationFocus()));
+                    codeFile.setQuestionIntegrityNotes(firstNonBlank(file.getQuestionIntegrityNotes(), existing == null ? null : existing.getQuestionIntegrityNotes()));
+                    OffsetDateTime candidateStartedAt = resolveCandidateStartedAt(file, existing, persistedAt);
+                    OffsetDateTime submittedAt = file.getSubmittedAt();
+                    codeFile.setCandidateStartedAt(candidateStartedAt);
+                    codeFile.setSubmittedAt(submittedAt);
+                    codeFile.setSolveDurationSeconds(resolveSolveDurationSeconds(file, candidateStartedAt, submittedAt));
+                    codeFile.setExecuteAttemptCount(file.getExecuteAttemptCount() == null ? 0 : file.getExecuteAttemptCount());
+                    applyAiEvaluationSnapshot(codeFile, file.getAiEvaluation(), existing);
                     return codeFile;
                 })
                 .toList();
         codeFileRepository.saveAll(persistedFiles);
+    }
+
+    private OffsetDateTime resolveCandidateStartedAt(EditableCodeFileDto file, CodeFile existing, OffsetDateTime fallbackStartedAt) {
+        OffsetDateTime incomingStartedAt = file.getCandidateStartedAt();
+        OffsetDateTime submittedAt = file.getSubmittedAt();
+        if (Boolean.TRUE.equals(file.getSubmitted()) && submittedAt != null && !hasPositiveDuration(incomingStartedAt, submittedAt)) {
+            OffsetDateTime persistedStartedAt = existing == null
+                    ? null
+                    : existing.getCandidateStartedAt() == null ? existing.getCreatedAt() : existing.getCandidateStartedAt();
+            if (hasPositiveDuration(persistedStartedAt, submittedAt)) {
+                return persistedStartedAt;
+            }
+        }
+        if (incomingStartedAt != null) {
+            return incomingStartedAt;
+        }
+        if (existing != null && existing.getCandidateStartedAt() != null) {
+            return existing.getCandidateStartedAt();
+        }
+        if (Boolean.TRUE.equals(file.getActiveQuestion()) && !Boolean.TRUE.equals(file.getSubmitted())) {
+            return existing != null && existing.getCreatedAt() != null ? existing.getCreatedAt() : fallbackStartedAt;
+        }
+        return null;
+    }
+
+    private Long resolveSolveDurationSeconds(EditableCodeFileDto file,
+                                             OffsetDateTime candidateStartedAt,
+                                             OffsetDateTime submittedAt) {
+        if (file.getSolveDurationSeconds() != null && file.getSolveDurationSeconds() > 0) {
+            return file.getSolveDurationSeconds();
+        }
+        if (!Boolean.TRUE.equals(file.getSubmitted()) || candidateStartedAt == null || submittedAt == null) {
+            return file.getSolveDurationSeconds();
+        }
+        long durationSeconds = Duration.between(candidateStartedAt, submittedAt).getSeconds();
+        if (durationSeconds < 0) {
+            return file.getSolveDurationSeconds();
+        }
+        return Math.max(1L, durationSeconds);
+    }
+
+    private boolean hasPositiveDuration(OffsetDateTime candidateStartedAt, OffsetDateTime submittedAt) {
+        return candidateStartedAt != null
+                && submittedAt != null
+                && Duration.between(candidateStartedAt, submittedAt).getSeconds() > 0;
+    }
+
+    private Integer resolvePersistedDifficultyLevel(EditableCodeFileDto file, CodeFile existing) {
+        if (file.getDifficultyLevel() != null) {
+            return file.getDifficultyLevel();
+        }
+        if (existing != null && existing.getDifficultyLevel() != null) {
+            return existing.getDifficultyLevel();
+        }
+        boolean hasAiQuestionMetadata = file.getExpectedTimeComplexity() != null
+                || file.getExpectedSpaceComplexity() != null
+                || file.getQuestionIntegrityNotes() != null
+                || containsAiProblemComment(file.getContent());
+        return hasAiQuestionMetadata ? 1 : null;
     }
 
     private List<EditableCodeFileDto> resolveEditableFiles(InterviewSession session, CodeState codeState) {
@@ -2177,6 +3779,8 @@ public class SessionService {
     }
 
     private EditableCodeFileDto toEditableCodeFileDto(CodeFile file) {
+        OffsetDateTime candidateStartedAt = resolveDisplayCandidateStartedAt(file);
+        Long solveDurationSeconds = resolveDisplaySolveDurationSeconds(file, candidateStartedAt);
         return EditableCodeFileDto.builder()
                 .path(file.getFilePath())
                 .displayName(file.getDisplayName())
@@ -2186,8 +3790,47 @@ public class SessionService {
                 .enabledForCandidate(file.getEnabledForCandidate() == null || Boolean.TRUE.equals(file.getEnabledForCandidate()))
                 .activeQuestion(Boolean.TRUE.equals(file.getActiveQuestion()))
                 .submitted(Boolean.TRUE.equals(file.getSubmitted()))
+                .difficultyLevel(file.getDifficultyLevel())
                 .idealDurationMinutes(file.getIdealDurationMinutes())
+                .expectedTimeComplexity(file.getExpectedTimeComplexity())
+                .expectedSpaceComplexity(file.getExpectedSpaceComplexity())
+                .questionIntegrityNotes(file.getQuestionIntegrityNotes())
+                .originalProblemStatement(file.getOriginalProblemStatement())
+                .originalStarterCode(file.getOriginalStarterCode())
+                .referenceSolution(file.getReferenceSolution())
+                .questionConcepts(file.getQuestionConcepts())
+                .questionEvaluationFocus(file.getQuestionEvaluationFocus())
+                .candidateStartedAt(candidateStartedAt)
+                .submittedAt(file.getSubmittedAt())
+                .solveDurationSeconds(solveDurationSeconds)
+                .executeAttemptCount(file.getExecuteAttemptCount() == null ? 0 : file.getExecuteAttemptCount())
+                .aiEvaluation(toAiEvaluationDto(file))
                 .build();
+    }
+
+    private OffsetDateTime resolveDisplayCandidateStartedAt(CodeFile file) {
+        OffsetDateTime submittedAt = file.getSubmittedAt();
+        if (Boolean.TRUE.equals(file.getSubmitted())
+                && submittedAt != null
+                && !hasPositiveDuration(file.getCandidateStartedAt(), submittedAt)
+                && hasPositiveDuration(file.getCreatedAt(), submittedAt)) {
+            return file.getCreatedAt();
+        }
+        return file.getCandidateStartedAt();
+    }
+
+    private Long resolveDisplaySolveDurationSeconds(CodeFile file, OffsetDateTime candidateStartedAt) {
+        if (file.getSolveDurationSeconds() != null && file.getSolveDurationSeconds() > 0) {
+            return file.getSolveDurationSeconds();
+        }
+        if (!Boolean.TRUE.equals(file.getSubmitted()) || candidateStartedAt == null || file.getSubmittedAt() == null) {
+            return file.getSolveDurationSeconds();
+        }
+        long durationSeconds = Duration.between(candidateStartedAt, file.getSubmittedAt()).getSeconds();
+        if (durationSeconds < 0) {
+            return file.getSolveDurationSeconds();
+        }
+        return Math.max(1L, durationSeconds);
     }
 
     private List<EditableCodeFileDto> attachRunResults(String sessionId, List<EditableCodeFileDto> files) {
@@ -2210,8 +3853,22 @@ public class SessionService {
                             .enabledForCandidate(file.getEnabledForCandidate())
                             .activeQuestion(file.getActiveQuestion())
                             .submitted(file.getSubmitted())
+                            .difficultyLevel(file.getDifficultyLevel())
                             .idealDurationMinutes(file.getIdealDurationMinutes())
+                            .expectedTimeComplexity(file.getExpectedTimeComplexity())
+                            .expectedSpaceComplexity(file.getExpectedSpaceComplexity())
+                            .questionIntegrityNotes(file.getQuestionIntegrityNotes())
+                            .originalProblemStatement(file.getOriginalProblemStatement())
+                            .originalStarterCode(file.getOriginalStarterCode())
+                            .referenceSolution(file.getReferenceSolution())
+                            .questionConcepts(file.getQuestionConcepts())
+                            .questionEvaluationFocus(file.getQuestionEvaluationFocus())
+                            .candidateStartedAt(file.getCandidateStartedAt())
+                            .submittedAt(file.getSubmittedAt())
+                            .solveDurationSeconds(file.getSolveDurationSeconds())
+                            .executeAttemptCount(file.getExecuteAttemptCount())
                             .runResult(result == null ? null : toRunResultDto(result))
+                            .aiEvaluation(file.getAiEvaluation())
                             .changedAfterLastRun(result != null && !Objects.equals(file.getContent(), result.getSourceSnapshot()))
                             .build();
                 })
@@ -2353,6 +4010,16 @@ public class SessionService {
             return failureReason == null ? IdentityCaptureFailureReason.UNKNOWN : failureReason;
         }
         return null;
+    }
+
+    private boolean isIdentityCaptureComplete(IdentityCaptureStatus status) {
+        return status == IdentityCaptureStatus.SUCCESS
+                || status == IdentityCaptureStatus.SKIPPED
+                || status == IdentityCaptureStatus.FAILED;
+    }
+
+    private boolean isAiInterview(InterviewSession session) {
+        return session.getInterviewMode() == InterviewMode.AI_INTERVIEWER;
     }
 
     public record ResourceWithMetadata(org.springframework.core.io.Resource resource, String contentType) {

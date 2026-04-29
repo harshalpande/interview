@@ -13,6 +13,7 @@ export type AvMode = 'IN_APP' | 'EXTERNAL';
 export type ActivityEventSeverity = 'INFO' | 'WARNING' | 'SUSPICIOUS';
 export type ActivityEventType =
   | 'TAB_HIDDEN'
+  | 'COPY_FROM_EDITOR'
   | 'PASTE_IN_EDITOR'
   | 'EXTERNAL_DROP_BLOCKED'
   | 'CAMERA_STREAM_LOST'
@@ -21,6 +22,7 @@ export type ActivityEventType =
   | 'NO_FACE_DETECTED'
   | 'MULTIPLE_FACES_DETECTED';
 export type TechnologySkill = 'JAVA' | 'PYTHON' | 'ANGULAR' | 'REACT' | 'SQL';
+export type InterviewMode = 'HUMAN_INTERVIEWER' | 'AI_INTERVIEWER';
 export type RecommendationDecision = 'YES' | 'NO' | 'REEVALUATION';
 export type IdentityCaptureStatus = 'PENDING' | 'SUCCESS' | 'FAILED' | 'SKIPPED';
 export type IdentityCaptureFailureReason = 'NO_CAMERA' | 'PERMISSION_DENIED' | 'CAMERA_IN_USE' | 'UNSUPPORTED' | 'DEVICE_ERROR' | 'USER_SKIPPED' | 'UNKNOWN';
@@ -117,14 +119,76 @@ export interface EditableCodeFile {
   enabledForCandidate?: boolean;
   activeQuestion?: boolean;
   submitted?: boolean;
+  difficultyLevel?: number | null;
   idealDurationMinutes?: number | null;
+  expectedTimeComplexity?: string | null;
+  expectedSpaceComplexity?: string | null;
+  questionIntegrityNotes?: string | null;
+  candidateStartedAt?: string | null;
+  submittedAt?: string | null;
+  solveDurationSeconds?: number | null;
+  executeAttemptCount?: number | null;
   runResult?: RunResult | null;
+  aiEvaluation?: AiSolutionEvaluation | null;
   changedAfterLastRun?: boolean | null;
+}
+
+export interface AiQuestion {
+  title: string;
+  filePath: string;
+  displayName: string;
+  problemStatement: string;
+  starterCode: string;
+  difficulty: string;
+  difficultyLevel?: number | null;
+  idealDurationMinutes: number;
+  expectedTimeComplexity?: string | null;
+  expectedSpaceComplexity?: string | null;
+  concepts: string[];
+  evaluationFocus: string[];
+}
+
+export interface AiQuestionSessionResponse {
+  question: AiQuestion;
+  session: SessionResponse;
+}
+
+export interface AiSolutionEvaluation {
+  correctnessScore?: number | null;
+  codeQualityScore?: number | null;
+  edgeCaseScore?: number | null;
+  efficiencyScore?: number | null;
+  overallScore?: number | null;
+  verdict?: string | null;
+  nextDifficulty?: string | null;
+  nextDifficultyLevel?: number | null;
+  summary?: string | null;
+  complexityAssessment?: string | null;
+  questionIntegrityNotes?: string | null;
+  strengths?: string[] | null;
+  concerns?: string[] | null;
+}
+
+export interface AiInterviewRecommendation {
+  rating?: FeedbackRating | string | null;
+  recommendationDecision?: RecommendationDecision | string | null;
+  overallScore?: number | null;
+  summary?: string | null;
+  strengths?: string[] | null;
+  risks?: string[] | null;
+  suggestedFollowUps?: string[] | null;
+  humanReviewRequired?: boolean | null;
+  generatedAt?: string | null;
 }
 
 export interface SessionResponse {
   id: string;
   technology: TechnologySkill;
+  interviewMode?: InterviewMode | null;
+  yearsOfExperience?: number | null;
+  targetRole?: string | null;
+  startingDifficultyLevel?: number | null;
+  maxQuestions?: number | null;
   avMode: AvMode;
   status: SessionStatus;
   createdAt: string;
@@ -147,6 +211,7 @@ export interface SessionResponse {
   finalRunResult?: RunResult | null;
   feedback?: Feedback | null;
   feedbackDraft?: Feedback | null;
+  aiRecommendation?: AiInterviewRecommendation | null;
   activityEvents?: ActivityEvent[];
   authAuditEvents?: AuthAuditEvent[];
   summary?: string | null;
@@ -187,6 +252,11 @@ export interface CreateSessionRequest {
   interviewerTimeZone?: string;
   technology: TechnologySkill;
   avMode: AvMode;
+  interviewMode?: InterviewMode;
+  yearsOfExperience?: number | null;
+  targetRole?: string | null;
+  startingDifficultyLevel?: number | null;
+  maxQuestions?: number | null;
 }
 
 export interface AcceptDisclaimerRequest {
@@ -270,6 +340,14 @@ export interface EndSessionRequest {
   finalCode: string;
   codeFiles?: EditableCodeFile[];
   activeFilePath?: string;
+}
+
+export interface CodeUpdateRequest {
+  code: string;
+  codeFiles?: EditableCodeFile[];
+  activeFilePath?: string;
+  version: number;
+  updatedByRole: ParticipantRole;
 }
 
 export interface ActivityEventRequest {

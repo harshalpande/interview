@@ -323,6 +323,21 @@
   text-align: center;
 }
 
+.dashboard-action-message {
+  margin-top: 8px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.dashboard-action-message.success {
+  color: #1f7a52;
+}
+
+.dashboard-action-message.error {
+  color: #ad423a;
+}
+
 .participant-cell {
   display: grid;
   gap: 3px;

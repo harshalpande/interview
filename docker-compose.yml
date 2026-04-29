@@ -1,6 +1,42 @@
 
 
 services:
+  ai-service:
+    build:
+      context: ./ai-service
+      dockerfile: Dockerfile
+    container_name: interview-ai-service
+    ports:
+      - "8084:8080"
+    environment:
+      - AI_PROVIDER=${AI_PROVIDER:-openai}
+      - AI_API_KEY=${AI_API_KEY:-}
+      - AI_BASE_URL=${AI_BASE_URL:-https://api.openai.com/v1}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GEMINI_BASE_URL=${GEMINI_BASE_URL:-https://generativelanguage.googleapis.com/v1beta}
+      - AI_MODEL_QUESTION=${AI_MODEL_QUESTION:-gpt-4.1-mini}
+      - AI_MODEL_EVALUATION=${AI_MODEL_EVALUATION:-gpt-4.1-mini}
+      - AI_MODEL_RECOMMENDATION=${AI_MODEL_RECOMMENDATION:-gpt-4.1-mini}
+      - OPENAI_MODEL_QUESTION=${OPENAI_MODEL_QUESTION:-gpt-4.1-mini}
+      - OPENAI_MODEL_EVALUATION=${OPENAI_MODEL_EVALUATION:-gpt-4.1-mini}
+      - OPENAI_MODEL_RECOMMENDATION=${OPENAI_MODEL_RECOMMENDATION:-gpt-4.1-mini}
+      - GEMINI_MODEL_QUESTION=${GEMINI_MODEL_QUESTION:-gemini-2.5-flash}
+      - GEMINI_MODEL_EVALUATION=${GEMINI_MODEL_EVALUATION:-gemini-2.5-flash}
+      - GEMINI_MODEL_RECOMMENDATION=${GEMINI_MODEL_RECOMMENDATION:-gemini-2.5-flash}
+      - AI_REQUEST_TIMEOUT_SECONDS=${AI_REQUEST_TIMEOUT_SECONDS:-60}
+      - AI_MAX_RETRIES=${AI_MAX_RETRIES:-2}
+      - AI_TEMPERATURE=${AI_TEMPERATURE:-0.2}
+      - JAVA_OPTS=-Xmx512m -Xms256m
+    networks:
+      - java-compiler-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
   sandbox-frontend:
     build:
       context: .
@@ -55,6 +91,7 @@ services:
       - SANDBOX_BASE_URL=http://sandbox-backend:8080/api
       - SANDBOX_FRONTEND_BASE_URL=http://sandbox-frontend:8080/api
       - SANDBOX_FRONTEND_PUBLIC_BASE_URL=http://localhost:8083/api
+      - AI_SERVICE_BASE_URL=http://ai-service:8080/api
       - APP_PUBLIC_ORIGIN=${APP_PUBLIC_ORIGIN:-http://localhost:3000}
       - APP_EMAIL_MODE=${APP_EMAIL_MODE:-logging}
       - APP_EMAIL_PROVIDER=${APP_EMAIL_PROVIDER:-postmark}

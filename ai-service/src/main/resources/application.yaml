@@ -1,0 +1,38 @@
+spring:
+  config:
+    import: optional:file:../.env[.properties],optional:file:.env[.properties],optional:file:.env.local[.properties]
+  application:
+    name: interview-ai-service
+  webflux:
+    base-path: /api
+
+server:
+  port: 8080
+
+ai:
+  provider:
+    name: ${AI_PROVIDER:openai}
+    api-key: ${AI_API_KEY:}
+    base-url: ${AI_BASE_URL:https://api.openai.com/v1}
+    gemini-api-key: ${GEMINI_API_KEY:}
+    gemini-base-url: ${GEMINI_BASE_URL:https://generativelanguage.googleapis.com/v1beta}
+    question-model: ${AI_MODEL_QUESTION:}
+    evaluation-model: ${AI_MODEL_EVALUATION:}
+    recommendation-model: ${AI_MODEL_RECOMMENDATION:}
+    openai-question-model: ${OPENAI_MODEL_QUESTION:gpt-4.1-mini}
+    openai-evaluation-model: ${OPENAI_MODEL_EVALUATION:gpt-4.1-mini}
+    openai-recommendation-model: ${OPENAI_MODEL_RECOMMENDATION:gpt-4.1-mini}
+    gemini-question-model: ${GEMINI_MODEL_QUESTION:gemini-2.5-flash}
+    gemini-evaluation-model: ${GEMINI_MODEL_EVALUATION:gemini-2.5-flash}
+    gemini-recommendation-model: ${GEMINI_MODEL_RECOMMENDATION:gemini-2.5-flash}
+    request-timeout-seconds: ${AI_REQUEST_TIMEOUT_SECONDS:60}
+    max-retries: ${AI_MAX_RETRIES:2}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never

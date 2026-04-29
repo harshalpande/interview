@@ -8,7 +8,8 @@ import type { AuthAuditEvent, EditableCodeFile } from '../types/session';
 
 import './Result.css';
 
-type ResultTabKey = 'overview' | 'code' | 'preview' | 'errors' | 'audit' | 'suspicious';
+type ResultTabKey = 'overview' | 'code' | 'preview' | 'audit' | 'suspicious' | 'ai';
+type MetricTone = 'best' | 'good' | 'average' | 'worse' | 'worst' | 'neutral';
 type AuditStageKey = 'registration' | 'delivery' | 'verification' | 'readiness';
 type FinalPreviewStatus = 'unknown' | 'available' | 'missing';
 
@@ -166,6 +167,7 @@ const Result: React.FC = () => {
     (event) => event.eventType === 'TAB_HIDDEN' && event.detail.toLowerCase().includes('closed or refreshed the browser/tab')
   );
   const pasteEvents = activityEvents.filter((event) => event.eventType === 'PASTE_IN_EDITOR');
+  const copyEvents = activityEvents.filter((event) => event.eventType === 'COPY_FROM_EDITOR');
   const blockedDropEvents = activityEvents.filter((event) => event.eventType === 'EXTERNAL_DROP_BLOCKED');
   const cameraStreamLostEvents = activityEvents.filter((event) => event.eventType === 'CAMERA_STREAM_LOST');
   const microphoneDisabledEvents = activityEvents.filter((event) => event.eventType === 'MICROPHONE_DISABLED_MANUALLY');
@@ -174,15 +176,15 @@ const Result: React.FC = () => {
   const snapshotUrl = interviewee?.identityCaptureStatus === 'SUCCESS'
     ? sessionApi.getIdentityCaptureImageUrl(session.id, 'INTERVIEWEE')
     : null;
-  const hasFinalErrors = Boolean(session.finalRunResult?.stderr?.trim());
   const showExecutionTabs = !isPreSessionExpired;
+  const showAiTab = session.interviewMode === 'AI_INTERVIEWER' || Boolean(session.aiRecommendation);
   const resultTabs = [
     { key: 'overview' as const, label: 'Overview' },
     ...(showExecutionTabs ? [{ key: 'code' as const, label: 'Code' }] : []),
     ...(hasSuccessfulFrontendPreview ? [{ key: 'preview' as const, label: 'Preview' }] : []),
-    ...(showExecutionTabs && hasFinalErrors ? [{ key: 'errors' as const, label: 'Errors' }] : []),
     { key: 'audit' as const, label: 'Audit' },
     ...(!isPreSessionExpired ? [{ key: 'suspicious' as const, label: 'Integrity Activity' }] : []),
+    ...(showAiTab ? [{ key: 'ai' as const, label: 'AI Recommendation' }] : []),
   ];
   const requestedTab = searchParams.get('tab') as ResultTabKey | null;
   const activeTab = resultTabs.some((tab) => tab.key === requestedTab) ? requestedTab! : 'overview';
@@ -226,6 +228,11 @@ const Result: React.FC = () => {
               <span className="participant-label">Suspicious Activity</span>
               <span className="participant-name">{activityEvents.length}</span>
               <span>{activityEvents.length === 1 ? 'event observed' : 'events observed'}</span>
+            </div>
+            <div className="participant-info">
+              <span className="participant-label">AI Recommendation</span>
+              <span className="participant-name">{aiRecommendationHeaderValue(session)}</span>
+              <span>{aiRecommendationHeaderDetail(session)}</span>
             </div>
           </div>
         </div>
@@ -306,21 +313,47 @@ const Result: React.FC = () => {
                   <pre className="result-pre code-pre workspace-code-pre">{activeCodeFile?.content || '(no code captured)'}</pre>
                   {(session.technology === 'JAVA' || session.technology === 'PYTHON') && activeCodeFile ? (
                     <div className="question-result-grid">
-                      <div className="question-result-card">
-                        <strong>Question run status</strong>
+                      <MetricCard title="Question run status" tone={runStatusTone(activeCodeFile)}>
                         <span>{activeCodeFile.runResult ? resultStatusLabel(activeCodeFile.runResult.exitStatus) : 'Not run'}</span>
-                      </div>
-                      <div className="question-result-card">
-                        <strong>Output</strong>
+                      </MetricCard>
+                      <MetricCard title="Time taken" tone={timeTakenTone(activeCodeFile)}>
+                        <span>{formatSolveDuration(activeCodeFile.solveDurationSeconds)}</span>
+                      </MetricCard>
+                      <MetricCard title="Execute attempts" tone={attemptTone(activeCodeFile.executeAttemptCount)}>
+                        <span>{formatExecuteAttemptCount(activeCodeFile.executeAttemptCount)}</span>
+                      </MetricCard>
+                      <MetricCard title="Difficulty level" tone="neutral">
+                        <span>{activeCodeFile.difficultyLevel ? `Level ${activeCodeFile.difficultyLevel}` : 'Not captured'}</span>
+                      </MetricCard>
+                      <MetricCard title="Expected complexity" tone="neutral">
+                        <ComplexityLines time={activeCodeFile.expectedTimeComplexity} space={activeCodeFile.expectedSpaceComplexity} />
+                      </MetricCard>
+                      <MetricCard title="Actual complexity" tone={actualComplexityTone(activeCodeFile)}>
+                        <ComplexityLines
+                          time={actualComplexityLabel(activeCodeFile, 'time')}
+                          space={actualComplexityLabel(activeCodeFile, 'space')}
+                        />
+                      </MetricCard>
+                      <MetricCard title="Question integrity" tone={integrityTone(activeCodeFile)}>
+                        <pre>{activeCodeFile.aiEvaluation?.questionIntegrityNotes || activeCodeFile.questionIntegrityNotes || 'Not captured'}</pre>
+                      </MetricCard>
+                      {activeCodeFile.aiEvaluation ? (
+                        <MetricCard title="AI evaluation" tone={aiEvaluationTone(activeCodeFile)}>
+                          <span>{formatAiScore(activeCodeFile.aiEvaluation.overallScore)} {activeCodeFile.aiEvaluation.verdict ? `- ${activeCodeFile.aiEvaluation.verdict}` : ''}</span>
+                          <pre>{activeCodeFile.aiEvaluation.summary || '(no AI summary captured)'}</pre>
+                        </MetricCard>
+                      ) : null}
+                      <MetricCard title="Output" tone={outputTone(activeCodeFile, session.technology)}>
                         <pre>{activeCodeFile.runResult?.stdout || '(no output captured)'}</pre>
-                      </div>
-                      <div className="question-result-card">
-                        <strong>Errors</strong>
+                      </MetricCard>
+                      <MetricCard title="Errors" tone={errorTone(activeCodeFile)}>
                         <pre>{activeCodeFile.runResult?.stderr || '(no errors captured)'}</pre>
-                      </div>
+                      </MetricCard>
                     </div>
                   ) : null}
                 </div>
+              ) : (session.technology === 'JAVA' || session.technology === 'PYTHON') && (session.codeFiles || []).length > 0 ? (
+                <p className="activity-empty">No attempted question code was captured for this interview.</p>
               ) : (
                 <pre className="result-pre code-pre">{session.latestCode || '(no code captured)'}</pre>
               )}
@@ -337,13 +370,6 @@ const Result: React.FC = () => {
                   className="result-preview-frame"
                 />
               </div>
-            </section>
-          )}
-
-          {activeTab === 'errors' && (
-            <section className="result-panel">
-              <h3>Final Errors</h3>
-              <pre className="result-pre error-pre">{session.finalRunResult?.stderr || '(no errors)'}</pre>
             </section>
           )}
 
@@ -440,6 +466,10 @@ const Result: React.FC = () => {
                       <strong>{pasteEvents.length}</strong>
                     </div>
                     <div className="activity-metric">
+                      <span className="activity-metric-label">Copy attempts</span>
+                      <strong>{copyEvents.length}</strong>
+                    </div>
+                    <div className="activity-metric">
                       <span className="activity-metric-label">Blocked drops</span>
                       <strong>{blockedDropEvents.length}</strong>
                     </div>
@@ -462,7 +492,7 @@ const Result: React.FC = () => {
                   </div>
                   <div className="activity-summary-note">
                     <p>
-                      <strong>Summary:</strong> {suspiciousEvents.length} suspicious event{suspiciousEvents.length === 1 ? '' : 's'}, {warningEvents.length} warning{warningEvents.length === 1 ? '' : 's'}, and {infoEvents.length} informational signal{infoEvents.length === 1 ? '' : 's'} were recorded. {tabSwitchEvents.length} tab switch event{tabSwitchEvents.length === 1 ? '' : 's'}, {browserCloseRefreshEvents.length} browser refresh/close event{browserCloseRefreshEvents.length === 1 ? '' : 's'}, {pasteEvents.length} paste event{pasteEvents.length === 1 ? '' : 's'}, and {blockedDropEvents.length} blocked drag-and-drop attempt{blockedDropEvents.length === 1 ? '' : 's'} were observed during the session.{isInAppAvSession ? ` ${cameraStreamLostEvents.length} camera interruption${cameraStreamLostEvents.length === 1 ? '' : 's'}, ${microphoneDisabledEvents.length} microphone-off event${microphoneDisabledEvents.length === 1 ? '' : 's'}, and ${cameraDisabledEvents.length} camera-off event${cameraDisabledEvents.length === 1 ? '' : 's'} were also recorded through the in-app AV workflow.` : ' Live AV was handled outside the platform for this session, so focus-away events are reviewed with more context.'}
+                      <strong>Summary:</strong> {suspiciousEvents.length} suspicious event{suspiciousEvents.length === 1 ? '' : 's'}, {warningEvents.length} warning{warningEvents.length === 1 ? '' : 's'}, and {infoEvents.length} informational signal{infoEvents.length === 1 ? '' : 's'} were recorded. {tabSwitchEvents.length} tab switch event{tabSwitchEvents.length === 1 ? '' : 's'}, {browserCloseRefreshEvents.length} browser refresh/close event{browserCloseRefreshEvents.length === 1 ? '' : 's'}, {copyEvents.length} copy attempt{copyEvents.length === 1 ? '' : 's'}, {pasteEvents.length} paste event{pasteEvents.length === 1 ? '' : 's'}, and {blockedDropEvents.length} blocked drag-and-drop attempt{blockedDropEvents.length === 1 ? '' : 's'} were observed during the session.{isInAppAvSession ? ` ${cameraStreamLostEvents.length} camera interruption${cameraStreamLostEvents.length === 1 ? '' : 's'}, ${microphoneDisabledEvents.length} microphone-off event${microphoneDisabledEvents.length === 1 ? '' : 's'}, and ${cameraDisabledEvents.length} camera-off event${cameraDisabledEvents.length === 1 ? '' : 's'} were also recorded through the in-app AV workflow.` : ' Live AV was handled outside the platform for this session, so focus-away events are reviewed with more context.'}
                     </p>
                     {latestActivity ? (
                       <p>
@@ -476,6 +506,40 @@ const Result: React.FC = () => {
               )}
             </section>
           )}
+
+          {activeTab === 'ai' && (
+            <section className="result-panel ai-result-panel">
+              <h3>AI Recommendation</h3>
+              {session.aiRecommendation ? (
+                <div className="ai-result-layout">
+                  <div className="question-result-grid ai-score-grid">
+                    <MetricCard title="Rating" tone={recommendationRatingTone(session.aiRecommendation.rating)}>
+                      <span>{formatOptionalLabel(session.aiRecommendation.rating)}</span>
+                    </MetricCard>
+                    <MetricCard title="Recommendation" tone={recommendationDecisionTone(session.aiRecommendation.recommendationDecision)}>
+                      <span>{formatOptionalLabel(session.aiRecommendation.recommendationDecision)}</span>
+                    </MetricCard>
+                    <MetricCard title="Score" tone={scoreTone(session.aiRecommendation.overallScore)}>
+                      <span>{formatAiScore(session.aiRecommendation.overallScore)}</span>
+                    </MetricCard>
+                    <MetricCard title="Human review" tone="neutral">
+                      <span>{session.aiRecommendation.humanReviewRequired === false ? 'Optional' : 'Required'}</span>
+                    </MetricCard>
+                  </div>
+                  <div className="ai-result-summary">
+                    <h4>Summary</h4>
+                    <p>{session.aiRecommendation.summary || 'No AI recommendation summary was captured.'}</p>
+                    <AiList title="Strengths" items={session.aiRecommendation.strengths} />
+                    <AiList title="Risks" items={session.aiRecommendation.risks} />
+                    <AiList title="Review focus" items={session.aiRecommendation.suggestedFollowUps} />
+                    {session.aiRecommendation.generatedAt ? <p className="activity-empty">Generated {formatDateTime(session.aiRecommendation.generatedAt)}</p> : null}
+                  </div>
+                </div>
+              ) : (
+                <p className="activity-empty">No AI recommendation has been generated for this interview yet.</p>
+              )}
+            </section>
+          )}
         </div>
       </div>
     </div>
@@ -484,12 +548,54 @@ const Result: React.FC = () => {
 
 export default Result;
 
+function AiList({ title, items }: { title: string; items?: string[] | null }) {
+  const normalizedItems = (items || []).filter((item) => item.trim()).slice(0, 3);
+  if (!normalizedItems.length) {
+    return null;
+  }
+  return (
+    <div className="ai-result-list">
+      <h4>{title}</h4>
+      <ul>
+        {normalizedItems.map((item) => <li key={item}>{item}</li>)}
+      </ul>
+    </div>
+  );
+}
+
+function MetricCard({ title, tone, children }: { title: string; tone?: MetricTone; children: React.ReactNode }) {
+  return (
+    <div className={`question-result-card metric-${tone || 'neutral'}`}>
+      <strong>{title}</strong>
+      {children}
+    </div>
+  );
+}
+
+function ComplexityLines({ time, space }: { time?: string | null; space?: string | null }) {
+  if (!time && !space) {
+    return <span>Not captured</span>;
+  }
+  return (
+    <span className="complexity-lines">
+      <span>Time: {time || 'Not captured'}</span>
+      <span>Space: {space || 'Not captured'}</span>
+    </span>
+  );
+}
+
 function buildResultCodeFiles(technology: string, codeFiles: EditableCodeFile[] | undefined, latestCode: string) {
   if (technology !== 'ANGULAR' && technology !== 'REACT' && technology !== 'JAVA' && technology !== 'PYTHON') {
     return [];
   }
 
-  const persistedFiles = (codeFiles || []).map((file) => ({ ...file }));
+  const incomingCodeFiles = codeFiles || [];
+  const persistedFiles = incomingCodeFiles
+    .filter((file) => shouldShowResultCodeFile(technology, file))
+    .map((file) => ({ ...file }));
+  if ((technology === 'JAVA' || technology === 'PYTHON') && incomingCodeFiles.length > 0 && persistedFiles.length === 0) {
+    return [];
+  }
   const files = persistedFiles.length > 0
     ? persistedFiles
     : [{
@@ -519,6 +625,19 @@ function buildResultCodeFiles(technology: string, codeFiles: EditableCodeFile[] 
   });
 }
 
+function shouldShowResultCodeFile(technology: string, file: EditableCodeFile) {
+  if (technology !== 'JAVA' && technology !== 'PYTHON') {
+    return true;
+  }
+  if (file.submitted === true || file.runResult || file.aiEvaluation) {
+    return true;
+  }
+  if ((file.executeAttemptCount ?? 0) > 0) {
+    return true;
+  }
+  return typeof file.solveDurationSeconds === 'number' && file.solveDurationSeconds > 0;
+}
+
 function defaultResultFilePath(technology: string) {
   if (technology === 'REACT') return 'src/App.tsx';
   if (technology === 'ANGULAR') return 'src/app/app.component.ts';
@@ -538,11 +657,191 @@ function resultStatusLabel(exitStatus?: number | null) {
   return 'Run captured';
 }
 
+function formatSolveDuration(seconds?: number | null) {
+  if (typeof seconds !== 'number' || !Number.isFinite(seconds)) {
+    return 'Not captured';
+  }
+
+  const safeSeconds = Math.max(0, Math.round(seconds));
+  const minutes = Math.floor(safeSeconds / 60);
+  const remainingSeconds = safeSeconds % 60;
+  if (minutes <= 0) {
+    return `${remainingSeconds}s`;
+  }
+  if (remainingSeconds === 0) {
+    return `${minutes}m`;
+  }
+  return `${minutes}m ${remainingSeconds}s`;
+}
+
+function formatExecuteAttemptCount(count?: number | null) {
+  if (typeof count !== 'number' || !Number.isFinite(count)) {
+    return 'Not captured';
+  }
+
+  const safeCount = Math.max(0, Math.round(count));
+  return `${safeCount}`;
+}
+
+function formatAiScore(score?: number | null) {
+  return typeof score === 'number' && Number.isFinite(score) ? `${score}/100` : 'Not captured';
+}
+
+function aiRecommendationHeaderValue(session: { interviewMode?: string | null; aiRecommendation?: { recommendationDecision?: string | null; rating?: string | null } | null }) {
+  if (!session.aiRecommendation) {
+    return session.interviewMode === 'AI_INTERVIEWER' ? 'Not generated' : 'Not applicable';
+  }
+  return formatOptionalLabel(session.aiRecommendation.recommendationDecision || session.aiRecommendation.rating);
+}
+
+function aiRecommendationHeaderDetail(session: { aiRecommendation?: { overallScore?: number | null; rating?: string | null; humanReviewRequired?: boolean | null } | null }) {
+  const recommendation = session.aiRecommendation;
+  if (!recommendation) {
+    return 'no AI result';
+  }
+  const score = formatAiScore(recommendation.overallScore);
+  const rating = formatOptionalLabel(recommendation.rating);
+  const review = recommendation.humanReviewRequired === false ? 'review optional' : 'human review required';
+  return `${rating}; ${score}; ${review}`;
+}
+
+function runStatusTone(file: EditableCodeFile): MetricTone {
+  if (!file.runResult) return 'worst';
+  return file.runResult.exitStatus === 0 ? 'best' : 'worst';
+}
+
+function timeTakenTone(file: EditableCodeFile): MetricTone {
+  if (typeof file.solveDurationSeconds !== 'number' || file.solveDurationSeconds <= 0) return 'worst';
+  const idealSeconds = (file.idealDurationMinutes || 12) * 60;
+  if (file.solveDurationSeconds <= idealSeconds) return 'best';
+  if (file.solveDurationSeconds <= idealSeconds * 1.25) return 'good';
+  if (file.solveDurationSeconds <= idealSeconds * 1.5) return 'average';
+  return 'worse';
+}
+
+function attemptTone(count?: number | null): MetricTone {
+  if (typeof count !== 'number' || !Number.isFinite(count)) return 'worst';
+  if (count <= 0) return 'worst';
+  if (count <= 2) return 'best';
+  if (count <= 4) return 'good';
+  if (count <= 6) return 'average';
+  if (count <= 9) return 'worse';
+  return 'worst';
+}
+
+function integrityTone(file: EditableCodeFile): MetricTone {
+  const text = `${file.aiEvaluation?.questionIntegrityNotes || ''} ${file.questionIntegrityNotes || ''}`.toLowerCase();
+  if (!text.trim()) return 'average';
+  if (text.includes('healthy: true')) return 'best';
+  if (text.includes('healthy: false')) return 'worst';
+  if (hasIntegrityConcern(text)) return 'worst';
+  return 'best';
+}
+
+function outputTone(file: EditableCodeFile, technology: string): MetricTone {
+  const output = file.runResult?.stdout?.trim() || '';
+  if (!output) return technology === 'JAVA' || technology === 'PYTHON' ? 'worst' : 'average';
+  if (output.toLowerCase().includes('all assertions passed')) return 'best';
+  return file.runResult?.exitStatus === 0 ? 'good' : 'average';
+}
+
+function errorTone(file: EditableCodeFile): MetricTone {
+  return file.runResult?.stderr?.trim() ? 'worst' : 'best';
+}
+
+function aiEvaluationTone(file: EditableCodeFile): MetricTone {
+  const score = file.aiEvaluation?.overallScore;
+  if (typeof score !== 'number') return 'average';
+  return scoreTone(score);
+}
+
+function actualComplexityTone(file: EditableCodeFile): MetricTone {
+  return complexityWordTone(actualComplexityLabel(file, 'time'));
+}
+
+function actualComplexityLabel(file: EditableCodeFile, dimension: 'time' | 'space') {
+  const text = file.aiEvaluation?.complexityAssessment?.toLowerCase() || '';
+  const dimensionText = dimension === 'time' ? text.split(/space[:\s]/i)[0] || text : text;
+  if (!file.aiEvaluation) return 'Not captured';
+  if (/optimal|matches|same as expected|as expected|efficient|o\(1\)/i.test(dimensionText)) return 'Best';
+  if (/acceptable|reasonable|near|close/i.test(dimensionText)) return 'Good';
+  if (/average|moderate/i.test(dimensionText)) return 'Better';
+  if (/higher|extra|suboptimal|inefficient|worse/i.test(dimensionText)) return 'Worse';
+  if (/exponential|very high|poor|bad|unbounded/i.test(dimensionText)) return 'Worst';
+  return complexityWord(file.aiEvaluation.efficiencyScore);
+}
+
+function complexityWord(score?: number | null) {
+  if (typeof score !== 'number') return 'Not captured';
+  if (score >= 90) return 'Best';
+  if (score >= 75) return 'Good';
+  if (score >= 55) return 'Better';
+  if (score >= 35) return 'Worse';
+  return 'Worst';
+}
+
+function complexityWordTone(value: string): MetricTone {
+  if (value === 'Best') return 'best';
+  if (value === 'Good') return 'good';
+  if (value === 'Better') return 'average';
+  if (value === 'Worse') return 'worse';
+  if (value === 'Worst') return 'worst';
+  return 'average';
+}
+
+function scoreTone(score?: number | null): MetricTone {
+  if (typeof score !== 'number') return 'average';
+  if (score >= 85) return 'best';
+  if (score >= 70) return 'good';
+  if (score >= 50) return 'average';
+  if (score >= 35) return 'worse';
+  return 'worst';
+}
+
+function recommendationRatingTone(rating?: string | null): MetricTone {
+  if (!rating) return 'average';
+  switch (rating.toUpperCase()) {
+    case 'EXCELLENT': return 'best';
+    case 'GOOD': return 'good';
+    case 'FAIR': return 'average';
+    case 'BAD': return 'worse';
+    case 'DISQUALIFIED': return 'worst';
+    default: return 'average';
+  }
+}
+
+function recommendationDecisionTone(decision?: string | null): MetricTone {
+  if (decision === 'YES') return 'best';
+  if (decision === 'REEVALUATION') return 'average';
+  if (decision === 'NO') return 'worst';
+  return 'average';
+}
+
+function hasIntegrityConcern(text: string) {
+  return /changed|removed|tamper|mismatch|integrity concern/i.test(text);
+}
+
+function formatOptionalLabel(value?: string | null) {
+  if (!value) {
+    return 'Not captured';
+  }
+  return value
+    .toLowerCase()
+    .split('_')
+    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+    .join(' ');
+}
+
 function resultCodeTabLabel(technology: string, file: EditableCodeFile, index: number) {
   if (technology === 'JAVA' || technology === 'PYTHON') {
-    return `Question ${index + 1}`;
+    return `Question ${guidedQuestionNumber(file.path, index + 1)}`;
   }
   return file.displayName;
+}
+
+function guidedQuestionNumber(path: string, fallbackIndex: number) {
+  const match = basename(path).match(/(\d+)/);
+  return match ? Number(match[1]) : fallbackIndex;
 }
 
 function formatRecommendation(value: string) {

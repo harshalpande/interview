@@ -33,20 +33,43 @@ flowchart LR
 
 ### Interview Session
 - Interviewer creates a session and receives a join link token.
+- The registration flow supports two modes: `HUMAN_INTERVIEWER` and `AI_INTERVIEWER`. Human mode is the default and preserves the existing two-person workflow.
+- AI mode registers an internal `AI Interviewer` system participant, captures experience/target-role/difficulty-level metadata, and sends secure access only to the candidate.
 - During session creation, the interviewer selects the live AV mode for the interview: built-in platform AV or an external channel such as Microsoft Teams or Zoom.
 - Interviewee joins using the token (name/email must match what interviewer registered).
-- Identity capture remains mandatory before the interviewee enters the live session, regardless of the selected AV mode.
+- Identity capture is part of the pre-session flow before the interviewee enters the live session, regardless of the selected AV mode.
+- Identity capture readiness accepts terminal statuses (`SUCCESS`, `SKIPPED`, or `FAILED`) so a candidate who continues without a photo is still considered joined and ready for interview start.
 - Before the interviewer starts the live interview, both participants see a non-dismissible quick control guide with a single `I know` action. The guide explains editor buttons and shortcuts while the editor is still read-only.
 - Live collaboration uses STOMP topics (`/topic/session/{sessionId}`) for code + session state.
 - When `IN_APP` AV is selected, the session also uses WebRTC signaling for the built-in media panel.
 - When `EXTERNAL` AV is selected, the coding session remains focused on the editor and session controls while live audio/video is handled outside the platform.
 
+### AI Service
+- AI orchestration is separated into `ai-service/`, a Spring Boot WebFlux service.
+- The core backend remains the source of truth for sessions, participants, code files, run results, feedback, and human override.
+- `ai-service` owns provider configuration, question generation, solution evaluation, interview recommendation prompts, and later voice/transcript analysis. It supports OpenAI and Gemini behind the `AI_PROVIDER` toggle.
+- Provider-specific models are resolved inside `ai-service`: OpenAI prefers `OPENAI_MODEL_*`, Gemini prefers `GEMINI_MODEL_*`, and generic `AI_MODEL_*` values are only backward-compatible fallbacks.
+- The service is configured only through environment variables; API keys must not be committed.
+- Initial Docker endpoint: `http://localhost:8084/api/ai/status`.
+- Live provider-readiness endpoint: `http://localhost:8084/api/ai/status/provider`.
+- Backend calls `ai-service` through `AI_SERVICE_BASE_URL` and keeps all generated questions in the existing `code_files` question-tab model.
+- For AI interviews, backend secure-access startup calls the provider-readiness endpoint before OTP emails are sent; failed readiness blocks candidate access with a friendly retry message.
+- Session-scoped AI operations are exposed by the backend under `/api/sessions/{id}/ai/...`, so the frontend does not need direct provider access.
+- AI question progression is candidate-action driven: `Freeze` persists the submitted tab, triggers background AI evaluation, and asks the AI service for the next question. The candidate does not manually request or evaluate AI questions from the interview screen and sees a loading state while generation is in progress.
+- Question Policy/Rubric Engine v1 lives in backend Java code (`AiPolicyEngineService`) and sends structured policy/rubric guidance into AI question generation, solution evaluation, and final recommendation requests. This is intentionally a phase 1 implementation; the rules should later move to DB/admin-managed tables so HR/interview owners can tune technology concept coverage, forbidden capabilities, duration guidance, and rubric weights without code changes.
+- Per-question AI evaluation is persisted on `code_files`; final AI recommendation metadata is persisted on `interview_sessions` and remains subject to human review/override. Session end also attempts backend-side recommendation generation so the result does not depend on the candidate browser staying open.
+- AI-generated Java/Python questions carry stored difficulty level, expected complexity, original problem/test snapshots, hidden reference solution metadata, and integrity notes so evaluation can detect changed problem statements or validation assertions.
+- Java/Python AI questions pass through a backend validation gate before persistence: generate problem and hidden solution, verify matching starter/reference assertions, compile/run the hidden solution through `sandbox-backend`, and only then publish the starter question to the candidate. Failed validation triggers regeneration or a validated fallback.
+- Candidate disclaimers make the same rule explicit before entry: changing, removing, or weakening problem statements, validation code, or assert statements is recorded as a question-integrity issue and may be treated as suspicious. Integrity output is intentionally boolean-style (`Healthy: TRUE` / `Healthy: FALSE`) with changed validation details when unhealthy.
+- Provider-unavailable fallback uses the `interview_question_bank` table. Startup seeding creates 100 Java/Python entries and the backend selects a technology/difficulty-appropriate unused question when Gemini/OpenAI is unavailable, varying selection by session and avoiding already used question content.
+
 ### Compile & Run
 - Java/Python interviews support Guided Question Tabs. The interviewer can prepare future hidden tabs at any time while the candidate works on the current active tab.
 - Guided question tabs can be deleted only while they are still `Prepared`; active/submitted question evidence is retained in the interview record.
-- The candidate submits the current question with `Freeze`; the submitted tab becomes read-only, and the next prepared tab is automatically promoted to active/visible when it exists.
+- The candidate submits the current question with `Freeze`; the submitted tab becomes read-only, its solve duration is captured, and the next prepared tab is automatically promoted to active/visible when it exists.
 - Guided question tab states are `Prepared`, `Active`, and `Submitted`; submitted tabs are read-only for both participants.
 - Frontend posts the active Java/Python question source to the main backend using the existing `/api/compile` contract.
+- Candidate `Run Active Tab` presses are persisted as `executeAttemptCount` on the active question tab; Freeze's final capture does not increment this counter.
 - Backend proxies Java/Python execution to `sandbox-backend`.
 - `sandbox-backend` routes execution through `SandboxExecutionService -> LanguageRunner -> JavaRunner/PythonRunner`.
 - The runner writes source to a temp directory, executes inside the isolated sandbox process, and returns stdout/stderr/compile errors to the backend.
@@ -72,6 +95,8 @@ flowchart LR
 - In-app mic/camera disablement is warning-first and becomes suspicious after `15 seconds` or repeated disablement.
 - Candidate notifications use corrective language, while interviewer alerts are reserved for confirmed suspicious events.
 - The Result Workspace summarizes integrity activity by severity and event category.
+- Question-integrity evidence from tampered prompts, validation code, or assert statements is retained separately from browser/activity events and is considered during AI recommendation and human review.
+- In AI-interviewer mode, candidate copy/cut from the editor is blocked and recorded as integrity activity; repeated attempts are elevated to suspicious.
 
 ### End Interview / Final Preview
 - Before a session is marked ended, backend performs one final execution/build using the latest saved code/files.
@@ -83,7 +108,7 @@ flowchart LR
 
 - H2 is used for sessions, participants, tokens, code state, run results, and feedback.
 - Java/Python Guided Question Tabs reuse `code_files` for tab metadata and `run_results` for per-question execution evidence.
-- Guided Question Tab state is stored as plain boolean/integer metadata on `code_files` (`enabledForCandidate`, `activeQuestion`, `submitted`, and `idealDurationMinutes`), not as database enums.
+- Guided Question Tab state is stored as plain boolean/integer/timestamp metadata on `code_files` (`enabledForCandidate`, `activeQuestion`, `submitted`, `idealDurationMinutes`, `candidateStartedAt`, `submittedAt`, `solveDurationSeconds`, and `executeAttemptCount`), not as database enums.
 - Enum-backed entity fields use `EnumType.STRING`; local/Docker H2 startup runs an enum-column repair pass that converts known enum columns to `VARCHAR` to avoid stale H2 enum allowed-value errors after enum changes.
 - Docker deployment uses file-based H2 persisted via bind mount.
 - Final identity snapshots and final frontend preview artifacts are stored under the backend bind-mounted storage root.

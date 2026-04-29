@@ -5,6 +5,10 @@ import type {
   AccessVerificationResponse,
   ActivityEvent,
   ActivityEventRequest,
+  AiInterviewRecommendation,
+  AiQuestionSessionResponse,
+  AiSolutionEvaluation,
+  CodeUpdateRequest,
   CreateSessionRequest, 
   DisconnectParticipantRequest,
   EndSessionRequest,
@@ -20,6 +24,8 @@ import type {
   VerifyOtpRequest
 } from '../types/session';
 import { resolveApiBaseUrl } from '../utils/apiUrls';
+
+const SECURE_ACCESS_EMAIL_TIMEOUT_MS = 60000;
 
 class SessionApiClient {
   private axiosInstance: AxiosInstance;
@@ -54,7 +60,9 @@ class SessionApiClient {
 
   async startSecureSession(id: string): Promise<SessionResponse> {
     try {
-      const response = await this.axiosInstance.post<SessionResponse>(`/sessions/${id}/start-session`);
+      const response = await this.axiosInstance.post<SessionResponse>(`/sessions/${id}/start-session`, undefined, {
+        timeout: SECURE_ACCESS_EMAIL_TIMEOUT_MS,
+      });
       return response.data;
     } catch (error) {
       throw this.handleError(error);
@@ -249,6 +257,48 @@ class SessionApiClient {
     }
   }
 
+  async generateNextAiQuestion(id: string): Promise<AiQuestionSessionResponse> {
+    try {
+      const response = await this.axiosInstance.post<AiQuestionSessionResponse>(`/sessions/${id}/ai/questions/next`, undefined, {
+        timeout: 90000,
+      });
+      return response.data;
+    } catch (error) {
+      throw this.handleError(error);
+    }
+  }
+
+  async updateCodeState(id: string, request: CodeUpdateRequest): Promise<SessionResponse> {
+    try {
+      const response = await this.axiosInstance.post<SessionResponse>(`/sessions/${id}/code`, request);
+      return response.data;
+    } catch (error) {
+      throw this.handleError(error);
+    }
+  }
+
+  async evaluateAiQuestion(id: string, filePath?: string): Promise<AiSolutionEvaluation> {
+    try {
+      const response = await this.axiosInstance.post<AiSolutionEvaluation>(`/sessions/${id}/ai/questions/evaluate`, filePath ? { filePath } : undefined, {
+        timeout: 90000,
+      });
+      return response.data;
+    } catch (error) {
+      throw this.handleError(error);
+    }
+  }
+
+  async generateAiRecommendation(id: string): Promise<AiInterviewRecommendation> {
+    try {
+      const response = await this.axiosInstance.post<AiInterviewRecommendation>(`/sessions/${id}/ai/recommendation`, undefined, {
+        timeout: 90000,
+      });
+      return response.data;
+    } catch (error) {
+      throw this.handleError(error);
+    }
+  }
+
   async submitFeedback(id: string, feedback: FeedbackRequest): Promise<SessionResponse> {
     try {
       const response = await this.axiosInstance.post<SessionResponse>(`/sessions/${id}/feedback`, feedback);
@@ -308,6 +358,9 @@ class SessionApiClient {
       if (error.response) {
         const message = (error.response.data as any)?.message || `Server error: ${error.response.status}`;
         return new Error(message);
+      }
+      if (error.code === 'ECONNABORTED') {
+        return new Error('The request took longer than expected. Please refresh the dashboard; passcodes may still have been delivered.');
       }
       if (error.request) {
         return new Error('No response from server. Is the backend running?');

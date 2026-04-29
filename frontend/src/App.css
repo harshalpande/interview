@@ -144,6 +144,7 @@ body {
 }
 
 .form-group input,
+.form-group select,
 .feedback-field select,
 .feedback-textarea,
 .share-url-input {
@@ -157,6 +158,7 @@ body {
 }
 
 .form-group input:focus,
+.form-group select:focus,
 .feedback-field select:focus,
 .feedback-textarea:focus,
 .share-url-input:focus {

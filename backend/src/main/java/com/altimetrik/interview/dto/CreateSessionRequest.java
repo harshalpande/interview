@@ -1,15 +1,17 @@
 package com.altimetrik.interview.dto;
 
 import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 import com.altimetrik.interview.enums.AvMode;
+import com.altimetrik.interview.enums.InterviewMode;
 import com.altimetrik.interview.enums.TechnologySkill;
 
 @Data
 public class CreateSessionRequest {
     
-    @NotBlank
     private String interviewerName;
     
     @Email
@@ -24,6 +26,18 @@ public class CreateSessionRequest {
     private String title;
 
     private TechnologySkill technology;
+
+    private InterviewMode interviewMode;
+
+    private Integer yearsOfExperience;
+
+    private String targetRole;
+
+    @Min(1)
+    @Max(5)
+    private Integer startingDifficultyLevel;
+
+    private Integer maxQuestions;
 
     private String interviewerTimeZone;
 

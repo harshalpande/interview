@@ -30,6 +30,38 @@ const STATUS_LABELS: Record<SessionStatus, string> = {
   AUTH_FAILED: 'Authentication Failed',
 };
 
+const isManagedAiQuestionFile = (file: EditableCodeFile) =>
+  Boolean(file.aiEvaluation || file.content?.includes('AI Generated Problem Statement:'));
+
+const mutationErrorMessage = (error: unknown) => error instanceof Error ? error.message : '';
+
+const isAiQuotaOrCredentialError = (message: string) =>
+  /quota|rate limit|credential|api key/i.test(message);
+
+type AiQuestionProgressStage = 'idle' | 'saving' | 'evaluating' | 'generating' | 'validating' | 'ready';
+
+const logAiQuestionFlow = (message: string, details?: unknown) => {
+  if (details === undefined) {
+    console.info(`[AI Question Flow] ${message}`);
+    return;
+  }
+  console.info(`[AI Question Flow] ${message}`, details);
+};
+
+const summarizeAiQuestionFiles = (files: EditableCodeFile[]) =>
+  files
+    .filter(isManagedAiQuestionFile)
+    .map((file) => ({
+      path: file.path,
+      displayName: file.displayName,
+      activeQuestion: file.activeQuestion === true,
+      submitted: file.submitted === true,
+      editable: file.editable === true,
+      enabledForCandidate: file.enabledForCandidate !== false,
+      difficultyLevel: file.difficultyLevel,
+      executeAttemptCount: file.executeAttemptCount,
+    }));
+
 const Session: React.FC = () => {
   const { sessionId } = useParams<{ sessionId: string }>();
   const [searchParams] = useSearchParams();
@@ -69,10 +101,15 @@ const Session: React.FC = () => {
   const cameraLongOffRecordedRef = React.useRef(false);
   const previousMuteStateRef = React.useRef<boolean | null>(null);
   const previousCameraStateRef = React.useRef<boolean | null>(null);
+  const aiFirstQuestionRequestedRef = React.useRef(false);
+  const aiRecommendationAutoRequestedRef = React.useRef(false);
+  const lastEditorCopyBlockedAtRef = React.useRef(0);
   const internalClipboardTextsRef = React.useRef<Map<string, number>>(new Map());
   const codeVersionRef = React.useRef(0);
   const [activeQuestionPath, setActiveQuestionPath] = React.useState('');
   const [preStartGuideAcknowledged, setPreStartGuideAcknowledged] = React.useState(false);
+  const [isGeneratingFollowupAiQuestion, setIsGeneratingFollowupAiQuestion] = React.useState(false);
+  const [aiQuestionProgressStage, setAiQuestionProgressStage] = React.useState<AiQuestionProgressStage>('idle');
 
   const { data: session, isLoading, error } = useQuery({
     queryKey: ['session', sessionId],
@@ -91,10 +128,12 @@ const Session: React.FC = () => {
   const isFrontendWorkspaceSession = session?.technology === 'ANGULAR' || session?.technology === 'REACT';
   const isGuidedQuestionSession = session?.technology === 'JAVA' || session?.technology === 'PYTHON';
   const isCodeWorkspaceSession = isFrontendWorkspaceSession || isGuidedQuestionSession;
+  const isAiInterviewSession = session?.interviewMode === 'AI_INTERVIEWER';
   const isInAppAvSession = session?.avMode === 'IN_APP';
   const intervieweeName = interviewee?.name?.trim() || 'Interviewee';
   const interviewerFirstName = firstName(interviewer?.name, 'Interviewer');
   const intervieweeFirstName = firstName(interviewee?.name, 'Interviewee');
+  const wsRole: ParticipantRole = role === 'interviewer' ? 'INTERVIEWER' : 'INTERVIEWEE';
 
   useBackGuard({
     enabled: true,
@@ -286,6 +325,11 @@ const Session: React.FC = () => {
     setToastItems((prev) => [...prev, { id, message: prefixedMessage, tone, persistent: true, createdAt: Date.now(), autoCloseMs: 60000 }]);
   }, []);
 
+  const pushSessionToast = React.useCallback((message: string, tone: ToastItem['tone'] = 'warning') => {
+    const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    setToastItems((prev) => [...prev, { id, message, tone, persistent: false, createdAt: Date.now(), autoCloseMs: 12000 }]);
+  }, []);
+
   const pushCandidateActivityToast = React.useCallback((event: ActivityEvent) => {
     const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const severity = event.severity || 'WARNING';
@@ -367,14 +411,50 @@ const Session: React.FC = () => {
     [pushCandidateActivityToast, role, session?.status, sessionId]
   );
 
+  const handleCopyFromEditor = React.useCallback((text: string) => {
+    if (!isAiInterviewSession || role !== 'interviewee' || session?.status !== 'ACTIVE') {
+      rememberInternalClipboardText(text);
+      return true;
+    }
+
+    const now = Date.now();
+    if (now - lastEditorCopyBlockedAtRef.current > 1200) {
+      lastEditorCopyBlockedAtRef.current = now;
+      void recordActivityEvent(
+        'COPY_FROM_EDITOR',
+        `${interviewee?.name?.trim() || 'Interviewee'} tried to copy content from the editor during an AI interview.`
+      );
+    }
+    return false;
+  }, [interviewee?.name, isAiInterviewSession, recordActivityEvent, rememberInternalClipboardText, role, session?.status]);
+
   const resolvedCodeFiles = React.useMemo(
     () => (currentCodeFiles.length > 0 ? currentCodeFiles : session?.codeFiles || []),
     [currentCodeFiles, session?.codeFiles]
+  );
+  const hasManagedAiQuestion = React.useMemo(
+    () => resolvedCodeFiles.some(isManagedAiQuestionFile),
+    [resolvedCodeFiles]
+  );
+  const resolvedActiveQuestionPath = React.useMemo(
+    () => resolvedCodeFiles.find((file) => file.activeQuestion && !file.submitted)?.path || '',
+    [resolvedCodeFiles]
   );
   const resolvedLatestCode = React.useMemo(
     () => (isCodeWorkspaceSession ? resolvePrimaryCodeFromFiles(session?.technology, resolvedCodeFiles) : (currentCode || session?.latestCode || '')),
     [currentCode, isCodeWorkspaceSession, resolvedCodeFiles, session?.latestCode, session?.technology]
   );
+
+  React.useEffect(() => {
+    if (resolvedActiveQuestionPath && resolvedActiveQuestionPath !== activeQuestionPath) {
+      logAiQuestionFlow('syncing active question path from session state', {
+        previousActiveQuestionPath: activeQuestionPath || null,
+        resolvedActiveQuestionPath,
+        files: summarizeAiQuestionFiles(resolvedCodeFiles),
+      });
+      setActiveQuestionPath(resolvedActiveQuestionPath);
+    }
+  }, [activeQuestionPath, resolvedActiveQuestionPath, resolvedCodeFiles]);
 
   React.useEffect(() => {
     if (!sessionId || !role || session?.status !== 'ACTIVE' || !hadStoredSession) {
@@ -484,6 +564,227 @@ const Session: React.FC = () => {
     onSuccess: refreshSession,
   });
 
+  const generateAiQuestionMutation = useMutation({
+    mutationFn: () => sessionApi.generateNextAiQuestion(sessionId!),
+    onMutate: () => {
+      setAiQuestionProgressStage('generating');
+      logAiQuestionFlow('first question generation started', { sessionId });
+    },
+    onSuccess: (response) => {
+      setAiQuestionProgressStage('ready');
+      logAiQuestionFlow('first question generation completed', {
+        sessionId,
+        responseQuestionPath: response.question.filePath,
+        responseQuestionTitle: response.question.displayName || response.question.title,
+        refreshedCodeVersion: response.session.codeVersion,
+        refreshedActivePath: response.session.codeFiles?.find((file) => file.activeQuestion && !file.submitted)?.path || null,
+        files: summarizeAiQuestionFiles(response.session.codeFiles || []),
+      });
+      refreshSession(response.session);
+      setActiveQuestionPath(response.question.filePath);
+    },
+    onError: (mutationError) => {
+      logAiQuestionFlow('first question generation failed', {
+        sessionId,
+        error: mutationErrorMessage(mutationError),
+      });
+      pushSessionToast(`AI question generation failed: ${mutationErrorMessage(mutationError)}`, 'warning');
+    },
+    onSettled: () => {
+      window.setTimeout(() => setAiQuestionProgressStage('idle'), 500);
+    },
+  });
+
+  const aiRecommendationMutation = useMutation({
+    mutationFn: () => sessionApi.generateAiRecommendation(sessionId!),
+    onSuccess: async (recommendation) => {
+      if (recommendation.rating && recommendation.recommendationDecision && recommendation.summary) {
+        setFeedback({
+          rating: recommendation.rating as FeedbackRating,
+          recommendationDecision: recommendation.recommendationDecision as RecommendationDecision,
+          comments: recommendation.summary,
+        });
+      }
+      if (sessionId) {
+        const refreshed = await sessionApi.getSession(sessionId);
+        refreshSession(refreshed);
+      }
+    },
+  });
+
+  const handleAiQuestionFrozen = React.useCallback(
+    async (files: EditableCodeFile[], frozenFilePath: string) => {
+      if (!isAiInterviewSession || role !== 'interviewee' || !sessionId || !session || session.status !== 'ACTIVE') {
+        return;
+      }
+
+      const frozenFile = files.find((file) => file.path === frozenFilePath);
+      if (!frozenFile || !isManagedAiQuestionFile(frozenFile)) {
+        logAiQuestionFlow('freeze ignored because frozen file is not a managed AI question', {
+          sessionId,
+          frozenFilePath,
+          files: summarizeAiQuestionFiles(files),
+        });
+        return;
+      }
+
+      logAiQuestionFlow('freeze processing started', {
+        sessionId,
+        frozenFilePath,
+        files: summarizeAiQuestionFiles(files),
+      });
+      try {
+        setAiQuestionProgressStage('saving');
+        const latestCode = resolvePrimaryCodeFromFiles(session.technology, files);
+        const nextVersion = reserveNextCodeVersion();
+        logAiQuestionFlow('saving frozen answer before follow-up generation', {
+          sessionId,
+          frozenFilePath,
+          nextVersion,
+        });
+        const savedSession = await sessionApi.updateCodeState(sessionId, {
+          code: latestCode,
+          codeFiles: files,
+          activeFilePath: frozenFilePath,
+          version: nextVersion,
+          updatedByRole: wsRole,
+        });
+        logAiQuestionFlow('frozen answer saved', {
+          sessionId,
+          savedCodeVersion: savedSession.codeVersion,
+          activePathAfterSave: savedSession.codeFiles?.find((file) => file.activeQuestion && !file.submitted)?.path || null,
+          files: summarizeAiQuestionFiles(savedSession.codeFiles || []),
+        });
+        refreshSession(savedSession);
+      } catch (saveError) {
+        setAiQuestionProgressStage('idle');
+        logAiQuestionFlow('saving frozen answer failed', {
+          sessionId,
+          frozenFilePath,
+          error: mutationErrorMessage(saveError),
+        });
+        pushSessionToast(`Unable to save the frozen answer: ${mutationErrorMessage(saveError)}`, 'warning');
+        return;
+      }
+
+      try {
+        setAiQuestionProgressStage('evaluating');
+        logAiQuestionFlow('AI evaluation started for frozen question', { sessionId, frozenFilePath });
+        await sessionApi.evaluateAiQuestion(sessionId, frozenFilePath);
+        logAiQuestionFlow('AI evaluation completed for frozen question', { sessionId, frozenFilePath });
+      } catch (evaluationError) {
+        const message = mutationErrorMessage(evaluationError);
+        logAiQuestionFlow('AI evaluation failed for frozen question', {
+          sessionId,
+          frozenFilePath,
+          error: message,
+        });
+        pushSessionToast(`AI evaluation failed: ${message}`, 'warning');
+        if (isAiQuotaOrCredentialError(message)) {
+          setAiQuestionProgressStage('idle');
+          return;
+        }
+      }
+
+      const submittedAiQuestionCount = files.filter((file) => file.submitted && isManagedAiQuestionFile(file)).length;
+      const maxQuestions = session.maxQuestions ?? 5;
+      if (submittedAiQuestionCount >= maxQuestions || (timeLeft ?? session.remainingSec) <= 0) {
+        const refreshed = await sessionApi.getSession(sessionId);
+        logAiQuestionFlow('follow-up generation skipped because interview reached limit or time ended', {
+          sessionId,
+          submittedAiQuestionCount,
+          maxQuestions,
+          timeLeft: timeLeft ?? session.remainingSec,
+          files: summarizeAiQuestionFiles(refreshed.codeFiles || []),
+        });
+        refreshSession(refreshed);
+        return;
+      }
+
+      try {
+        const latestSession = await sessionApi.getSession(sessionId);
+        refreshSession(latestSession);
+        if (latestSession.status !== 'ACTIVE') {
+          logAiQuestionFlow('follow-up generation skipped because refreshed session is not active', {
+            sessionId,
+            status: latestSession.status,
+          });
+          setAiQuestionProgressStage('idle');
+          return;
+        }
+        setAiQuestionProgressStage('generating');
+        setIsGeneratingFollowupAiQuestion(true);
+        logAiQuestionFlow('follow-up question generation started', {
+          sessionId,
+          frozenFilePath,
+          latestCodeVersion: latestSession.codeVersion,
+          latestActivePath: latestSession.codeFiles?.find((file) => file.activeQuestion && !file.submitted)?.path || null,
+          files: summarizeAiQuestionFiles(latestSession.codeFiles || []),
+        });
+        const response = await sessionApi.generateNextAiQuestion(sessionId);
+        setAiQuestionProgressStage('ready');
+        logAiQuestionFlow('follow-up question generation completed', {
+          sessionId,
+          responseQuestionPath: response.question.filePath,
+          responseQuestionTitle: response.question.displayName || response.question.title,
+          refreshedCodeVersion: response.session.codeVersion,
+          refreshedActivePath: response.session.codeFiles?.find((file) => file.activeQuestion && !file.submitted)?.path || null,
+          files: summarizeAiQuestionFiles(response.session.codeFiles || []),
+        });
+        refreshSession(response.session);
+        setActiveQuestionPath(response.question.filePath);
+      } catch (generationError) {
+        logAiQuestionFlow('follow-up question generation failed', {
+          sessionId,
+          frozenFilePath,
+          error: mutationErrorMessage(generationError),
+        });
+        pushSessionToast(`AI question generation failed: ${mutationErrorMessage(generationError)}`, 'warning');
+      } finally {
+        setIsGeneratingFollowupAiQuestion(false);
+        window.setTimeout(() => setAiQuestionProgressStage('idle'), 500);
+      }
+    },
+    [isAiInterviewSession, refreshSession, reserveNextCodeVersion, role, session, sessionId, pushSessionToast, timeLeft, wsRole]
+  );
+
+  React.useEffect(() => {
+    aiFirstQuestionRequestedRef.current = false;
+  }, [sessionId]);
+
+  React.useEffect(() => {
+    if (aiQuestionProgressStage !== 'generating') {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setAiQuestionProgressStage((stage) => stage === 'generating' ? 'validating' : stage);
+    }, 1600);
+    return () => window.clearTimeout(timer);
+  }, [aiQuestionProgressStage]);
+
+  React.useEffect(() => {
+    if (
+      !isAiInterviewSession ||
+      role !== 'interviewee' ||
+      !sessionId ||
+      session?.status !== 'ACTIVE' ||
+      hasManagedAiQuestion ||
+      generateAiQuestionMutation.isPending ||
+      aiFirstQuestionRequestedRef.current
+    ) {
+      return;
+    }
+    aiFirstQuestionRequestedRef.current = true;
+    generateAiQuestionMutation.mutate();
+  }, [
+    generateAiQuestionMutation,
+    hasManagedAiQuestion,
+    isAiInterviewSession,
+    role,
+    session?.status,
+    sessionId,
+  ]);
+
   const approveResumeMutation = useMutation({
     mutationFn: () =>
       sessionApi.approveResume(sessionId!, {
@@ -514,6 +815,21 @@ const Session: React.FC = () => {
       navigate('/');
     },
   });
+
+  React.useEffect(() => {
+    if (
+      !isAiInterviewSession ||
+      role !== 'interviewee' ||
+      !sessionId ||
+      session?.status !== 'ENDED' ||
+      session.aiRecommendation ||
+      aiRecommendationAutoRequestedRef.current
+    ) {
+      return;
+    }
+    aiRecommendationAutoRequestedRef.current = true;
+    aiRecommendationMutation.mutate();
+  }, [aiRecommendationMutation, isAiInterviewSession, role, session?.aiRecommendation, session?.status, sessionId]);
 
   const canFullscreen = role === 'interviewee';
 
@@ -766,28 +1082,31 @@ const Session: React.FC = () => {
   }
 
   const isInterviewer = role === 'interviewer';
-  const wsRole: ParticipantRole = isInterviewer ? 'INTERVIEWER' : 'INTERVIEWEE';
+  const isAiInterview = isAiInterviewSession;
+  const canCandidateControlAiInterview = isAiInterview && role === 'interviewee';
   const displayedTimeLeft = timeLeft ?? session.remainingSec;
-  const canStart = isInterviewer && session.status === 'READY_TO_START';
-  const canEnd = isInterviewer && session.status === 'ACTIVE';
+  const canStart = (isInterviewer || canCandidateControlAiInterview) && session.status === 'READY_TO_START';
+  const canEnd = (isInterviewer || canCandidateControlAiInterview) && session.status === 'ACTIVE';
   const canExtend =
     isInterviewer && session.status === 'ACTIVE' && !session.extensionUsed && displayedTimeLeft <= 15 * 60;
   const showEditor = session.status !== 'ENDED' && session.status !== 'EXPIRED';
   const showPreStartState = showEditor && session.status !== 'ACTIVE';
   const waitingForFeedback = isInterviewer && session.status === 'ENDED' && !session.feedback;
   const lockDisqualificationOutcome = waitingForFeedback && Boolean(session.suspiciousRejected);
+  const awaitingAiQuestion = isAiInterview && session.status === 'ACTIVE' && !hasManagedAiQuestion;
+  const isAiQuestionGenerationVisible = awaitingAiQuestion || generateAiQuestionMutation.isPending || isGeneratingFollowupAiQuestion;
+  const showOnlyAiQuestionProgress = awaitingAiQuestion && !hasManagedAiQuestion;
   const suspiciousActivityEvents = (session.activityEvents || []).filter((event) =>
     event.severity === 'SUSPICIOUS' ||
     (!event.severity && (isInAppAvSession
-      ? ['TAB_HIDDEN', 'PASTE_IN_EDITOR', 'EXTERNAL_DROP_BLOCKED', 'CAMERA_STREAM_LOST', 'MICROPHONE_DISABLED_MANUALLY', 'CAMERA_DISABLED_MANUALLY', 'NO_FACE_DETECTED', 'MULTIPLE_FACES_DETECTED']
-      : ['TAB_HIDDEN', 'PASTE_IN_EDITOR', 'EXTERNAL_DROP_BLOCKED']
+      ? ['TAB_HIDDEN', 'COPY_FROM_EDITOR', 'PASTE_IN_EDITOR', 'EXTERNAL_DROP_BLOCKED', 'CAMERA_STREAM_LOST', 'MICROPHONE_DISABLED_MANUALLY', 'CAMERA_DISABLED_MANUALLY', 'NO_FACE_DETECTED', 'MULTIPLE_FACES_DETECTED']
+      : ['TAB_HIDDEN', 'COPY_FROM_EDITOR', 'PASTE_IN_EDITOR', 'EXTERNAL_DROP_BLOCKED']
     ).includes(event.eventType))
   );
   const waitingJoinLabel = `Waiting for ${interviewee?.name || 'Interviewee'} to join`;
   const hasCompleteFeedback = Boolean(feedback.rating && feedback.recommendationDecision && feedback.comments.trim());
   const isFinalizingSession =
     endMutation.isPending || (showEditor && session.status === 'ACTIVE' && displayedTimeLeft <= 0);
-
   const timerLabel =
     session.status === 'ACTIVE'
       ? `${Math.floor(displayedTimeLeft / 60)}:${(displayedTimeLeft % 60).toString().padStart(2, '0')}`
@@ -1056,7 +1375,15 @@ const Session: React.FC = () => {
             </div>
           )}
 
-          <Editor
+          {isAiQuestionGenerationVisible ? (
+            <AiQuestionProgressPanel
+              stage={aiQuestionProgressStage}
+              firstQuestion={!hasManagedAiQuestion}
+            />
+          ) : null}
+
+          {!showOnlyAiQuestionProgress ? (
+            <Editor
             sessionId={sessionId}
             participantRole={role}
             executionLanguage={
@@ -1068,11 +1395,11 @@ const Session: React.FC = () => {
                     ? 'REACT'
                   : 'JAVA'
             }
-            readOnly={session.status !== 'ACTIVE'}
-            canRun={session.status === 'ACTIVE'}
+            readOnly={session.status !== 'ACTIVE' || awaitingAiQuestion}
+            canRun={session.status === 'ACTIVE' && !awaitingAiQuestion}
             showResetButton={isInterviewer}
-            onCopyFromEditor={rememberInternalClipboardText}
-            onCutFromEditor={rememberInternalClipboardText}
+            onCopyFromEditor={handleCopyFromEditor}
+            onCutFromEditor={handleCopyFromEditor}
             onExternalDropBlocked={() => {
               if (role !== 'interviewee' || session.status !== 'ACTIVE') {
                 return;
@@ -1126,7 +1453,9 @@ const Session: React.FC = () => {
             initialCodeFiles={resolvedCodeFiles}
             initialCode={resolvedLatestCode}
             initialCodeVersion={normalizeCodeVersion(currentSession?.codeVersion ?? session.codeVersion)}
+            preferredActiveFilePath={resolvedActiveQuestionPath || activeQuestionPath}
             onActiveFileChange={setActiveQuestionPath}
+            onQuestionFrozen={handleAiQuestionFrozen}
             showFullscreenToggle={canFullscreen}
             isFullscreen={isFullscreen}
             onToggleFullscreen={toggleFullscreen}
@@ -1159,7 +1488,8 @@ const Session: React.FC = () => {
                 sendCode(nextCode, nextVersion, wsRole, files);
               }
             }}
-          />
+            />
+          ) : null}
         </>
       ) : (
         <div className="page-card session-end-card">
@@ -1174,7 +1504,9 @@ const Session: React.FC = () => {
                 ? `${session.suspiciousActivityReason || 'This interview session could not be recovered within the allowed integrity controls.'} You will be redirected shortly.${typeof closeCountdown === 'number' ? ` This page will close in ${closeCountdown}.` : ''}`
                 : session.summary === 'INCOMPLETE'
                   ? `${interviewer?.name || 'The interviewer'} could not reconnect because of a network or session continuity issue, so this interview has been marked incomplete. Please reach out to HR or ${interviewer?.name || 'the interviewer'} to schedule it again.${typeof closeCountdown === 'number' ? ` This tab will automatically close in ${closeCountdown}.` : ''}`
-                  : `The coding test is now complete. ${interviewer?.name || 'The interviewer'} is submitting the feedback. You can check the results with ${interviewer?.name || 'the interviewer'} or the HR.${typeof closeCountdown === 'number' ? ` This tab will automatically close in ${closeCountdown}.` : ''}`}
+                  : isAiInterview
+                    ? `The coding test is now complete. The AI evaluation is being prepared for human review. HR will review the results and share the next steps.${typeof closeCountdown === 'number' ? ` This tab will automatically close in ${closeCountdown}.` : ''}`
+                    : `The coding test is now complete. ${interviewer?.name || 'The interviewer'} is submitting the feedback. You can check the results with ${interviewer?.name || 'the interviewer'} or HR.${typeof closeCountdown === 'number' ? ` This tab will automatically close in ${closeCountdown}.` : ''}`}
           </p>
 
           {waitingForFeedback ? (
@@ -1195,6 +1527,29 @@ const Session: React.FC = () => {
                     ) : null}
                   </div>
                 )}
+                {isAiInterview ? (
+                  <div className="feedback-warning-panel ai-recommendation-panel">
+                    <div className="feedback-warning-title">AI Recommendation</div>
+                    {session.aiRecommendation ? (
+                      <p>
+                        {session.aiRecommendation.summary || 'AI recommendation generated.'}
+                        {typeof session.aiRecommendation.overallScore === 'number' ? ` Score: ${session.aiRecommendation.overallScore}/100.` : ''}
+                      </p>
+                    ) : (
+                      <p>Generate the AI recommendation before submitting final human feedback.</p>
+                    )}
+                    <div className="feedback-actions">
+                      <button
+                        type="button"
+                        className="control-btn btn-extend"
+                        onClick={() => aiRecommendationMutation.mutate()}
+                        disabled={aiRecommendationMutation.isPending}
+                      >
+                        {aiRecommendationMutation.isPending ? 'Generating...' : session.aiRecommendation ? 'Regenerate AI Recommendation' : 'Generate AI Recommendation'}
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
                 <div className="feedback-field">
                   <label htmlFor="rating">Rating</label>
                   <select
@@ -1381,6 +1736,80 @@ function preStartGuideStorageKey(sessionId: string, role: string) {
 }
 
 export default Session;
+
+function AiQuestionProgressPanel({
+  stage,
+  firstQuestion,
+}: {
+  stage: AiQuestionProgressStage;
+  firstQuestion: boolean;
+}) {
+  const normalizedStage = stage === 'idle' ? 'generating' : stage;
+  const steps = aiQuestionProgressSteps(firstQuestion);
+  const activeIndex = Math.max(0, steps.findIndex((step) => step.stage === normalizedStage));
+  const activeStep = steps[activeIndex] || steps[0];
+
+  return (
+    <div className="ai-question-progress-panel" role="status" aria-live="polite">
+      <div className="ai-question-progress-copy">
+        <span className="ai-question-progress-kicker">{firstQuestion ? 'AI interviewer' : 'Next question'}</span>
+        <h3 key={activeStep.stage}>{activeStep.title}</h3>
+        <p key={`${activeStep.stage}-copy`}>{activeStep.description}</p>
+      </div>
+      <div className="ai-question-progress-track" aria-hidden="true">
+        <div className={`ai-question-progress-fill ai-question-progress-fill-${normalizedStage}`} />
+      </div>
+      <div className="ai-question-progress-steps" aria-hidden="true">
+        {steps.map((step, index) => (
+          <span
+            key={step.stage}
+            className={[
+              'ai-question-progress-step',
+              index < activeIndex ? 'is-done' : '',
+              index === activeIndex ? 'is-active' : '',
+            ].filter(Boolean).join(' ')}
+          >
+            {step.shortLabel}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function aiQuestionProgressSteps(firstQuestion: boolean) {
+  return [
+    ...(firstQuestion ? [] : [{
+      stage: 'saving' as const,
+      shortLabel: 'Save',
+      title: 'Saving your frozen answer',
+      description: 'Your submitted solution and captured run evidence are being preserved.',
+    }, {
+      stage: 'evaluating' as const,
+      shortLabel: 'Evaluate',
+      title: 'Evaluating submitted solution',
+      description: 'The AI interviewer is reviewing correctness, attempts, timing, and integrity signals.',
+    }]),
+    {
+      stage: 'generating' as const,
+      shortLabel: 'Generate',
+      title: firstQuestion ? 'Preparing your first question' : 'Generating the next question',
+      description: 'A fresh sandbox-ready problem is being created from the interview metadata.',
+    },
+    {
+      stage: 'validating' as const,
+      shortLabel: 'Validate',
+      title: 'Finalizing question checks',
+      description: 'The platform is making sure the next question is ready for the coding environment.',
+    },
+    {
+      stage: 'ready' as const,
+      shortLabel: 'Ready',
+      title: 'Question ready',
+      description: 'The editor is being unlocked with the verified question.',
+    },
+  ];
+}
 
 const SESSION_LOADING_MESSAGES = [
   'Loading the interview session details.',

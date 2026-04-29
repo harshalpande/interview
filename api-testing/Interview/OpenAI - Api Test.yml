@@ -1,0 +1,27 @@
+info:
+  name: OpenAI - Api Test
+  type: http
+  seq: 1
+
+http:
+  method: POST
+  url: https://api.openai.com/v1/responses
+  headers:
+    - name: Authorization
+      value: Bearer ${AI_API_KEY}
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {
+        "model": "gpt-5.5",
+        "input": "Say hello in one short sentence."
+      }
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

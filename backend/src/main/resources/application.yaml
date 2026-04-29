@@ -106,6 +106,9 @@ sandbox:
   frontend-base-url: ${SANDBOX_FRONTEND_BASE_URL:http://localhost:8083/api}
   frontend-public-base-url: ${SANDBOX_FRONTEND_PUBLIC_BASE_URL:http://localhost:8083/api}
 
+ai-service:
+  base-url: ${AI_SERVICE_BASE_URL:http://localhost:8084/api}
+
 springdoc:
   api-docs:
     path: /v3/api-docs

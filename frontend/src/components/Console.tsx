@@ -19,12 +19,13 @@ const Console: React.FC<ConsoleProps> = ({ stdout, stderr, previewUrl }) => {
   const previousFlagsRef = React.useRef({
     hasError,
     hasPreview,
+    stderr,
   });
 
   React.useEffect(() => {
     const previousFlags = previousFlagsRef.current;
 
-    if (hasError && !previousFlags.hasError) {
+    if (hasError && stderr !== previousFlags.stderr) {
       setActiveTab('error');
     } else if (hasPreview && !previousFlags.hasPreview && !hasError) {
       setActiveTab('preview');
@@ -37,8 +38,9 @@ const Console: React.FC<ConsoleProps> = ({ stdout, stderr, previewUrl }) => {
     previousFlagsRef.current = {
       hasError,
       hasPreview,
+      stderr,
     };
-  }, [activeTab, hasError, hasPreview]);
+  }, [activeTab, hasError, hasPreview, stderr]);
 
   React.useEffect(() => {
     if (previewUrl) {
