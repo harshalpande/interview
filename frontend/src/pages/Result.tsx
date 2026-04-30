@@ -158,6 +158,7 @@ const Result: React.FC = () => {
   const interviewee = session.participants.find((participant) => participant.role === 'INTERVIEWEE');
   const isInAppAvSession = session.avMode === 'IN_APP';
   const isPreSessionExpired = session.status === 'EXPIRED';
+  const isAiInterviewSession = session.interviewMode === 'AI_INTERVIEWER';
   const activityEvents = session.activityEvents || [];
   const authAuditEvents = session.authAuditEvents || [];
   const suspiciousEvents = activityEvents.filter((event) => event.severity === 'SUSPICIOUS' || !event.severity);
@@ -182,7 +183,7 @@ const Result: React.FC = () => {
   const showExecutionTabs = !isPreSessionExpired;
   const hasAiQuestionEvidence = resultCodeFiles.some((file) => file.content?.includes('AI Generated Problem Statement:') || file.aiEvaluation);
   const showAiTab = !isPreSessionExpired && (session.interviewMode === 'AI_INTERVIEWER' || Boolean(session.aiRecommendation) || hasAiQuestionEvidence);
-  const showHumanRecommendationTab = Boolean(session.feedback || session.feedbackDraft);
+  const showHumanRecommendationTab = !isAiInterviewSession && Boolean(session.feedback || session.feedbackDraft);
   const resultTabs = [
     { key: 'overview' as const, label: 'Overview' },
     ...(showExecutionTabs ? [{ key: 'code' as const, label: 'Code' }] : []),
@@ -240,11 +241,13 @@ const Result: React.FC = () => {
               <span className="participant-name">{aiRecommendationHeaderValue(session)}</span>
               <span>{aiRecommendationHeaderDetail(session)}</span>
             </div>
-            <div className="participant-info">
-              <span className="participant-label">{firstName(interviewer?.name, 'Interviewer')}'s Recommendation</span>
-              <span className="participant-name">{humanRecommendationHeaderValue(session.feedback || session.feedbackDraft)}</span>
-              <span>{humanRecommendationHeaderDetail(session.feedback || session.feedbackDraft)}</span>
-            </div>
+            {showHumanRecommendationTab ? (
+              <div className="participant-info">
+                <span className="participant-label">{firstName(interviewer?.name, 'Interviewer')}'s Recommendation</span>
+                <span className="participant-name">{humanRecommendationHeaderValue(session.feedback || session.feedbackDraft)}</span>
+                <span>{humanRecommendationHeaderDetail(session.feedback || session.feedbackDraft)}</span>
+              </div>
+            ) : null}
           </div>
         </div>
         <Button onClick={() => navigate('/')}>Close (Esc)</Button>

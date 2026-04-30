@@ -878,8 +878,9 @@ public class SessionService {
                                               OffsetDateTime from,
                                               OffsetDateTime to,
                                               List<TechnologySkill> technologies,
+                                              List<InterviewMode> modes,
                                               List<FeedbackRating> ratings) {
-        List<SessionResponse> sessions = filterSessions(search, from, to, technologies, ratings, false)
+        List<SessionResponse> sessions = filterSessions(search, from, to, technologies, modes, ratings, false)
                 .stream()
                 .sorted(buildSessionComparator(pageable))
                 .toList();
@@ -896,10 +897,11 @@ public class SessionService {
                                        OffsetDateTime from,
                                        OffsetDateTime to,
                                        List<TechnologySkill> technologies,
+                                       List<InterviewMode> modes,
                                        List<FeedbackRating> ratings,
                                        String sortBy,
                                        Sort.Direction direction) {
-        List<SessionResponse> sessions = filterSessions(search, from, to, technologies, ratings, true)
+        List<SessionResponse> sessions = filterSessions(search, from, to, technologies, modes, ratings, true)
                 .stream()
                 .sorted(buildSessionComparator(sortBy, direction))
                 .toList();
@@ -4199,6 +4201,7 @@ public class SessionService {
                                    OffsetDateTime from,
                                    OffsetDateTime to,
                                    List<TechnologySkill> technologies,
+                                   List<InterviewMode> modes,
                                    List<FeedbackRating> ratings) {
         if (from != null && (session.getCreatedAt() == null || session.getCreatedAt().isBefore(from))) {
             return false;
@@ -4208,6 +4211,12 @@ public class SessionService {
         }
         if (technologies != null && !technologies.isEmpty() && (session.getTechnology() == null || !technologies.contains(session.getTechnology()))) {
             return false;
+        }
+        if (modes != null && !modes.isEmpty()) {
+            InterviewMode mode = session.getInterviewMode() == null ? InterviewMode.HUMAN_INTERVIEWER : session.getInterviewMode();
+            if (!modes.contains(mode)) {
+                return false;
+            }
         }
         if (ratings != null && !ratings.isEmpty()) {
             if (session.getFeedback() == null || session.getFeedback().getRating() == null || !ratings.contains(session.getFeedback().getRating())) {
@@ -4221,12 +4230,13 @@ public class SessionService {
                                                  OffsetDateTime from,
                                                  OffsetDateTime to,
                                                  List<TechnologySkill> technologies,
+                                                 List<InterviewMode> modes,
                                                  List<FeedbackRating> ratings,
                                                  boolean includeDetails) {
         return sessionRepository.findAll().stream()
                 .map(session -> toSessionResponse(session, includeDetails))
                 .filter(session -> matchesSearch(session, search))
-                .filter(session -> matchesFilters(session, from, to, technologies, ratings))
+                .filter(session -> matchesFilters(session, from, to, technologies, modes, ratings))
                 .toList();
     }
 

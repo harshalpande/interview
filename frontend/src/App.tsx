@@ -37,7 +37,12 @@ function LegacyResultRedirect() {
 function AppContent() {
   const location = useLocation();
   const isJavaFlow = location.pathname === '/java' || location.pathname.startsWith('/java/');
-  const headerTitle = isJavaFlow ? 'Live Coding Interview - Java' : 'Live Coding Interview';
+  const isDashboard = location.pathname === '/';
+  const headerTitle = isJavaFlow
+    ? 'Live Coding Interview - Java'
+    : isDashboard
+      ? 'Live Coding Interview - Recent Sessions'
+      : 'Live Coding Interview';
 
   return (
     <div className="App">
