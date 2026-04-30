@@ -18,6 +18,7 @@ import type {
   FeedbackRating,
   HeartbeatRequest,
   IdentityCaptureRequest,
+  InterviewMode,
   ResumeApprovalRequest,
   ResumeRequest,
   ResumeResponse,
@@ -82,6 +83,7 @@ class SessionApiClient {
     filters?: {
       from?: string;
       to?: string;
+      modes?: InterviewMode[];
       technologies?: TechnologySkill[];
       ratings?: FeedbackRating[];
     }
@@ -101,6 +103,7 @@ class SessionApiClient {
       if (filters?.to) {
         params.set('to', filters.to);
       }
+      filters?.modes?.forEach((mode) => params.append('modes', mode));
       filters?.technologies?.forEach((technology) => params.append('technologies', technology));
       filters?.ratings?.forEach((rating) => params.append('ratings', rating));
       const response = await this.axiosInstance.get<any>(`/sessions?${params.toString()}`);
@@ -117,6 +120,7 @@ class SessionApiClient {
     filters?: {
       from?: string;
       to?: string;
+      modes?: InterviewMode[];
       technologies?: TechnologySkill[];
       ratings?: FeedbackRating[];
     }
@@ -135,6 +139,7 @@ class SessionApiClient {
       if (filters?.to) {
         params.set('to', filters.to);
       }
+      filters?.modes?.forEach((mode) => params.append('modes', mode));
       filters?.technologies?.forEach((technology) => params.append('technologies', technology));
       filters?.ratings?.forEach((rating) => params.append('ratings', rating));
 

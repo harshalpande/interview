@@ -3,13 +3,24 @@ import { useQuery } from '@tanstack/react-query';
 import { Link, useLocation } from 'react-router-dom';
 import { InterviewRow } from '../components/InterviewRow';
 import { sessionApi } from '../services/sessionApi';
-import type { FeedbackRating, SessionResponse, TechnologySkill } from '../types/session';
+import type { FeedbackRating, InterviewMode, SessionResponse, TechnologySkill } from '../types/session';
 import './Dashboard.css';
 
 type SortKey = 'createdAt' | 'status' | 'summary';
 type DatePresetKey = 'today' | 'week' | 'month' | 'year' | 'financialYear';
+type DashboardFilters = {
+  from: string;
+  to: string;
+  modes: InterviewMode[];
+  technologies: TechnologySkill[];
+  ratings: FeedbackRating[];
+};
 
 const TECHNOLOGY_OPTIONS: TechnologySkill[] = ['JAVA', 'PYTHON', 'ANGULAR', 'REACT', 'SQL'];
+const MODE_OPTIONS: Array<{ value: InterviewMode; label: string }> = [
+  { value: 'HUMAN_INTERVIEWER', label: 'Human' },
+  { value: 'AI_INTERVIEWER', label: 'AI' },
+];
 const RATING_OPTIONS: FeedbackRating[] = ['EXCELLENT', 'GOOD', 'FAIR', 'BAD', 'DISQUALIFIED'];
 const TODAY_DATE = toDateValue(new Date());
 const TABLE_COLUMN_WIDTHS = ['12%', '8%', '18%', '18%', '13%', '17%', '14%'];
@@ -23,14 +34,10 @@ const Dashboard: React.FC = () => {
   const [direction, setDirection] = useState<'asc' | 'desc'>('desc');
   const [filtersEnabled, setFiltersEnabled] = useState(false);
   const [selectedPreset, setSelectedPreset] = useState<DatePresetKey | null>(null);
-  const [filters, setFilters] = useState<{
-    from: string;
-    to: string;
-    technologies: TechnologySkill[];
-    ratings: FeedbackRating[];
-  }>({
+  const [filters, setFilters] = useState<DashboardFilters>({
     from: '',
     to: '',
+    modes: [],
     technologies: [],
     ratings: [],
   });
@@ -45,6 +52,7 @@ const Dashboard: React.FC = () => {
     return {
       from: filters.from ? toIsoString(filters.from, 'start') : undefined,
       to: filters.to ? toIsoString(filters.to, 'end') : undefined,
+      modes: filters.modes,
       technologies: filters.technologies,
       ratings: filters.ratings,
     };
@@ -62,6 +70,18 @@ const Dashboard: React.FC = () => {
   const presetOptions = useMemo(() => buildPresetOptions(), []);
   const fromMax = filters.to ? minDate(filters.to, TODAY_DATE) : TODAY_DATE;
   const toMin = filters.from || undefined;
+  const activeFilterCount = useMemo(() => {
+    if (!filtersEnabled) {
+      return 0;
+    }
+
+    return [
+      filters.from || filters.to,
+      filters.modes.length > 0,
+      filters.technologies.length > 0,
+      filters.ratings.length > 0,
+    ].filter(Boolean).length;
+  }, [filters, filtersEnabled]);
 
   const handlePresetSelection = (preset: DatePresetKey) => {
     if (selectedPreset === preset) {
@@ -99,7 +119,7 @@ const Dashboard: React.FC = () => {
     setPage(0);
   };
 
-  const clearFilterField = (key: 'technologies' | 'ratings' | 'from' | 'to') => {
+  const clearFilterField = (key: 'modes' | 'technologies' | 'ratings' | 'from' | 'to') => {
     if (key === 'from' || key === 'to') {
       setSelectedPreset(null);
       setFilters((previous) => ({
@@ -120,20 +140,33 @@ const Dashboard: React.FC = () => {
     setFilters({
       from: '',
       to: '',
+      modes: [],
       technologies: [],
       ratings: [],
     });
     setPage(0);
   };
 
-  const handleMultiSelectChange = (
-    key: 'technologies' | 'ratings',
-    event: React.ChangeEvent<HTMLSelectElement>
-  ) => {
-    const values = Array.from(event.target.selectedOptions).map((option) => option.value);
+  const toggleModeFilter = (mode: InterviewMode) => {
     setFilters((previous) => ({
       ...previous,
-      [key]: values,
+      modes: toggleListValue(previous.modes, mode),
+    }));
+    setPage(0);
+  };
+
+  const toggleTechnologyFilter = (technology: TechnologySkill) => {
+    setFilters((previous) => ({
+      ...previous,
+      technologies: toggleListValue(previous.technologies, technology),
+    }));
+    setPage(0);
+  };
+
+  const toggleRatingFilter = (rating: FeedbackRating) => {
+    setFilters((previous) => ({
+      ...previous,
+      ratings: toggleListValue(previous.ratings, rating),
     }));
     setPage(0);
   };
@@ -157,10 +190,6 @@ const Dashboard: React.FC = () => {
 
   return (
     <div className="dashboard">
-      <div className="dashboard-header">
-        <h2>Recent Interview Sessions (newest first)</h2>
-      </div>
-
       {registrationCreated && (
         <div className="grid-refreshing">Interview registration created. Start the secure session later from the dashboard.</div>
       )}
@@ -190,13 +219,12 @@ const Dashboard: React.FC = () => {
               onClick={handleFilterToggle}
               aria-pressed={filtersEnabled}
             >
-              Filter
+              {activeFilterCount > 0 ? `Filter (${activeFilterCount})` : 'Filter'}
             </button>
             <Link to="/start" className="btn btn-primary start-interview-btn">
               Register
             </Link>
           </div>
-          <span className="search-hint">Minimum 3 characters are needed to search.</span>
         </div>
       </div>
 
@@ -216,114 +244,161 @@ const Dashboard: React.FC = () => {
         </div>
 
         <div className="filter-body">
-          <div className="filter-presets">
-            {presetOptions.map((preset) => (
+          <div className="filter-group-block">
+            <div className="filter-group-label-row">
+              <div className="filter-group-label">Date</div>
               <button
-                key={preset.key}
                 type="button"
-                className={`preset-chip ${selectedPreset === preset.key ? 'is-selected' : ''}`}
-                onClick={() => handlePresetSelection(preset.key)}
+                className={`filter-clear-button ${filters.from || filters.to ? '' : 'is-invisible'}`}
+                onClick={() => {
+                  clearFilterField('from');
+                  clearFilterField('to');
+                }}
+                aria-hidden={filters.from || filters.to ? undefined : true}
+                tabIndex={filters.from || filters.to ? 0 : -1}
               >
-                {preset.label}
+                Clear
               </button>
-            ))}
+            </div>
+            <div className="filter-section filter-section-wide filter-date-section">
+              <div className="filter-date-line">
+                <div className="filter-presets filter-presets-top">
+                  {renderPresetChip(presetOptions, 'today', selectedPreset, handlePresetSelection)}
+                  {renderPresetChip(presetOptions, 'month', selectedPreset, handlePresetSelection)}
+                  {renderPresetChip(presetOptions, 'week', selectedPreset, handlePresetSelection)}
+                </div>
+                <div className="filter-field-date">
+                  <label htmlFor="filter-from">From</label>
+                  <div className="filter-date-control-row">
+                    <input
+                      id="filter-from"
+                      type="date"
+                      value={filters.from}
+                      max={fromMax}
+                      onChange={(event) => handleDateChange('from', event.target.value)}
+                    />
+                    <span className={`filter-date-readable ${filters.from ? '' : 'is-invisible'}`}>
+                      {filters.from ? formatReadableDate(filters.from) : 'January 01, 2026'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="filter-date-line">
+                <div className="filter-presets filter-presets-bottom">
+                  {renderPresetChip(presetOptions, 'year', selectedPreset, handlePresetSelection)}
+                  {renderPresetChip(presetOptions, 'financialYear', selectedPreset, handlePresetSelection)}
+                </div>
+                <div className="filter-field-date">
+                  <label htmlFor="filter-to">To</label>
+                  <div className="filter-date-control-row">
+                    <input
+                      id="filter-to"
+                      type="date"
+                      value={filters.to}
+                      min={toMin}
+                      max={TODAY_DATE}
+                      onChange={(event) => handleDateChange('to', event.target.value)}
+                    />
+                    <span className={`filter-date-readable ${filters.to ? '' : 'is-invisible'}`}>
+                      {filters.to ? formatReadableDate(filters.to) : 'January 01, 2026'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
 
-          <div className="filter-grid">
-            <div className="filter-group filter-group-date">
-              <div className="filter-date-stack">
-                <div className="filter-field filter-field-date filter-field-date-compact">
-                  <div className="filter-label-row">
-                    <label htmlFor="filter-from">From</label>
-                    {filters.from && (
-                      <button type="button" className="filter-clear-button" onClick={() => clearFilterField('from')}>
-                        Clear
-                      </button>
-                    )}
-                  </div>
-                  <input
-                    id="filter-from"
-                    type="date"
-                    value={filters.from}
-                    max={fromMax}
-                    onChange={(event) => handleDateChange('from', event.target.value)}
-                  />
+          <div className="filter-group-block">
+            <div className="filter-grid">
+              <div className="filter-group-block">
+                <div className="filter-group-label-row">
+                  <div className="filter-group-label">Mode</div>
+                  <button
+                    type="button"
+                    className={`filter-clear-button ${filters.modes.length > 0 ? '' : 'is-invisible'}`}
+                    onClick={() => clearFilterField('modes')}
+                    aria-hidden={filters.modes.length > 0 ? undefined : true}
+                    tabIndex={filters.modes.length > 0 ? 0 : -1}
+                  >
+                    Clear
+                  </button>
                 </div>
-
-                <div className="filter-field filter-field-date filter-field-date-compact">
-                  <div className="filter-label-row">
-                    <label htmlFor="filter-to">To</label>
-                    {filters.to && (
-                      <button type="button" className="filter-clear-button" onClick={() => clearFilterField('to')}>
-                        Clear
+                <div className="filter-section filter-section-mode">
+                  <div className="filter-chip-row">
+                    {MODE_OPTIONS.map((mode) => (
+                      <button
+                        key={mode.value}
+                        type="button"
+                        className={`filter-chip ${filters.modes.includes(mode.value) ? 'is-selected' : ''}`}
+                        onClick={() => toggleModeFilter(mode.value)}
+                        aria-pressed={filters.modes.includes(mode.value)}
+                      >
+                        {mode.label}
                       </button>
-                    )}
+                    ))}
                   </div>
-                  <input
-                    id="filter-to"
-                    type="date"
-                    value={filters.to}
-                    min={toMin}
-                    max={TODAY_DATE}
-                    onChange={(event) => handleDateChange('to', event.target.value)}
-                  />
                 </div>
               </div>
-            </div>
 
-            <div className="filter-group">
-              <div className="filter-field">
-                <div className="filter-label-row">
-                  <label htmlFor="filter-technology">Technology</label>
-                  {filters.technologies.length > 0 && (
-                    <button
-                      type="button"
-                      className="filter-clear-button"
-                      onClick={() => clearFilterField('technologies')}
-                    >
-                      Clear
-                    </button>
-                  )}
+              <div className="filter-group-block">
+                <div className="filter-group-label-row">
+                  <div className="filter-group-label">Technology</div>
+                  <button
+                    type="button"
+                    className={`filter-clear-button ${filters.technologies.length > 0 ? '' : 'is-invisible'}`}
+                    onClick={() => clearFilterField('technologies')}
+                    aria-hidden={filters.technologies.length > 0 ? undefined : true}
+                    tabIndex={filters.technologies.length > 0 ? 0 : -1}
+                  >
+                    Clear
+                  </button>
                 </div>
-                <select
-                  id="filter-technology"
-                  multiple
-                  value={filters.technologies}
-                  onChange={(event) => handleMultiSelectChange('technologies', event)}
-                >
-                  {TECHNOLOGY_OPTIONS.map((technology) => (
-                    <option key={technology} value={technology}>
-                      {formatTechnology(technology)}
-                    </option>
-                  ))}
-                </select>
-                <span className="filter-select-hint">Hold Ctrl while clicking to select multiple options.</span>
+                <div className="filter-section filter-section-technology">
+                  <div className="filter-chip-row">
+                    {TECHNOLOGY_OPTIONS.map((technology) => (
+                      <button
+                        key={technology}
+                        type="button"
+                        className={`filter-chip ${filters.technologies.includes(technology) ? 'is-selected' : ''}`}
+                        onClick={() => toggleTechnologyFilter(technology)}
+                        aria-pressed={filters.technologies.includes(technology)}
+                      >
+                        {formatTechnology(technology)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
-            </div>
 
-            <div className="filter-group">
-              <div className="filter-field">
-                <div className="filter-label-row">
-                  <label htmlFor="filter-rating">Rating</label>
-                  {filters.ratings.length > 0 && (
-                    <button type="button" className="filter-clear-button" onClick={() => clearFilterField('ratings')}>
-                      Clear
-                    </button>
-                  )}
+              <div className="filter-group-block">
+                <div className="filter-group-label-row">
+                  <div className="filter-group-label">Rating</div>
+                  <button
+                    type="button"
+                    className={`filter-clear-button ${filters.ratings.length > 0 ? '' : 'is-invisible'}`}
+                    onClick={() => clearFilterField('ratings')}
+                    aria-hidden={filters.ratings.length > 0 ? undefined : true}
+                    tabIndex={filters.ratings.length > 0 ? 0 : -1}
+                  >
+                    Clear
+                  </button>
                 </div>
-                <select
-                  id="filter-rating"
-                  multiple
-                  value={filters.ratings}
-                  onChange={(event) => handleMultiSelectChange('ratings', event)}
-                >
-                  {RATING_OPTIONS.map((rating) => (
-                    <option key={rating} value={rating}>
-                      {formatRating(rating)}
-                    </option>
-                  ))}
-                </select>
-                <span className="filter-select-hint">Hold Ctrl while clicking to select multiple options.</span>
+                <div className="filter-section filter-section-rating">
+                  <div className="filter-chip-row">
+                    {RATING_OPTIONS.map((rating) => (
+                      <button
+                        key={rating}
+                        type="button"
+                        className={`filter-chip ${filters.ratings.includes(rating) ? 'is-selected' : ''}`}
+                        onClick={() => toggleRatingFilter(rating)}
+                        aria-pressed={filters.ratings.includes(rating)}
+                      >
+                        {formatRating(rating)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -503,8 +578,48 @@ function buildPresetOptions() {
   ];
 }
 
+function renderPresetChip(
+  presetOptions: Array<{ key: DatePresetKey; label: string }>,
+  key: DatePresetKey,
+  selectedPreset: DatePresetKey | null,
+  onSelect: (preset: DatePresetKey) => void
+) {
+  const preset = presetOptions.find((option) => option.key === key);
+  if (!preset) {
+    return null;
+  }
+
+  return (
+    <button
+      key={preset.key}
+      type="button"
+      className={`preset-chip ${selectedPreset === preset.key ? 'is-selected' : ''}`}
+      onClick={() => onSelect(preset.key)}
+    >
+      {preset.label}
+    </button>
+  );
+}
+
 function minDate(first: string, second: string) {
   return first <= second ? first : second;
+}
+
+function toggleListValue<T extends string>(values: T[], value: T) {
+  return values.includes(value) ? values.filter((current) => current !== value) : [...values, value];
+}
+
+function formatReadableDate(value: string) {
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(date);
 }
 
 function formatTechnology(value: TechnologySkill) {

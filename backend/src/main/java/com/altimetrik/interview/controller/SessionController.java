@@ -50,6 +50,7 @@ import com.altimetrik.interview.dto.SessionResponse;
 import com.altimetrik.interview.dto.SessionSocketMessage;
 import com.altimetrik.interview.dto.VerifyOtpRequest;
 import com.altimetrik.interview.enums.FeedbackRating;
+import com.altimetrik.interview.enums.InterviewMode;
 import com.altimetrik.interview.enums.TechnologySkill;
 import com.altimetrik.interview.service.SessionAccessService;
 import com.altimetrik.interview.service.SessionService;
@@ -94,6 +95,7 @@ public class SessionController {
                                           @RequestParam(required = false) @Nullable OffsetDateTime from,
                                           @RequestParam(required = false) @Nullable OffsetDateTime to,
                                           @RequestParam(required = false) @Nullable List<TechnologySkill> technologies,
+                                          @RequestParam(required = false) @Nullable List<InterviewMode> modes,
                                           @RequestParam(required = false) @Nullable List<FeedbackRating> ratings) {
         if (pageable == null || pageable.getSort().isUnsorted()) {
             Pageable defaultPageable = PageRequest.of(
@@ -101,9 +103,9 @@ public class SessionController {
                 pageable != null && pageable.getPageSize() > 0 ? pageable.getPageSize() : 20,
                 Sort.by("createdAt").descending()
             );
-            return ResponseEntity.ok(sessionService.listSessions(defaultPageable, search, from, to, technologies, ratings));
+            return ResponseEntity.ok(sessionService.listSessions(defaultPageable, search, from, to, technologies, modes, ratings));
         }
-        return ResponseEntity.ok(sessionService.listSessions(pageable, search, from, to, technologies, ratings));
+        return ResponseEntity.ok(sessionService.listSessions(pageable, search, from, to, technologies, modes, ratings));
     }
 
     @GetMapping("/export")
@@ -111,6 +113,7 @@ public class SessionController {
                                                  @RequestParam(required = false) @Nullable OffsetDateTime from,
                                                  @RequestParam(required = false) @Nullable OffsetDateTime to,
                                                  @RequestParam(required = false) @Nullable List<TechnologySkill> technologies,
+                                                 @RequestParam(required = false) @Nullable List<InterviewMode> modes,
                                                  @RequestParam(required = false) @Nullable List<FeedbackRating> ratings,
                                                  @RequestParam(defaultValue = "createdAt") String sortBy,
                                                  @RequestParam(defaultValue = "desc") String direction) {
@@ -119,6 +122,7 @@ public class SessionController {
                 from,
                 to,
                 technologies,
+                modes,
                 ratings,
                 sortBy,
                 Sort.Direction.fromOptionalString(direction).orElse(Sort.Direction.DESC)

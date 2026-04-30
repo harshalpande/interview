@@ -1608,6 +1608,7 @@ const Editor: React.FC<EditorProps> = ({
               }}
               options={{
                 readOnly: activeEditorReadOnly,
+                automaticLayout: true,
                 minimap: { enabled: false },
                 fontSize: 14,
                 lineNumbers: 'on',
