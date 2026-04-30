@@ -5,6 +5,9 @@ import type {
   AccessVerificationResponse,
   ActivityEvent,
   ActivityEventRequest,
+  AiInterviewerQuestionAcceptRequest,
+  AiInterviewerQuestionDraftRequest,
+  AiInterviewerQuestionDraftResponse,
   AiInterviewRecommendation,
   AiQuestionSessionResponse,
   AiSolutionEvaluation,
@@ -26,6 +29,7 @@ import type {
 import { resolveApiBaseUrl } from '../utils/apiUrls';
 
 const SECURE_ACCESS_EMAIL_TIMEOUT_MS = 60000;
+const AI_QUESTION_TIMEOUT_MS = 180000;
 
 class SessionApiClient {
   private axiosInstance: AxiosInstance;
@@ -260,8 +264,38 @@ class SessionApiClient {
   async generateNextAiQuestion(id: string): Promise<AiQuestionSessionResponse> {
     try {
       const response = await this.axiosInstance.post<AiQuestionSessionResponse>(`/sessions/${id}/ai/questions/next`, undefined, {
-        timeout: 90000,
+        timeout: AI_QUESTION_TIMEOUT_MS,
       });
+      return response.data;
+    } catch (error) {
+      throw this.handleError(error);
+    }
+  }
+
+  async draftInterviewerAssistedQuestion(id: string, request?: AiInterviewerQuestionDraftRequest): Promise<AiInterviewerQuestionDraftResponse> {
+    try {
+      const response = await this.axiosInstance.post<AiInterviewerQuestionDraftResponse>(
+        `/sessions/${id}/ai/interviewer-assist/questions/draft`,
+        request || {},
+        { timeout: AI_QUESTION_TIMEOUT_MS }
+      );
+      return response.data;
+    } catch (error) {
+      throw this.handleError(error);
+    }
+  }
+
+  async acceptInterviewerAssistedQuestion(
+    id: string,
+    draftId: string,
+    request: AiInterviewerQuestionAcceptRequest
+  ): Promise<AiQuestionSessionResponse> {
+    try {
+      const response = await this.axiosInstance.post<AiQuestionSessionResponse>(
+        `/sessions/${id}/ai/interviewer-assist/questions/${draftId}/accept`,
+        request,
+        { timeout: 90000 }
+      );
       return response.data;
     } catch (error) {
       throw this.handleError(error);

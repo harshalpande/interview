@@ -8,7 +8,7 @@ import type { AuthAuditEvent, EditableCodeFile } from '../types/session';
 
 import './Result.css';
 
-type ResultTabKey = 'overview' | 'code' | 'preview' | 'audit' | 'suspicious' | 'ai';
+type ResultTabKey = 'overview' | 'code' | 'preview' | 'audit' | 'suspicious' | 'ai' | 'human';
 type MetricTone = 'best' | 'good' | 'average' | 'worse' | 'worst' | 'neutral';
 type AuditStageKey = 'registration' | 'delivery' | 'verification' | 'readiness';
 type FinalPreviewStatus = 'unknown' | 'available' | 'missing';
@@ -101,7 +101,10 @@ const Result: React.FC = () => {
   React.useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-          navigate('/');
+        if (document.body.dataset.resultMetricExpanded) {
+          return;
+        }
+        navigate('/');
       }
     };
 
@@ -177,7 +180,9 @@ const Result: React.FC = () => {
     ? sessionApi.getIdentityCaptureImageUrl(session.id, 'INTERVIEWEE')
     : null;
   const showExecutionTabs = !isPreSessionExpired;
-  const showAiTab = session.interviewMode === 'AI_INTERVIEWER' || Boolean(session.aiRecommendation);
+  const hasAiQuestionEvidence = resultCodeFiles.some((file) => file.content?.includes('AI Generated Problem Statement:') || file.aiEvaluation);
+  const showAiTab = !isPreSessionExpired && (session.interviewMode === 'AI_INTERVIEWER' || Boolean(session.aiRecommendation) || hasAiQuestionEvidence);
+  const showHumanRecommendationTab = Boolean(session.feedback || session.feedbackDraft);
   const resultTabs = [
     { key: 'overview' as const, label: 'Overview' },
     ...(showExecutionTabs ? [{ key: 'code' as const, label: 'Code' }] : []),
@@ -185,6 +190,7 @@ const Result: React.FC = () => {
     { key: 'audit' as const, label: 'Audit' },
     ...(!isPreSessionExpired ? [{ key: 'suspicious' as const, label: 'Integrity Activity' }] : []),
     ...(showAiTab ? [{ key: 'ai' as const, label: 'AI Recommendation' }] : []),
+    ...(showHumanRecommendationTab ? [{ key: 'human' as const, label: `${firstName(interviewer?.name, 'Interviewer')}'s Recommendation` }] : []),
   ];
   const requestedTab = searchParams.get('tab') as ResultTabKey | null;
   const activeTab = resultTabs.some((tab) => tab.key === requestedTab) ? requestedTab! : 'overview';
@@ -233,6 +239,11 @@ const Result: React.FC = () => {
               <span className="participant-label">AI Recommendation</span>
               <span className="participant-name">{aiRecommendationHeaderValue(session)}</span>
               <span>{aiRecommendationHeaderDetail(session)}</span>
+            </div>
+            <div className="participant-info">
+              <span className="participant-label">{firstName(interviewer?.name, 'Interviewer')}'s Recommendation</span>
+              <span className="participant-name">{humanRecommendationHeaderValue(session.feedback || session.feedbackDraft)}</span>
+              <span>{humanRecommendationHeaderDetail(session.feedback || session.feedbackDraft)}</span>
             </div>
           </div>
         </div>
@@ -319,6 +330,9 @@ const Result: React.FC = () => {
                       <MetricCard title="Time taken" tone={timeTakenTone(activeCodeFile)}>
                         <span>{formatSolveDuration(activeCodeFile.solveDurationSeconds)}</span>
                       </MetricCard>
+                      <MetricCard title="Expected solve time" tone="neutral">
+                        <span>{formatExpectedSolveTime(activeCodeFile.idealDurationMinutes)}</span>
+                      </MetricCard>
                       <MetricCard title="Execute attempts" tone={attemptTone(activeCodeFile.executeAttemptCount)}>
                         <span>{formatExecuteAttemptCount(activeCodeFile.executeAttemptCount)}</span>
                       </MetricCard>
@@ -334,19 +348,19 @@ const Result: React.FC = () => {
                           space={actualComplexityLabel(activeCodeFile, 'space')}
                         />
                       </MetricCard>
-                      <MetricCard title="Question integrity" tone={integrityTone(activeCodeFile)}>
+                      <MetricCard title="Question integrity" tone={integrityTone(activeCodeFile)} expandable>
                         <pre>{activeCodeFile.aiEvaluation?.questionIntegrityNotes || activeCodeFile.questionIntegrityNotes || 'Not captured'}</pre>
                       </MetricCard>
                       {activeCodeFile.aiEvaluation ? (
-                        <MetricCard title="AI evaluation" tone={aiEvaluationTone(activeCodeFile)}>
+                        <MetricCard title="AI evaluation" tone={aiEvaluationTone(activeCodeFile)} expandable>
                           <span>{formatAiScore(activeCodeFile.aiEvaluation.overallScore)} {activeCodeFile.aiEvaluation.verdict ? `- ${activeCodeFile.aiEvaluation.verdict}` : ''}</span>
                           <pre>{activeCodeFile.aiEvaluation.summary || '(no AI summary captured)'}</pre>
                         </MetricCard>
                       ) : null}
-                      <MetricCard title="Output" tone={outputTone(activeCodeFile, session.technology)}>
+                      <MetricCard title="Output" tone={outputTone(activeCodeFile, session.technology)} expandable>
                         <pre>{activeCodeFile.runResult?.stdout || '(no output captured)'}</pre>
                       </MetricCard>
-                      <MetricCard title="Errors" tone={errorTone(activeCodeFile)}>
+                      <MetricCard title="Errors" tone={errorTone(activeCodeFile)} expandable>
                         <pre>{activeCodeFile.runResult?.stderr || '(no errors captured)'}</pre>
                       </MetricCard>
                     </div>
@@ -540,6 +554,34 @@ const Result: React.FC = () => {
               )}
             </section>
           )}
+
+          {activeTab === 'human' && (
+            <section className="result-panel ai-result-panel">
+              <h3>{firstName(interviewer?.name, 'Interviewer')}'s Recommendation</h3>
+              {session.feedback || session.feedbackDraft ? (
+                <div className="ai-result-layout">
+                  <div className="question-result-grid ai-score-grid">
+                    <MetricCard title="Rating" tone={recommendationRatingTone((session.feedback || session.feedbackDraft)?.rating)}>
+                      <span>{formatOptionalLabel((session.feedback || session.feedbackDraft)?.rating)}</span>
+                    </MetricCard>
+                    <MetricCard title="Recommendation" tone={recommendationDecisionTone((session.feedback || session.feedbackDraft)?.recommendationDecision)}>
+                      <span>{formatOptionalLabel((session.feedback || session.feedbackDraft)?.recommendationDecision)}</span>
+                    </MetricCard>
+                    <MetricCard title="Review status" tone={session.feedback ? 'best' : 'average'}>
+                      <span>{session.feedback ? 'Submitted' : 'Draft'}</span>
+                    </MetricCard>
+                  </div>
+                  <div className="ai-result-summary">
+                    <h4>Feedback</h4>
+                    <p>{(session.feedback || session.feedbackDraft)?.comments || 'No interviewer comments captured.'}</p>
+                    {session.feedback?.submittedAt ? <p className="activity-empty">Submitted {formatDateTime(session.feedback.submittedAt)}</p> : null}
+                  </div>
+                </div>
+              ) : (
+                <p className="activity-empty">No interviewer recommendation has been captured yet.</p>
+              )}
+            </section>
+          )}
         </div>
       </div>
     </div>
@@ -563,11 +605,55 @@ function AiList({ title, items }: { title: string; items?: string[] | null }) {
   );
 }
 
-function MetricCard({ title, tone, children }: { title: string; tone?: MetricTone; children: React.ReactNode }) {
+function MetricCard({ title, tone, children, expandable = false }: { title: string; tone?: MetricTone; children: React.ReactNode; expandable?: boolean }) {
+  const [expanded, setExpanded] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!expanded) {
+      if (document.body.dataset.resultMetricExpanded === title) {
+        delete document.body.dataset.resultMetricExpanded;
+      }
+      return;
+    }
+    document.body.dataset.resultMetricExpanded = title;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        setExpanded(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown, true);
+      if (document.body.dataset.resultMetricExpanded === title) {
+        delete document.body.dataset.resultMetricExpanded;
+      }
+    };
+  }, [expanded, title]);
+
   return (
-    <div className={`question-result-card metric-${tone || 'neutral'}`}>
-      <strong>{title}</strong>
+    <div className={`question-result-card metric-${tone || 'neutral'} ${expandable ? 'is-expandable' : 'is-compact'}`}>
+      <div className="metric-card-heading">
+        <strong>{title}</strong>
+        {expandable ? (
+          <button type="button" className="metric-expand-button" onClick={() => setExpanded(true)} aria-label={`Expand ${title}`}>
+            +
+          </button>
+        ) : null}
+      </div>
       {children}
+      {expanded ? (
+        <div className="metric-expanded-backdrop" role="presentation" onClick={() => setExpanded(false)}>
+          <div className={`metric-expanded-card metric-${tone || 'neutral'}`} role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+            <div className="metric-expanded-heading">
+              <strong>{title}</strong>
+              <button type="button" className="metric-collapse-button" onClick={() => setExpanded(false)} aria-label={`Collapse ${title}`}>(Esc) X</button>
+            </div>
+            <div className="metric-expanded-content">{children}</div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -674,6 +760,15 @@ function formatSolveDuration(seconds?: number | null) {
   return `${minutes}m ${remainingSeconds}s`;
 }
 
+function formatExpectedSolveTime(minutes?: number | null) {
+  if (typeof minutes !== 'number' || !Number.isFinite(minutes) || minutes <= 0) {
+    return 'Not captured';
+  }
+
+  const roundedMinutes = Math.round(minutes);
+  return `${roundedMinutes} min${roundedMinutes === 1 ? '' : 's'}`;
+}
+
 function formatExecuteAttemptCount(count?: number | null) {
   if (typeof count !== 'number' || !Number.isFinite(count)) {
     return 'Not captured';
@@ -687,9 +782,10 @@ function formatAiScore(score?: number | null) {
   return typeof score === 'number' && Number.isFinite(score) ? `${score}/100` : 'Not captured';
 }
 
-function aiRecommendationHeaderValue(session: { interviewMode?: string | null; aiRecommendation?: { recommendationDecision?: string | null; rating?: string | null } | null }) {
+function aiRecommendationHeaderValue(session: { interviewMode?: string | null; codeFiles?: EditableCodeFile[]; aiRecommendation?: { recommendationDecision?: string | null; rating?: string | null } | null }) {
   if (!session.aiRecommendation) {
-    return session.interviewMode === 'AI_INTERVIEWER' ? 'Not generated' : 'Not applicable';
+    const hasEvidence = (session.codeFiles || []).some((file) => file.content?.includes('AI Generated Problem Statement:') || file.aiEvaluation);
+    return session.interviewMode === 'AI_INTERVIEWER' || hasEvidence ? 'Not generated' : 'Not applicable';
   }
   return formatOptionalLabel(session.aiRecommendation.recommendationDecision || session.aiRecommendation.rating);
 }
@@ -703,6 +799,30 @@ function aiRecommendationHeaderDetail(session: { aiRecommendation?: { overallSco
   const rating = formatOptionalLabel(recommendation.rating);
   const review = recommendation.humanReviewRequired === false ? 'review optional' : 'human review required';
   return `${rating}; ${score}; ${review}`;
+}
+
+function humanRecommendationHeaderValue(feedback?: { recommendationDecision?: string | null; rating?: string | null } | null) {
+  if (!feedback) {
+    return 'Not submitted';
+  }
+  return formatOptionalLabel(feedback.recommendationDecision || feedback.rating);
+}
+
+function humanRecommendationHeaderDetail(feedback?: { rating?: string | null; submittedAt?: string | null } | null) {
+  if (!feedback) {
+    return 'awaiting feedback';
+  }
+  return feedback.submittedAt
+    ? `${formatOptionalLabel(feedback.rating)}; submitted`
+    : `${formatOptionalLabel(feedback.rating)}; draft`;
+}
+
+function firstName(value: string | undefined, fallback: string) {
+  const normalized = value?.trim();
+  if (!normalized) {
+    return fallback;
+  }
+  return normalized.split(/\s+/)[0] || fallback;
 }
 
 function runStatusTone(file: EditableCodeFile): MetricTone {

@@ -31,6 +31,9 @@ import com.altimetrik.interview.dto.AccessVerificationResponse;
 import com.altimetrik.interview.dto.ActivityEventDto;
 import com.altimetrik.interview.dto.ActivityEventRequest;
 import com.altimetrik.interview.dto.AiEvaluateQuestionRequest;
+import com.altimetrik.interview.dto.AiInterviewerQuestionAcceptRequest;
+import com.altimetrik.interview.dto.AiInterviewerQuestionDraftRequest;
+import com.altimetrik.interview.dto.AiInterviewerQuestionDraftResponse;
 import com.altimetrik.interview.dto.AiInterviewRecommendationResponse;
 import com.altimetrik.interview.dto.AiQuestionSessionResponse;
 import com.altimetrik.interview.dto.AiSolutionEvaluationResponse;
@@ -251,6 +254,31 @@ public class SessionController {
                         .findFirst()
                         .orElse("none"));
         broadcastSession(response.getSession(), "CODE_UPDATE", "AI question generated");
+        return ResponseEntity.ok(response);
+    }
+
+    @PostMapping("/{id}/ai/interviewer-assist/questions/draft")
+    public ResponseEntity<AiInterviewerQuestionDraftResponse> draftInterviewerAssistedQuestion(
+            @PathVariable String id,
+            @RequestBody(required = false) @Nullable AiInterviewerQuestionDraftRequest request) {
+        AiInterviewerQuestionDraftResponse response = sessionService.draftInterviewerAssistedQuestion(
+                id,
+                request == null ? new AiInterviewerQuestionDraftRequest() : request
+        );
+        return ResponseEntity.ok(response);
+    }
+
+    @PostMapping("/{id}/ai/interviewer-assist/questions/{draftId}/accept")
+    public ResponseEntity<AiQuestionSessionResponse> acceptInterviewerAssistedQuestion(
+            @PathVariable String id,
+            @PathVariable String draftId,
+            @RequestBody(required = false) @Nullable AiInterviewerQuestionAcceptRequest request) {
+        AiQuestionSessionResponse response = sessionService.acceptInterviewerAssistedQuestion(
+                id,
+                draftId,
+                request == null ? new AiInterviewerQuestionAcceptRequest() : request
+        );
+        broadcastSession(response.getSession(), "CODE_UPDATE", "New Question has landed on the editor.");
         return ResponseEntity.ok(response);
     }
 

@@ -4,6 +4,9 @@ import com.altimetrik.interview.dto.AcceptDisclaimerRequest;
 import com.altimetrik.interview.dto.ActivityEventDto;
 import com.altimetrik.interview.dto.ActivityEventRequest;
 import com.altimetrik.interview.dto.AiEvaluateQuestionRequest;
+import com.altimetrik.interview.dto.AiInterviewerQuestionAcceptRequest;
+import com.altimetrik.interview.dto.AiInterviewerQuestionDraftRequest;
+import com.altimetrik.interview.dto.AiInterviewerQuestionDraftResponse;
 import com.altimetrik.interview.dto.AiInterviewRecommendationRequest;
 import com.altimetrik.interview.dto.AiInterviewRecommendationResponse;
 import com.altimetrik.interview.dto.AiPersistedRecommendationDto;
@@ -34,6 +37,7 @@ import com.altimetrik.interview.dto.RunResultDto;
 import com.altimetrik.interview.dto.SessionResponse;
 import com.altimetrik.interview.entity.CodeState;
 import com.altimetrik.interview.entity.CodeFile;
+import com.altimetrik.interview.entity.AiQuestionDraft;
 import com.altimetrik.interview.entity.Feedback;
 import com.altimetrik.interview.entity.FrontendWorkspace;
 import com.altimetrik.interview.entity.InterviewSession;
@@ -61,6 +65,7 @@ import com.altimetrik.interview.enums.SessionStatus;
 import com.altimetrik.interview.enums.TechnologySkill;
 import com.altimetrik.interview.repository.CodeFileRepository;
 import com.altimetrik.interview.repository.CodeStateRepository;
+import com.altimetrik.interview.repository.AiQuestionDraftRepository;
 import com.altimetrik.interview.repository.FeedbackRepository;
 import com.altimetrik.interview.repository.FrontendWorkspaceRepository;
 import com.altimetrik.interview.repository.InterviewQuestionBankRepository;
@@ -254,6 +259,7 @@ public class SessionService {
     private final ParticipantRepository participantRepository;
     private final ParticipantAccessChallengeRepository participantAccessChallengeRepository;
     private final CodeFileRepository codeFileRepository;
+    private final AiQuestionDraftRepository aiQuestionDraftRepository;
     private final CodeStateRepository codeStateRepository;
     private final RunResultRepository runResultRepository;
     private final FeedbackRepository feedbackRepository;
@@ -438,6 +444,129 @@ public class SessionService {
                 .build();
     }
 
+    public AiInterviewerQuestionDraftResponse draftInterviewerAssistedQuestion(String sessionId,
+                                                                               AiInterviewerQuestionDraftRequest request) {
+        InterviewSession session = getRequiredSession(sessionId);
+        ensureHumanInterview(session);
+        if (session.getStatus() != SessionStatus.ACTIVE) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "AI assisted questions can be generated only while the interview is active.");
+        }
+
+        CodeState codeState = codeStateRepository.findBySessionId(sessionId).orElse(null);
+        List<EditableCodeFileDto> files = new ArrayList<>(resolveEditableFiles(session, codeState));
+        List<EditableCodeFileDto> questionFiles = files.stream()
+                .filter(file -> isManagedAiQuestionFile(session.getTechnology(), file))
+                .toList();
+        int questionNumber = questionFiles.size() + 1;
+        int difficultyLevel = resolveHumanAssistDifficultyLevel(session, questionFiles, request);
+        AiPolicyEngineService.QuestionPolicyPlan policyPlan = aiPolicyEngineService.questionPolicy(
+                session,
+                difficultyLevel,
+                questionNumber,
+                questionFiles,
+                calculateRemainingSec(session)
+        );
+        List<String> targetConcepts = resolveHumanAssistTargetConcepts(policyPlan.targetConcepts(), request);
+        List<String> avoidConcepts = resolveHumanAssistAvoidConcepts(policyPlan.avoidConcepts(), request);
+        String policy = policyPlan.questionPolicy() + "\nHuman interviewer assistant instruction: "
+                + humanAssistInstruction(request) + "\n";
+
+        AiQuestionGenerationRequest generationRequest = AiQuestionGenerationRequest.builder()
+                .sessionId(sessionId)
+                .technology(session.getTechnology().name())
+                .yearsOfExperience(session.getYearsOfExperience())
+                .targetRole(session.getTargetRole())
+                .startingDifficulty(String.valueOf(session.getStartingDifficultyLevel() == null ? 1 : session.getStartingDifficultyLevel()))
+                .currentDifficulty(String.valueOf(difficultyLevel))
+                .questionNumber(questionNumber)
+                .maxQuestions(session.getMaxQuestions() == null ? 5 : session.getMaxQuestions())
+                .timeRemainingSeconds((long) calculateRemainingSec(session))
+                .variationSeed(sessionId + "-human-assist-" + questionNumber + "-" + UUID.randomUUID())
+                .idealDurationMinutes(policyPlan.idealDurationMinutes())
+                .questionPolicy(policy)
+                .evaluationRubric(policyPlan.evaluationRubric())
+                .targetConcepts(targetConcepts)
+                .previousQuestionTitles(aiQuestionHistoryForGeneration(questionFiles))
+                .previousConcepts(policyPlan.previousConcepts())
+                .avoidConcepts(avoidConcepts)
+                .forbiddenCapabilities(policyPlan.forbiddenCapabilities())
+                .requiredQuestionElements(policyPlan.requiredQuestionElements())
+                .sandboxRules(policyPlan.sandboxRules())
+                .build();
+
+        log.info("Human interviewer AI draft requested sessionId={} questionNumber={} difficulty={} sectionMode={} complexityDirection={}",
+                sessionId, questionNumber, difficultyLevel,
+                request == null ? null : request.getSectionMode(),
+                request == null ? null : request.getComplexityDirection());
+        AiQuestionResponse generated = generateValidatedAiQuestion(session, generationRequest, questionFiles);
+        AiQuestionDraft draft = persistAiQuestionDraft(session, generated, questionNumber);
+        return AiInterviewerQuestionDraftResponse.builder()
+                .draftId(draft.getId())
+                .section(draft.getSection())
+                .question(generated)
+                .build();
+    }
+
+    @Transactional
+    public AiQuestionSessionResponse acceptInterviewerAssistedQuestion(String sessionId,
+                                                                       String draftId,
+                                                                       AiInterviewerQuestionAcceptRequest request) {
+        InterviewSession session = getRequiredSession(sessionId);
+        ensureHumanInterview(session);
+        if (session.getStatus() != SessionStatus.ACTIVE) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "AI assisted questions can be accepted only while the interview is active.");
+        }
+
+        AiQuestionDraft draft = aiQuestionDraftRepository.findByIdAndSessionId(draftId, sessionId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "AI question draft was not found."));
+        if (Boolean.TRUE.equals(draft.getAccepted())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "This AI question draft has already been accepted.");
+        }
+
+        CodeState codeState = codeStateRepository.findBySessionId(sessionId).orElse(null);
+        List<EditableCodeFileDto> files = new ArrayList<>(resolveEditableFiles(session, codeState));
+        String activePath = request == null ? null : request.getActiveFilePath();
+        EditableCodeFileDto activeFile = activePath == null || activePath.isBlank()
+                ? files.stream().filter(file -> Boolean.TRUE.equals(file.getActiveQuestion())).findFirst().orElse(null)
+                : files.stream().filter(file -> activePath.equals(file.getPath())).findFirst().orElse(null);
+        boolean createNewTab = request != null && Boolean.TRUE.equals(request.getCreateNewTab());
+        if (activeFile == null || Boolean.TRUE.equals(activeFile.getSubmitted()) || !Boolean.TRUE.equals(activeFile.getEditable())) {
+            createNewTab = true;
+        }
+
+        List<EditableCodeFileDto> questionFiles = files.stream()
+                .filter(file -> isManagedAiQuestionFile(session.getTechnology(), file))
+                .toList();
+        int questionNumber = createNewTab
+                ? questionFiles.size() + 1
+                : guidedQuestionNumber(activeFile, questionFiles.size() + 1);
+        AiQuestionResponse question = toAiQuestionResponse(draft);
+        EditableCodeFileDto generatedFile = buildAiQuestionFile(
+                session.getTechnology(),
+                question,
+                questionNumber,
+                createNewTab ? null : activeFile,
+                files.size()
+        );
+        List<EditableCodeFileDto> nextFiles = upsertAiQuestionFile(files, generatedFile);
+        validateWorkspaceFiles(session.getTechnology(), nextFiles);
+        runResultRepository.deleteBySessionIdAndFilePath(sessionId, generatedFile.getPath());
+        replaceCodeFiles(sessionId, nextFiles);
+        Long generatedCodeVersion = advanceCodeVersionForGeneratedAiQuestion(sessionId, nextFiles, generatedFile.getContent());
+
+        draft.setAccepted(true);
+        draft.setAcceptedAt(nowUtc());
+        aiQuestionDraftRepository.save(draft);
+
+        SessionResponse refreshed = getSession(sessionId);
+        log.info("Human interviewer AI draft accepted sessionId={} draftId={} path={} createNewTab={} codeVersion={}",
+                sessionId, draftId, generatedFile.getPath(), createNewTab, generatedCodeVersion);
+        return AiQuestionSessionResponse.builder()
+                .question(toAiQuestionResponse(generatedFile))
+                .session(refreshed)
+                .build();
+    }
+
     private Long advanceCodeVersionForGeneratedAiQuestion(String sessionId,
                                                           List<EditableCodeFileDto> files,
                                                           String fallbackLatestCode) {
@@ -475,7 +604,6 @@ public class SessionService {
 
     public AiSolutionEvaluationResponse evaluateAiQuestion(String sessionId, AiEvaluateQuestionRequest request) {
         InterviewSession session = getRequiredSession(sessionId);
-        ensureAiInterview(session);
 
         EditableCodeFileDto question = resolveAiEvaluationTarget(session, request == null ? null : request.getFilePath());
         AiSolutionEvaluationResponse response = aiInterviewClientService.evaluateSolution(toAiEvaluationRequest(session, question, questionIndex(session, question)));
@@ -489,7 +617,6 @@ public class SessionService {
 
     public AiInterviewRecommendationResponse recommendAiInterview(String sessionId) {
         InterviewSession session = getRequiredSession(sessionId);
-        ensureAiInterview(session);
 
         List<EditableCodeFileDto> files = resolveEditableFiles(session, codeStateRepository.findBySessionId(sessionId).orElse(null)).stream()
                 .filter(file -> isManagedAiQuestionFile(session.getTechnology(), file))
@@ -1212,7 +1339,7 @@ public class SessionService {
     }
 
     private void generateAiRecommendationAfterEndIfNeeded(InterviewSession session) {
-        if (!isAiInterview(session) || session.getAiRecommendationGeneratedAt() != null) {
+        if (session.getAiRecommendationGeneratedAt() != null) {
             return;
         }
         try {
@@ -1561,6 +1688,13 @@ public class SessionService {
     private void ensureAiInterview(InterviewSession session) {
         if (!isAiInterview(session)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "AI operations are available only for AI interviewer sessions.");
+        }
+    }
+
+    private void ensureHumanInterview(InterviewSession session) {
+        InterviewMode mode = session.getInterviewMode() == null ? InterviewMode.HUMAN_INTERVIEWER : session.getInterviewMode();
+        if (mode != InterviewMode.HUMAN_INTERVIEWER) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Human interviewer AI assistance is available only for human interviewer sessions.");
         }
     }
 
@@ -2100,6 +2234,146 @@ public class SessionService {
                 .concepts(List.of())
                 .evaluationFocus(List.of())
                 .build();
+    }
+
+    private AiQuestionResponse toAiQuestionResponse(AiQuestionDraft draft) {
+        return AiQuestionResponse.builder()
+                .title(draft.getTitle())
+                .filePath(draft.getFilePath())
+                .displayName(draft.getDisplayName())
+                .problemStatement(draft.getProblemStatement())
+                .starterCode(draft.getStarterCode())
+                .difficulty(String.valueOf(normalizeDifficultyLevel(draft.getDifficultyLevel())))
+                .difficultyLevel(normalizeDifficultyLevel(draft.getDifficultyLevel()))
+                .idealDurationMinutes(draft.getIdealDurationMinutes())
+                .referenceSolution(draft.getReferenceSolution())
+                .expectedTimeComplexity(draft.getExpectedTimeComplexity())
+                .expectedSpaceComplexity(draft.getExpectedSpaceComplexity())
+                .concepts(splitList(draft.getConcepts()))
+                .evaluationFocus(splitList(draft.getEvaluationFocus()))
+                .build();
+    }
+
+    private AiQuestionDraft persistAiQuestionDraft(InterviewSession session, AiQuestionResponse question, int questionNumber) {
+        AiQuestionDraft draft = new AiQuestionDraft();
+        draft.setSessionId(session.getId());
+        draft.setTechnology(session.getTechnology());
+        draft.setQuestionNumber(questionNumber);
+        draft.setTitle(firstNonBlank(question.getTitle(), "Question " + questionNumber));
+        draft.setFilePath(normalizeAiFilePath(session.getTechnology(), question.getFilePath(), defaultAiQuestionPath(session.getTechnology(), questionNumber)));
+        draft.setDisplayName("Question " + questionNumber);
+        draft.setProblemStatement(question.getProblemStatement());
+        draft.setStarterCode(question.getStarterCode());
+        draft.setReferenceSolution(question.getReferenceSolution());
+        int difficultyLevel = normalizeDifficultyLevel(question.getDifficultyLevel(), question.getDifficulty());
+        draft.setDifficultyLevel(difficultyLevel);
+        draft.setIdealDurationMinutes(normalizeIdealDuration(question.getIdealDurationMinutes(), difficultyLevel));
+        draft.setExpectedTimeComplexity(normalizeShortText(question.getExpectedTimeComplexity(), 80));
+        draft.setExpectedSpaceComplexity(normalizeShortText(question.getExpectedSpaceComplexity(), 80));
+        draft.setConcepts(joinList(question.getConcepts()));
+        draft.setEvaluationFocus(joinList(question.getEvaluationFocus()));
+        draft.setSection(resolveQuestionSection(question.getConcepts(), question.getEvaluationFocus()));
+        draft.setAccepted(false);
+        return aiQuestionDraftRepository.save(draft);
+    }
+
+    private String resolveQuestionSection(List<String> concepts, List<String> evaluationFocus) {
+        if (concepts != null) {
+            for (String concept : concepts) {
+                if (concept != null && !concept.isBlank()) {
+                    return concept.trim();
+                }
+            }
+        }
+        if (evaluationFocus != null) {
+            for (String focus : evaluationFocus) {
+                if (focus != null && !focus.isBlank()) {
+                    return focus.trim();
+                }
+            }
+        }
+        return "General problem solving";
+    }
+
+    private int guidedQuestionNumber(EditableCodeFileDto file, int fallback) {
+        if (file == null) {
+            return fallback;
+        }
+        String source = firstNonBlank(file.getDisplayName(), file.getPath());
+        if (source == null || source.isBlank()) {
+            return fallback;
+        }
+        String digits = source.replaceAll("\\D+", "");
+        if (digits.isBlank()) {
+            return fallback;
+        }
+        try {
+            return Integer.parseInt(digits);
+        } catch (NumberFormatException ignored) {
+            return fallback;
+        }
+    }
+
+    private int resolveHumanAssistDifficultyLevel(InterviewSession session,
+                                                  List<EditableCodeFileDto> questionFiles,
+                                                  AiInterviewerQuestionDraftRequest request) {
+        int submittedCount = (int) (questionFiles == null ? 0 : questionFiles.stream().filter(file -> Boolean.TRUE.equals(file.getSubmitted())).count());
+        int base = resolveCurrentAiDifficultyLevel(session, submittedCount);
+        String direction = request == null ? "" : valueOrBlank(request.getComplexityDirection());
+        if ("INCREASE".equalsIgnoreCase(direction)) {
+            return Math.min(5, base + 1);
+        }
+        if ("DECREASE".equalsIgnoreCase(direction)) {
+            return Math.max(1, base - 1);
+        }
+        return base;
+    }
+
+    private List<String> resolveHumanAssistTargetConcepts(List<String> defaultConcepts, AiInterviewerQuestionDraftRequest request) {
+        String currentSection = request == null ? "" : valueOrBlank(request.getCurrentSection());
+        String sectionMode = request == null ? "" : valueOrBlank(request.getSectionMode());
+        if ("SAME".equalsIgnoreCase(sectionMode) && !currentSection.isBlank()) {
+            return List.of(currentSection);
+        }
+        return defaultConcepts == null ? List.of() : defaultConcepts;
+    }
+
+    private List<String> resolveHumanAssistAvoidConcepts(List<String> defaultAvoidConcepts, AiInterviewerQuestionDraftRequest request) {
+        List<String> avoid = new ArrayList<>(defaultAvoidConcepts == null ? List.of() : defaultAvoidConcepts);
+        String currentSection = request == null ? "" : valueOrBlank(request.getCurrentSection());
+        String sectionMode = request == null ? "" : valueOrBlank(request.getSectionMode());
+        if ("CHANGE".equalsIgnoreCase(sectionMode) && !currentSection.isBlank()) {
+            avoid.add(currentSection);
+        }
+        return avoid.stream().filter(value -> value != null && !value.isBlank()).distinct().toList();
+    }
+
+    private String humanAssistInstruction(AiInterviewerQuestionDraftRequest request) {
+        if (request == null) {
+            return "Generate a fresh interviewer-reviewable question and reference solution.";
+        }
+        List<String> parts = new ArrayList<>();
+        String direction = valueOrBlank(request.getComplexityDirection());
+        if ("INCREASE".equalsIgnoreCase(direction)) {
+            parts.add("increase difficulty by one level if possible");
+        } else if ("DECREASE".equalsIgnoreCase(direction)) {
+            parts.add("decrease difficulty by one level if possible");
+        }
+        String sectionMode = valueOrBlank(request.getSectionMode());
+        String currentSection = valueOrBlank(request.getCurrentSection());
+        if ("SAME".equalsIgnoreCase(sectionMode) && !currentSection.isBlank()) {
+            parts.add("stay in the same technology section: " + currentSection);
+        } else if ("CHANGE".equalsIgnoreCase(sectionMode) && !currentSection.isBlank()) {
+            parts.add("choose a different technology section than: " + currentSection);
+        }
+        if (parts.isEmpty()) {
+            return "Generate a fresh interviewer-reviewable question and reference solution.";
+        }
+        return String.join("; ", parts) + ".";
+    }
+
+    private String valueOrBlank(String value) {
+        return value == null ? "" : value.trim();
     }
 
     private EditableCodeFileDto buildAiQuestionFile(TechnologySkill technology,

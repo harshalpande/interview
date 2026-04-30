@@ -2,6 +2,7 @@ import React from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import Editor from '../components/Editor';
+import HumanAiAssistantDrawer from '../components/HumanAiAssistantDrawer';
 import ToastStack, { ToastItem } from '../components/ToastStack';
 import VideoPanel from '../components/VideoPanel';
 import { useCameraMonitor } from '../hooks/useCameraMonitor';
@@ -62,6 +63,15 @@ const summarizeAiQuestionFiles = (files: EditableCodeFile[]) =>
       executeAttemptCount: file.executeAttemptCount,
     }));
 
+const isAiAssistantShortcut = (event: KeyboardEvent) => {
+  if (!event.ctrlKey || !event.altKey || event.shiftKey || event.metaKey || event.repeat) {
+    return false;
+  }
+  const key = event.key?.toLowerCase();
+  const code = event.code?.toLowerCase();
+  return key === 'q' || code === 'keyq' || event.keyCode === 81 || event.which === 81;
+};
+
 const Session: React.FC = () => {
   const { sessionId } = useParams<{ sessionId: string }>();
   const [searchParams] = useSearchParams();
@@ -107,6 +117,8 @@ const Session: React.FC = () => {
   const internalClipboardTextsRef = React.useRef<Map<string, number>>(new Map());
   const codeVersionRef = React.useRef(0);
   const [activeQuestionPath, setActiveQuestionPath] = React.useState('');
+  const [editorConsoleClearSignal, setEditorConsoleClearSignal] = React.useState(0);
+  const [humanAiAssistantOpen, setHumanAiAssistantOpen] = React.useState(false);
   const [preStartGuideAcknowledged, setPreStartGuideAcknowledged] = React.useState(false);
   const [isGeneratingFollowupAiQuestion, setIsGeneratingFollowupAiQuestion] = React.useState(false);
   const [aiQuestionProgressStage, setAiQuestionProgressStage] = React.useState<AiQuestionProgressStage>('idle');
@@ -129,11 +141,17 @@ const Session: React.FC = () => {
   const isGuidedQuestionSession = session?.technology === 'JAVA' || session?.technology === 'PYTHON';
   const isCodeWorkspaceSession = isFrontendWorkspaceSession || isGuidedQuestionSession;
   const isAiInterviewSession = session?.interviewMode === 'AI_INTERVIEWER';
+  const isHumanInterviewSession = session?.interviewMode !== 'AI_INTERVIEWER';
   const isInAppAvSession = session?.avMode === 'IN_APP';
   const intervieweeName = interviewee?.name?.trim() || 'Interviewee';
   const interviewerFirstName = firstName(interviewer?.name, 'Interviewer');
   const intervieweeFirstName = firstName(interviewee?.name, 'Interviewee');
   const wsRole: ParticipantRole = role === 'interviewer' ? 'INTERVIEWER' : 'INTERVIEWEE';
+  const canUseHumanAiAssistant = Boolean(
+    isHumanInterviewSession
+    && role === 'interviewer'
+    && session?.status === 'ACTIVE'
+  );
 
   useBackGuard({
     enabled: true,
@@ -144,6 +162,27 @@ const Session: React.FC = () => {
   React.useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'auto' });
   }, []);
+
+  React.useEffect(() => {
+    if (!canUseHumanAiAssistant) {
+      setHumanAiAssistantOpen(false);
+      return undefined;
+    }
+
+    const toggleAssistant = (event: KeyboardEvent) => {
+      if (!isAiAssistantShortcut(event)) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      setHumanAiAssistantOpen((previous) => !previous);
+    };
+
+    window.addEventListener('keydown', toggleAssistant, true);
+    return () => {
+      window.removeEventListener('keydown', toggleAssistant, true);
+    };
+  }, [canUseHumanAiAssistant]);
 
   React.useEffect(() => {
     if (role && storedRole !== role) {
@@ -444,6 +483,12 @@ const Session: React.FC = () => {
     () => (isCodeWorkspaceSession ? resolvePrimaryCodeFromFiles(session?.technology, resolvedCodeFiles) : (currentCode || session?.latestCode || '')),
     [currentCode, isCodeWorkspaceSession, resolvedCodeFiles, session?.latestCode, session?.technology]
   );
+  const activeCodeFile = React.useMemo(
+    () => resolvedCodeFiles.find((file) => file.path === (activeQuestionPath || resolvedActiveQuestionPath))
+      || resolvedCodeFiles.find((file) => file.activeQuestion)
+      || resolvedCodeFiles[0],
+    [activeQuestionPath, resolvedActiveQuestionPath, resolvedCodeFiles]
+  );
 
   React.useEffect(() => {
     if (resolvedActiveQuestionPath && resolvedActiveQuestionPath !== activeQuestionPath) {
@@ -479,6 +524,10 @@ const Session: React.FC = () => {
       if (message.session) {
         refreshSession(message.session);
       }
+      if (message.type === 'CODE_UPDATE' && message.message === 'New Question has landed on the editor.') {
+        setEditorConsoleClearSignal((previous) => previous + 1);
+        pushSessionToast('New Question has landed on the editor.', 'info');
+      }
       if (!message.session && message.type === 'CODE_UPDATE' && typeof message.code === 'string') {
         const incomingVersion = normalizeCodeVersion(message.version);
         if (incomingVersion < codeVersionRef.current) {
@@ -502,7 +551,7 @@ const Session: React.FC = () => {
         setIncomingSignal(message);
       }
     },
-    [pushPersistentToast, refreshSession, role, setCurrentCode]
+    [pushPersistentToast, pushSessionToast, refreshSession, role, setCurrentCode]
   );
 
   const { isReconnecting, isConnected, sendCode, sendSignal } = useWebSocket(sessionId || '', handleSocketMessage);
@@ -614,7 +663,7 @@ const Session: React.FC = () => {
 
   const handleAiQuestionFrozen = React.useCallback(
     async (files: EditableCodeFile[], frozenFilePath: string) => {
-      if (!isAiInterviewSession || role !== 'interviewee' || !sessionId || !session || session.status !== 'ACTIVE') {
+      if (role !== 'interviewee' || !sessionId || !session || session.status !== 'ACTIVE') {
         return;
       }
 
@@ -680,10 +729,17 @@ const Session: React.FC = () => {
           error: message,
         });
         pushSessionToast(`AI evaluation failed: ${message}`, 'warning');
-        if (isAiQuotaOrCredentialError(message)) {
+        if (isAiInterviewSession && isAiQuotaOrCredentialError(message)) {
           setAiQuestionProgressStage('idle');
           return;
         }
+      }
+
+      if (!isAiInterviewSession) {
+        const refreshed = await sessionApi.getSession(sessionId);
+        refreshSession(refreshed);
+        setAiQuestionProgressStage('idle');
+        return;
       }
 
       const submittedAiQuestionCount = files.filter((file) => file.submitted && isManagedAiQuestionFile(file)).length;
@@ -1454,6 +1510,7 @@ const Session: React.FC = () => {
             initialCode={resolvedLatestCode}
             initialCodeVersion={normalizeCodeVersion(currentSession?.codeVersion ?? session.codeVersion)}
             preferredActiveFilePath={resolvedActiveQuestionPath || activeQuestionPath}
+            clearConsoleSignal={editorConsoleClearSignal}
             onActiveFileChange={setActiveQuestionPath}
             onQuestionFrozen={handleAiQuestionFrozen}
             showFullscreenToggle={canFullscreen}
@@ -1627,6 +1684,23 @@ const Session: React.FC = () => {
           )}
         </div>
       )}
+      {canUseHumanAiAssistant ? (
+        <HumanAiAssistantDrawer
+          session={session}
+          sessionId={sessionId!}
+          interviewerName={interviewer?.name || 'Interviewer'}
+          activeFile={activeCodeFile}
+          activeFilePath={activeQuestionPath || resolvedActiveQuestionPath}
+          open={humanAiAssistantOpen}
+          onOpenChange={setHumanAiAssistantOpen}
+          onAccepted={(nextSession, activePath) => {
+            refreshSession(nextSession);
+            setActiveQuestionPath(activePath);
+            setEditorConsoleClearSignal((previous) => previous + 1);
+          }}
+          onMessage={pushSessionToast}
+        />
+      ) : null}
       <ToastStack toasts={toastItems} onDismiss={dismissToast} />
     </div>
   );
