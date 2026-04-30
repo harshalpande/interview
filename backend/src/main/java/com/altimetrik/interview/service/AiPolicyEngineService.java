@@ -25,7 +25,7 @@ public class AiPolicyEngineService {
         List<String> avoidConcepts = avoidConcepts(previousConcepts, targetConcepts);
         List<String> forbiddenCapabilities = forbiddenCapabilities(technology);
         List<String> requiredElements = requiredQuestionElements(technology);
-        int idealDurationMinutes = idealDurationMinutes(difficultyLevel, timeRemainingSeconds);
+        int idealDurationMinutes = idealDurationMinutes(difficultyLevel, timeRemainingSeconds, session.getYearsOfExperience());
         String sandboxRules = sandboxRules(technology);
         String rubric = evaluationRubric(session, difficultyLevel);
 
@@ -37,6 +37,8 @@ public class AiPolicyEngineService {
                 Required question elements: %s.
                 Forbidden capabilities: %s.
                 Expected candidate duration: %d minutes.
+                Calibrate question scope to the candidate experience and target role: fair, practical, sandbox-ready, and concept-focused rather than trick-heavy.
+                Prefer questions that test reasoning, edge cases, and implementation clarity over memorized syntax, while keeping the evaluation standard intact.
                 The question must be executable in the current sandbox and must include validation checks in starterCode.
                 Do not ask for implementation that requires unsupported dependencies, file IO, network IO, databases, system processes, or external services.
                 """.formatted(
@@ -189,7 +191,7 @@ public class AiPolicyEngineService {
                 """.formatted(seniorGuidance);
     }
 
-    private int idealDurationMinutes(int difficultyLevel, int timeRemainingSeconds) {
+    private int idealDurationMinutes(int difficultyLevel, int timeRemainingSeconds, Integer yearsOfExperience) {
         int duration = switch (normalizeDifficulty(difficultyLevel)) {
             case 1 -> 8;
             case 2 -> 10;
@@ -197,6 +199,12 @@ public class AiPolicyEngineService {
             case 4 -> 15;
             default -> 18;
         };
+        int years = yearsOfExperience == null ? 0 : yearsOfExperience;
+        if (years >= 8) {
+            duration = Math.max(6, duration - 1);
+        } else if (years <= 1) {
+            duration += 2;
+        }
         if (timeRemainingSeconds > 0 && timeRemainingSeconds < duration * 60) {
             return Math.max(5, timeRemainingSeconds / 60);
         }

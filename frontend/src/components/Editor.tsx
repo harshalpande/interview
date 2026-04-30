@@ -435,6 +435,7 @@ interface EditorProps {
   initialCodeFiles?: EditableCodeFile[];
   initialCodeVersion?: number;
   preferredActiveFilePath?: string;
+  clearConsoleSignal?: number;
   onCodeChange?: (code: string) => void;
   onCodeFilesChange?: (files: EditableCodeFile[]) => void;
   onActiveFileChange?: (path: string) => void;
@@ -461,6 +462,7 @@ const Editor: React.FC<EditorProps> = ({
   initialCodeFiles,
   initialCodeVersion,
   preferredActiveFilePath,
+  clearConsoleSignal,
   onCodeChange,
   onCodeFilesChange,
   onActiveFileChange,
@@ -1099,6 +1101,13 @@ const Editor: React.FC<EditorProps> = ({
       previewUrl: null,
     }));
   };
+
+  useEffect(() => {
+    if (!clearConsoleSignal) {
+      return;
+    }
+    handleClear();
+  }, [clearConsoleSignal]);
 
   const resetActiveEditor = () => {
     if (isWorkspaceSession) {

@@ -142,6 +142,7 @@ export interface AiQuestion {
   difficulty: string;
   difficultyLevel?: number | null;
   idealDurationMinutes: number;
+  referenceSolution?: string | null;
   expectedTimeComplexity?: string | null;
   expectedSpaceComplexity?: string | null;
   concepts: string[];
@@ -151,6 +152,26 @@ export interface AiQuestion {
 export interface AiQuestionSessionResponse {
   question: AiQuestion;
   session: SessionResponse;
+}
+
+export type AiQuestionComplexityDirection = 'INCREASE' | 'DECREASE';
+export type AiQuestionSectionMode = 'SAME' | 'CHANGE';
+
+export interface AiInterviewerQuestionDraftRequest {
+  complexityDirection?: AiQuestionComplexityDirection | null;
+  sectionMode?: AiQuestionSectionMode | null;
+  currentSection?: string | null;
+}
+
+export interface AiInterviewerQuestionDraftResponse {
+  draftId: string;
+  section?: string | null;
+  question: AiQuestion;
+}
+
+export interface AiInterviewerQuestionAcceptRequest {
+  activeFilePath?: string | null;
+  createNewTab?: boolean | null;
 }
 
 export interface AiSolutionEvaluation {

@@ -16,6 +16,7 @@
 - Monaco editor with Run/Reset, theme toggle, and `Ctrl+Enter` run shortcut.
 - Java/Python Guided Question Tabs with `Show` / `Freeze`, active-tab execution, and question-level run result preservation.
 - AI-generated Java/Python questions are validated before candidate visibility by running the hidden reference solution and its assertions in the sandbox.
+- Human-interviewer sessions can use an interviewer-only AI Assistant drawer to draft, review, regenerate, and accept validated questions without exposing the hidden reference solution to the candidate editor. The drawer also presents expected complexity and approximate solve-time guidance for the interviewer.
 - Angular/React editor builds use Warm Watcher Live Preview for fast feedback from persistent framework watchers while preserving strict final result builds.
 - Mandatory pre-interview identity capture for every session, independent of the selected live AV mode.
 - Configurable live AV mode at session creation, allowing the interviewer to choose either the built-in platform AV experience or an external channel such as Microsoft Teams or Zoom.

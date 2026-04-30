@@ -2,6 +2,7 @@ package com.altimetrik.interview.repository;
 
 import com.altimetrik.interview.entity.RunResult;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Optional;
@@ -15,5 +16,6 @@ public interface RunResultRepository extends JpaRepository<RunResult, String> {
 
     Optional<RunResult> findTopBySessionIdAndFilePathOrderByCompiledAtDesc(String sessionId, String filePath);
 
+    @Transactional
     long deleteBySessionIdAndFilePath(String sessionId, String filePath);
 }

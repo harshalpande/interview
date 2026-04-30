@@ -12,7 +12,7 @@
 
 .result-banner {
   display: grid;
-  grid-template-columns: repeat(5, minmax(160px, 1fr));
+  grid-template-columns: repeat(6, minmax(150px, 1fr));
   gap: 14px;
   margin-top: 16px;
 }
@@ -514,12 +514,37 @@
 }
 
 .question-result-card {
+  position: relative;
+  display: grid;
+  gap: 10px;
   border: 1px solid #d4e1eb;
   border-radius: 18px;
   background: #f8fbfd;
   padding: 14px 16px;
   color: #06294a;
   min-width: 0;
+}
+
+.question-result-card.is-compact {
+  align-content: center;
+  justify-items: center;
+  text-align: center;
+  font-size: 0.88rem;
+  line-height: 1.38;
+}
+
+.question-result-card.is-expandable {
+  align-content: start;
+  justify-items: stretch;
+  text-align: left;
+}
+
+.metric-card-heading,
+.metric-expanded-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
 }
 
 .question-result-card.metric-best {
@@ -561,17 +586,112 @@
   color: #54708a;
 }
 
+.metric-card-heading strong,
+.metric-expanded-heading strong {
+  margin-bottom: 0;
+}
+
+.metric-expand-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  border: 1px solid rgba(92, 118, 142, 0.18);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.7);
+  color: #365168;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.metric-collapse-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  min-height: 34px;
+  padding: 6px 11px;
+  border: 1px solid rgba(92, 118, 142, 0.18);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.8);
+  color: #365168;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
 .question-result-card pre {
   margin: 0;
   white-space: pre-wrap;
   overflow: auto;
   max-height: 180px;
   font-size: 0.86rem;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
+  line-height: 1.35;
+}
+
+.metric-expanded-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: grid;
+  place-items: center;
+  padding: 28px;
+  background: rgba(8, 24, 39, 0.42);
+  animation: metricBackdropIn 0.16s ease both;
+}
+
+.metric-expanded-card {
+  display: grid;
+  gap: 16px;
+  width: min(820px, 92vw);
+  max-height: min(720px, 86vh);
+  overflow: auto;
+  padding: 24px;
+  border: 1px solid #d5e2ec;
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 28px 64px rgba(16, 37, 66, 0.26);
+  animation: metricCardIn 0.18s ease both;
+}
+
+.metric-expanded-content {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.metric-expanded-content pre {
+  max-height: none;
+  overflow: visible;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+@keyframes metricBackdropIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes metricCardIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 .complexity-lines {
   display: grid;
   gap: 4px;
+  font-size: 0.8rem;
   line-height: 1.45;
 }
 

@@ -75,21 +75,19 @@ const StartInterview: React.FC = () => {
     startingDifficultyLevel: 1,
     maxQuestions: 5,
   });
+  const [registrationStep, setRegistrationStep] = useState<1 | 2>(1);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const targetRoleOptions = useMemo(() => TARGET_ROLES_BY_TECHNOLOGY[technology] || TARGET_ROLES_BY_TECHNOLOGY.JAVA, [technology]);
 
   useEffect(() => {
-    if (formData.interviewMode !== 'AI_INTERVIEWER') {
-      return;
-    }
     if (!formData.targetRole || !targetRoleOptions.includes(formData.targetRole)) {
       setFormData((previous) => ({
         ...previous,
         targetRole: targetRoleOptions[0] || '',
       }));
     }
-  }, [formData.interviewMode, formData.targetRole, targetRoleOptions]);
+  }, [formData.targetRole, targetRoleOptions]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     setFormData({
@@ -126,10 +124,10 @@ const StartInterview: React.FC = () => {
           interviewerEmail: interviewMode === 'AI_INTERVIEWER' ? 'ai-interviewer@interview.local' : formData.interviewerEmail,
           interviewerTimeZone: interviewMode === 'AI_INTERVIEWER' ? undefined : formData.interviewerTimeZone,
           avMode: interviewMode === 'AI_INTERVIEWER' ? 'EXTERNAL' : avMode,
-          yearsOfExperience: interviewMode === 'AI_INTERVIEWER' ? Number(formData.yearsOfExperience ?? 0) : undefined,
-          targetRole: interviewMode === 'AI_INTERVIEWER' ? formData.targetRole?.trim() : undefined,
-          startingDifficultyLevel: interviewMode === 'AI_INTERVIEWER' ? Number(formData.startingDifficultyLevel ?? 1) : undefined,
-          maxQuestions: interviewMode === 'AI_INTERVIEWER' ? Number(formData.maxQuestions ?? 5) : undefined,
+          yearsOfExperience: Number(formData.yearsOfExperience ?? 0),
+          targetRole: formData.targetRole?.trim(),
+          startingDifficultyLevel: Number(formData.startingDifficultyLevel ?? 1),
+          maxQuestions: Number(formData.maxQuestions ?? 5),
         };
         await sessionApi.createSession(request);
         await queryClient.invalidateQueries({ queryKey: ['sessions'] });
@@ -150,41 +148,51 @@ const StartInterview: React.FC = () => {
       <div className="page-card form-card">
       <div className="page-kicker">Register Interview</div>
       <h2>Register interview</h2>
-      <p className="page-subtitle">
-        This step creates the interview record only. The secure participant session flow will be started later from the dashboard.
-      </p>
       <form onSubmit={handleSubmit} className="stack-form start-interview-form" autoComplete="off">
         <input type="text" name="ghostUser" autoComplete="username" tabIndex={-1} aria-hidden="true" className="sr-only-input" />
         <input type="password" name="ghostPassword" autoComplete="new-password" tabIndex={-1} aria-hidden="true" className="sr-only-input" />
-        <div className="form-group form-group-full">
-          <label>Interview Mode</label>
-          <div className="av-mode-options" role="radiogroup" aria-label="Interview mode">
-            <label className={`av-mode-option ${formData.interviewMode === 'HUMAN_INTERVIEWER' ? 'selected' : ''}`}>
-              <input
-                type="radio"
-                name="interviewMode"
-                value="HUMAN_INTERVIEWER"
-                checked={formData.interviewMode === 'HUMAN_INTERVIEWER'}
-                onChange={() => handleInterviewModeChange('HUMAN_INTERVIEWER')}
-              />
-              <span className="av-mode-option-title">Human Interviewer</span>
-              <span className="av-mode-option-copy">Keep the existing two-participant workflow with interviewer-led questions and feedback.</span>
-            </label>
-            <label className={`av-mode-option ${formData.interviewMode === 'AI_INTERVIEWER' ? 'selected' : ''}`}>
-              <input
-                type="radio"
-                name="interviewMode"
-                value="AI_INTERVIEWER"
-                checked={formData.interviewMode === 'AI_INTERVIEWER'}
-                onChange={() => handleInterviewModeChange('AI_INTERVIEWER')}
-              />
-              <span className="av-mode-option-title">AI Interviewer</span>
-              <span className="av-mode-option-copy">Send candidate-only access and let the AI interviewer generate and evaluate questions.</span>
-            </label>
-          </div>
-        </div>
-        {formData.interviewMode !== 'AI_INTERVIEWER' ? (
+        {registrationStep === 1 ? (
           <>
+          <div className="registration-section form-group-full">
+            <div>
+              <span className="registration-section-kicker">Interview Attributes</span>
+              <h3>Mode and evaluation scope</h3>
+            </div>
+            <div className="registration-mode-layout">
+            <div className="mode-toggle-options" role="radiogroup" aria-label="Interview mode">
+              <label className={`av-mode-option ${formData.interviewMode === 'HUMAN_INTERVIEWER' ? 'selected' : ''}`}>
+                <input
+                  type="radio"
+                  name="interviewMode"
+                  value="HUMAN_INTERVIEWER"
+                  checked={formData.interviewMode === 'HUMAN_INTERVIEWER'}
+                  onChange={() => handleInterviewModeChange('HUMAN_INTERVIEWER')}
+                />
+                <span className="av-mode-option-title">Human Interview Mode</span>
+              </label>
+              <label className={`av-mode-option ${formData.interviewMode === 'AI_INTERVIEWER' ? 'selected' : ''}`}>
+                <input
+                  type="radio"
+                  name="interviewMode"
+                  value="AI_INTERVIEWER"
+                  checked={formData.interviewMode === 'AI_INTERVIEWER'}
+                  onChange={() => handleInterviewModeChange('AI_INTERVIEWER')}
+                />
+                <span className="av-mode-option-title">AI Interview Mode</span>
+              </label>
+            </div>
+            <div className="registration-mode-detail">
+              <strong>{modeDetailTitle(formData.interviewMode)}</strong>
+              <p>{modeDetailCopy(formData.interviewMode)}</p>
+            </div>
+            </div>
+          </div>
+          {formData.interviewMode !== 'AI_INTERVIEWER' ? (
+            <div className="registration-section form-group-full">
+              <div>
+                <span className="registration-section-kicker">Interviewer</span>
+                <h3>Human interviewer details</h3>
+              </div>
             <div className="form-group">
               <label htmlFor="interviewerName">Interviewer Name</label>
               <input id="interviewerName" name="interviewerName" autoComplete="off" value={formData.interviewerName} onChange={handleChange} required />
@@ -193,18 +201,21 @@ const StartInterview: React.FC = () => {
               <label htmlFor="interviewerEmail">Interviewer Email</label>
               <input id="interviewerEmail" name="interviewerEmail" type="email" autoComplete="new-password" inputMode="email" value={formData.interviewerEmail} onChange={handleChange} required />
             </div>
-          </>
-        ) : null}
-        <div className="form-group">
-          <label htmlFor="intervieweeName">Interviewee Name</label>
-          <input id="intervieweeName" name="intervieweeName" autoComplete="off" value={formData.intervieweeName} onChange={handleChange} required />
-        </div>
-        <div className="form-group">
-          <label htmlFor="intervieweeEmail">Interviewee Email</label>
-          <input id="intervieweeEmail" name="intervieweeEmail" type="email" autoComplete="new-password" inputMode="email" value={formData.intervieweeEmail} onChange={handleChange} required />
-        </div>
-        {formData.interviewMode === 'AI_INTERVIEWER' ? (
-          <>
+            </div>
+          ) : null}
+          <div className="registration-section form-group-full">
+            <div>
+              <span className="registration-section-kicker">Candidate</span>
+              <h3>Candidate profile</h3>
+            </div>
+            <div className="form-group">
+              <label htmlFor="intervieweeName">Interviewee Name</label>
+              <input id="intervieweeName" name="intervieweeName" autoComplete="off" value={formData.intervieweeName} onChange={handleChange} required />
+            </div>
+            <div className="form-group">
+              <label htmlFor="intervieweeEmail">Interviewee Email</label>
+              <input id="intervieweeEmail" name="intervieweeEmail" type="email" autoComplete="new-password" inputMode="email" value={formData.intervieweeEmail} onChange={handleChange} required />
+            </div>
             <div className="form-group">
               <label htmlFor="yearsOfExperience">Years of Experience</label>
               <input id="yearsOfExperience" name="yearsOfExperience" type="number" min="0" max="50" value={formData.yearsOfExperience ?? 0} onChange={handleChange} required />
@@ -231,11 +242,19 @@ const StartInterview: React.FC = () => {
               <label htmlFor="maxQuestions">Max Questions</label>
               <input id="maxQuestions" name="maxQuestions" type="number" min="1" max="5" value={formData.maxQuestions ?? 5} onChange={handleChange} required />
             </div>
+          </div>
+          <div className="start-interview-actions">
+            <Button type="button" onClick={() => setRegistrationStep(2)}>Continue</Button>
+          </div>
           </>
-        ) : null}
-        {formData.interviewMode !== 'AI_INTERVIEWER' ? (
-        <div className="form-group form-group-full">
-          <label>Interview AV Mode</label>
+        ) : (
+          <>
+          <div className="registration-section form-group-full">
+          <div>
+            <span className="registration-section-kicker">Session Setup</span>
+            <h3>Access and AV mode</h3>
+          </div>
+          {formData.interviewMode !== 'AI_INTERVIEWER' ? (
           <div className="av-mode-options" role="radiogroup" aria-label="Interview AV mode">
             <label className={`av-mode-option ${formData.avMode === 'EXTERNAL' ? 'selected' : ''}`}>
               <input
@@ -260,11 +279,22 @@ const StartInterview: React.FC = () => {
               <span className="av-mode-option-copy">Enable the built-in live audio and video panel during the interview session.</span>
             </label>
           </div>
-        </div>
-        ) : null}
+          ) : (
+            <p className="registration-review-copy">AI interviewer sessions use external AV controls and send candidate-only access.</p>
+          )}
+          <div className="registration-review">
+            <ReviewChip label="Mode" value={formData.interviewMode === 'AI_INTERVIEWER' ? 'AI Interview' : 'Human Interview'} />
+            <ReviewChip label="Candidate" value={formData.intervieweeName || 'Not entered'} />
+            <ReviewChip label="Target Role" value={formData.targetRole || 'Not selected'} />
+            <ReviewChip label="Difficulty" value={`Level ${formData.startingDifficultyLevel ?? 1}`} />
+          </div>
+          </div>
         <div className="start-interview-actions">
+          <Button type="button" variant="secondary" onClick={() => setRegistrationStep(1)}>Back</Button>
           <Button type="submit">Register</Button>
         </div>
+          </>
+        )}
       </form>
       </div>
     </div>
@@ -273,3 +303,22 @@ const StartInterview: React.FC = () => {
 
 export default StartInterview;
 
+function ReviewChip({ label, value }: { label: string; value: string }) {
+  return (
+    <span className="registration-review-chip">
+      <small>{label}</small>
+      <strong>{value}</strong>
+    </span>
+  );
+}
+
+function modeDetailTitle(mode?: InterviewMode) {
+  return mode === 'AI_INTERVIEWER' ? 'AI-led interview' : 'Human-led interview';
+}
+
+function modeDetailCopy(mode?: InterviewMode) {
+  if (mode === 'AI_INTERVIEWER') {
+    return 'The AI interviewer starts the coding flow, generates validated questions, evaluates submissions, and prepares an advisory recommendation for mandatory human review.';
+  }
+  return 'A human interviewer leads the conversation, controls question selection, and can optionally use the AI Assistant to draft validated questions and reference solutions.';
+}
