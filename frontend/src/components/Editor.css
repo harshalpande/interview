@@ -9,11 +9,24 @@
   box-shadow: var(--shadow);
 }
 
+.editor-container.editor-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  width: 100vw;
+  height: 100dvh;
+  min-height: 100dvh;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
 .editor-panel,
 .output-panel {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
 }
 
 .editor-header,
@@ -124,6 +137,11 @@
   flex: 1;
   min-height: 0;
   background: #0f2238;
+}
+
+.editor-fullscreen .editor-wrapper,
+.editor-fullscreen .output-panel {
+  min-height: 0;
 }
 
 .workspace-tabs-bar {
@@ -316,6 +334,10 @@
 
 .output-panel {
   background: #0f2238;
+  min-width: 320px;
+}
+
+.editor-fullscreen .output-panel {
   min-width: 320px;
 }
 

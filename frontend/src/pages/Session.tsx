@@ -429,6 +429,18 @@ const Session: React.FC = () => {
     }
   }, [isFullscreen]);
 
+  React.useEffect(() => {
+    if (!isFullscreen) {
+      return;
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [isFullscreen]);
+
   const recordActivityEvent = React.useCallback(
     async (eventType: ActivityEventType, detail: string, durationMs?: number) => {
       if (!sessionId || role !== 'interviewee' || session?.status !== 'ACTIVE') {
