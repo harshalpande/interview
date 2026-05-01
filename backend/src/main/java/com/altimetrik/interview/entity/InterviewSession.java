@@ -4,6 +4,7 @@ import com.altimetrik.interview.enums.SessionStatus;
 import com.altimetrik.interview.enums.TechnologySkill;
 import com.altimetrik.interview.enums.FeedbackRating;
 import com.altimetrik.interview.enums.InterviewMode;
+import com.altimetrik.interview.enums.EvaluationStyle;
 import com.altimetrik.interview.enums.ParticipantRole;
 import com.altimetrik.interview.enums.RecommendationDecision;
 import com.altimetrik.interview.enums.AvMode;
@@ -66,6 +67,9 @@ public class InterviewSession {
 
     @Enumerated(EnumType.STRING)
     private InterviewMode interviewMode = InterviewMode.HUMAN_INTERVIEWER;
+
+    @Enumerated(EnumType.STRING)
+    private EvaluationStyle evaluationStyle = EvaluationStyle.STANDARD_MULTIPLE_QUESTIONS;
 
     private Integer yearsOfExperience;
 

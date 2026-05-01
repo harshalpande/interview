@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import MonacoEditor from '@monaco-editor/react';
 import { ExecuteRequest, ExecuteResponse, ExecutionLanguage } from '../types/api';
-import type { EditableCodeFile } from '../types/session';
+import type { EditableCodeFile, EvaluationStyle } from '../types/session';
 import ResizeHandle from './ResizeHandle';
 import { compilerApi } from '../services/api';
 import './Editor.css';
@@ -16,7 +16,7 @@ public class Solution {
 
     public static void main(String[] args) {
         Assert.assertEquals(5, add(2, 3));
-        System.out.println("All assertions passed");
+        System.out.println("All Assertions are completed");
     }
 }`;
 
@@ -430,6 +430,7 @@ interface EditorProps {
   sessionId?: string;
   executionLanguage?: ExecutionLanguage;
   participantRole?: 'interviewer' | 'interviewee' | null;
+  evaluationStyle?: EvaluationStyle | null;
   readOnly?: boolean;
   initialCode?: string;
   initialCodeFiles?: EditableCodeFile[];
@@ -457,6 +458,7 @@ const Editor: React.FC<EditorProps> = ({
   sessionId,
   executionLanguage = 'JAVA',
   participantRole,
+  evaluationStyle,
   readOnly = false,
   initialCode,
   initialCodeFiles,
@@ -482,6 +484,7 @@ const Editor: React.FC<EditorProps> = ({
   const isFrontendWorkspace = executionLanguage === 'ANGULAR' || executionLanguage === 'REACT';
   const isGuidedQuestionWorkspace = executionLanguage === 'JAVA' || executionLanguage === 'PYTHON';
   const isWorkspaceSession = isFrontendWorkspace || isGuidedQuestionWorkspace;
+  const isBanyanStyle = evaluationStyle === 'BANYAN';
   const canManageQuestionTabs = participantRole === 'interviewer' && isGuidedQuestionWorkspace && !readOnly;
   const canCreateWorkspaceFiles = isFrontendWorkspace ? !readOnly : canManageQuestionTabs;
   const canDeleteWorkspaceFiles = isFrontendWorkspace && !readOnly;
@@ -614,10 +617,10 @@ const Editor: React.FC<EditorProps> = ({
   }, [dirtyWorkspacePaths]);
 
   const visibleWorkspaceFiles = useMemo(
-    () => isGuidedQuestionWorkspace && participantRole === 'interviewee'
+    () => isGuidedQuestionWorkspace && (participantRole === 'interviewee' || isBanyanStyle)
       ? workspaceFiles.filter((file) => file.enabledForCandidate !== false)
       : workspaceFiles,
-    [isGuidedQuestionWorkspace, participantRole, workspaceFiles]
+    [isBanyanStyle, isGuidedQuestionWorkspace, participantRole, workspaceFiles]
   );
 
   useEffect(() => {
@@ -1048,12 +1051,16 @@ const Editor: React.FC<EditorProps> = ({
     }
 
     const hasChangedAfterRun = activeAngularFile.runResult && activeAngularFile.changedAfterLastRun;
+    const changedAfterRunMessage = isBanyanStyle
+      ? 'This Banyan level has changes that were not run after the last edit. Submitting will still preserve it permanently; failing validation ends the challenge for evaluation.'
+      : 'This solution has changes that were not run after the last edit. Freezing will submit this answer permanently and move to the next prepared question if one exists.';
+    const freezeMessage = isBanyanStyle
+      ? 'Submitting will preserve this Banyan level permanently. If validation passes, the same challenge can grow to the next level; if validation fails, progression ends for evaluation. This action cannot be undone.'
+      : 'Freezing will submit this answer permanently and move to the next prepared question if one exists. This action cannot be undone.';
     setConfirmationModal({
-      title: 'Freeze solution?',
-      message: hasChangedAfterRun
-        ? 'This solution has changes that were not run after the last edit. Freezing will submit this answer permanently and move to the next prepared question if one exists.'
-        : 'Freezing will submit this answer permanently and move to the next prepared question if one exists. This action cannot be undone.',
-      confirmLabel: 'Freeze',
+      title: isBanyanStyle ? 'Submit Banyan level?' : 'Freeze solution?',
+      message: hasChangedAfterRun ? changedAfterRunMessage : freezeMessage,
+      confirmLabel: isBanyanStyle ? 'Submit' : 'Freeze',
       tone: 'danger',
       onConfirm: () => {
         setConfirmationModal(null);
@@ -1399,15 +1406,15 @@ const Editor: React.FC<EditorProps> = ({
                       <span
                         className="workspace-tab-action"
                         role="button"
-                        aria-label={`Freeze ${file.displayName}`}
-                        title="Freeze this solution and submit it for review"
+                        aria-label={`${isBanyanStyle ? 'Submit' : 'Freeze'} ${file.displayName}`}
+                        title={isBanyanStyle ? 'Submit this Banyan level for validation' : 'Freeze this solution and submit it for review'}
                         onClick={(event) => {
                           event.preventDefault();
                           event.stopPropagation();
                           handleFreezeQuestion();
                         }}
                       >
-                        Freeze
+                        {isBanyanStyle ? 'Submit' : 'Freeze'}
                       </span>
                     ) : null}
                     {((isGuidedQuestionWorkspace && canManageQuestionTabs && isPreparedGuidedQuestionTab(file))

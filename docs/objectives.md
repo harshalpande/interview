@@ -16,6 +16,7 @@
 - Monaco editor with Run/Reset, theme toggle, and `Ctrl+Enter` run shortcut.
 - Java/Python Guided Question Tabs with `Show` / `Freeze`, active-tab execution, and question-level run result preservation.
 - AI-generated Java/Python questions are validated before candidate visibility by running the hidden reference solution and its assertions in the sandbox.
+- Banyan Style adds a single evolving Java/Python challenge option where each passed level unlocks a stricter extension of the same problem, while failed frozen levels stop progression and move the interview to evaluation.
 - Human-interviewer sessions can use an interviewer-only AI Assistant drawer to draft, review, regenerate, and accept validated questions without exposing the hidden reference solution to the candidate editor. The drawer also presents expected complexity and approximate solve-time guidance for the interviewer.
 - Angular/React editor builds use Warm Watcher Live Preview for fast feedback from persistent framework watchers while preserving strict final result builds.
 - Mandatory pre-interview identity capture for every session, independent of the selected live AV mode.
@@ -38,7 +39,8 @@
 
 ## Shortcomings / Limitations
 
-- Java/Python question tabs are independent active-tab executions.
+- Standard Java/Python question tabs are independent active-tab executions.
+  - Banyan Style is the exception: it is one evolving challenge with level snapshots preserved for result evidence.
   - Full multi-file Java/Python project mode and external dependencies are not supported.
 - Guided question visibility/submission state is intentionally stored as normal tab metadata rather than database enums, reducing H2 enum drift risk during local/Docker development.
 - Sandbox is “best effort” (process + limits), not a hardened container sandbox.

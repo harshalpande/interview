@@ -6,6 +6,7 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 import com.altimetrik.interview.enums.AvMode;
+import com.altimetrik.interview.enums.EvaluationStyle;
 import com.altimetrik.interview.enums.InterviewMode;
 import com.altimetrik.interview.enums.TechnologySkill;
 
@@ -28,6 +29,8 @@ public class CreateSessionRequest {
     private TechnologySkill technology;
 
     private InterviewMode interviewMode;
+
+    private EvaluationStyle evaluationStyle;
 
     private Integer yearsOfExperience;
 

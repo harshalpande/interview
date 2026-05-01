@@ -2,6 +2,7 @@ package com.altimetrik.interview.dto;
 
 import com.altimetrik.interview.enums.SessionStatus;
 import com.altimetrik.interview.enums.TechnologySkill;
+import com.altimetrik.interview.enums.EvaluationStyle;
 import com.altimetrik.interview.enums.InterviewMode;
 import com.altimetrik.interview.enums.ParticipantRole;
 import com.altimetrik.interview.enums.AvMode;
@@ -17,6 +18,7 @@ public class SessionResponse {
     private String id;
     private TechnologySkill technology;
     private InterviewMode interviewMode;
+    private EvaluationStyle evaluationStyle;
     private Integer yearsOfExperience;
     private String targetRole;
     private Integer startingDifficultyLevel;

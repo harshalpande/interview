@@ -956,6 +956,9 @@ function formatOptionalLabel(value?: string | null) {
 }
 
 function resultCodeTabLabel(technology: string, file: EditableCodeFile, index: number) {
+  if (file.displayName?.toLowerCase().includes('banyan')) {
+    return file.displayName;
+  }
   if (technology === 'JAVA' || technology === 'PYTHON') {
     return `Question ${guidedQuestionNumber(file.path, index + 1)}`;
   }

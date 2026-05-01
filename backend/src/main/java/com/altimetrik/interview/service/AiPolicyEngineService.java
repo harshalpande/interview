@@ -2,6 +2,7 @@ package com.altimetrik.interview.service;
 
 import com.altimetrik.interview.dto.EditableCodeFileDto;
 import com.altimetrik.interview.entity.InterviewSession;
+import com.altimetrik.interview.enums.EvaluationStyle;
 import com.altimetrik.interview.enums.TechnologySkill;
 import org.springframework.stereotype.Service;
 
@@ -28,10 +29,14 @@ public class AiPolicyEngineService {
         int idealDurationMinutes = idealDurationMinutes(difficultyLevel, timeRemainingSeconds, session.getYearsOfExperience());
         String sandboxRules = sandboxRules(technology);
         String rubric = evaluationRubric(session, difficultyLevel);
+        String styleGuidance = session.getEvaluationStyle() == EvaluationStyle.BANYAN
+                ? "Evaluation style: Banyan Style. Generate one evolving challenge level in the same single file. Level 1 seeds a growable problem. Level 2+ must extend the same domain/classes/methods and include all previous requirements and validation expectations plus new assertions. Do not generate a separate or unrelated question."
+                : "Evaluation style: Standard Multiple Questions. Generate a standalone independent question.";
 
         String questionPolicy = """
                 Policy source: backend Question Policy/Rubric Engine v1.
                 Generate exactly one sandbox-ready question for %s, target role %s, experience %s year(s), difficulty level %d.
+                %s
                 Target concept coverage: %s.
                 Avoid repeated concepts/problem shapes: %s.
                 Required question elements: %s.
@@ -46,6 +51,7 @@ public class AiPolicyEngineService {
                 valueOrDefault(session.getTargetRole(), "unspecified"),
                 session.getYearsOfExperience() == null ? "unspecified" : session.getYearsOfExperience(),
                 difficultyLevel,
+                styleGuidance,
                 String.join(", ", targetConcepts),
                 avoidConcepts.isEmpty() ? "none captured" : String.join(", ", avoidConcepts),
                 String.join(", ", requiredElements),
@@ -84,7 +90,16 @@ public class AiPolicyEngineService {
                 Expected concepts: %s.
                 Non-negotiable checks: %s.
                 Treat execution attempts as a confidence signal only; this editor does not provide debugger support.
-                """.formatted(technology.name(), difficultyLevel, String.join(", ", concepts), String.join(", ", nonNegotiables));
+                %s
+                """.formatted(
+                technology.name(),
+                difficultyLevel,
+                String.join(", ", concepts),
+                String.join(", ", nonNegotiables),
+                session.getEvaluationStyle() == EvaluationStyle.BANYAN
+                        ? "Banyan evaluation: score the submitted level as part of one evolving challenge. Do not treat it as an unrelated separate question; verify previous requirements and new assertions still pass."
+                        : "Standard evaluation: score this question independently."
+        );
         return new EvaluationPolicy(questionPolicy, evaluationRubric(session, difficultyLevel), concepts, nonNegotiables);
     }
 

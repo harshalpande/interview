@@ -5,6 +5,7 @@ import java.util.List;
 public record AiQuestionGenerationRequest(
         String sessionId,
         String technology,
+        String evaluationStyle,
         Integer yearsOfExperience,
         String targetRole,
         String startingDifficulty,
@@ -14,6 +15,8 @@ public record AiQuestionGenerationRequest(
         Long timeRemainingSeconds,
         String variationSeed,
         Integer idealDurationMinutes,
+        Integer banyanLevel,
+        String previousBanyanChallenge,
         String questionPolicy,
         String evaluationRubric,
         List<String> targetConcepts,

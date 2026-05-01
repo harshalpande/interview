@@ -107,12 +107,21 @@ public class AiInterviewService {
                 Generate one practical coding question that can run in the platform sandbox.
                 Treat questionPolicy, requiredQuestionElements, forbiddenCapabilities, targetConcepts, evaluationRubric, and sandboxRules from the request as authoritative backend rules.
                 Respect the supplied technology, experience, target role, numeric difficulty level, ideal duration, time left, previous concepts, previous question history, variationSeed, and sandbox rules.
+                If evaluationStyle is BANYAN, generate an evolving single-challenge level, not a new independent question.
+                For BANYAN level 1, create a base problem that can naturally grow through later requirements, preferably with a small existing class/model and one bug or missing method.
+                For BANYAN level 2 or above, previousBanyanChallenge is authoritative context. Extend the exact same business domain, classes, method names, data model, and candidate implementation shape with one additional requirement.
+                For BANYAN level 2 or above, starterCode must preserve all previous problem statements, all previous validation assertions, and the candidate's existing accepted code as much as possible. Add the new requirement below the previous requirements and append only the new validation assertions.
+                For BANYAN, never switch to an unrelated problem, unrelated function name, unrelated class model, or separate tab/question concept. The filePath should remain Banyan.java for Java or banyan.py for Python.
+                For BANYAN, displayName should be "Banyan Level N", title should mention the evolving challenge, and starterCode must contain all accumulated level requirements visible in comments plus all accumulated assertions.
+                For all technologies, problemStatement must be plain text only. Do not wrap problemStatement in Java block comments, Python triple-quoted strings, or any other language comment delimiter.
+                If starterCode includes a problem statement comment, include it only once. Do not duplicate the same problem statement in both nested comment blocks.
                 Use variationSeed to choose a fresh problem shape; avoid common default prompts when another valid sandbox-ready question would fit.
-                Do not repeat any previous question title, problem statement, function name, or core concept supplied in the request.
+                For non-BANYAN requests, do not repeat any previous question title, problem statement, function name, or core concept supplied in the request.
                 Difficulty is a 1 to 5 scale: 1 is basic screening, 3 is solid working knowledge, 5 is advanced/expert.
                 Avoid file IO, network IO, databases, external services, unsupported dependencies, or tasks that cannot execute in the sandbox.
                 For Java, use Java 17 and a single public class Main only if starter code needs a runnable class.
                 For Java, starterCode must include runnable tests using org.junit.Assert from main; do not use any other test framework.
+                For Java, starterCode and referenceSolution must print System.out.println("All Assertions are completed"); after all validation assertions pass.
                 For Java, referenceSolution must be a complete runnable public class Main containing the full implementation and the same org.junit.Assert checks from starterCode.
                 For Python, use standard library only.
                 For Python, starterCode must include runnable assert statements from main or an equivalent function.

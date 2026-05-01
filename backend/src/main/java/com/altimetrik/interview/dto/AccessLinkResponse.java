@@ -1,6 +1,7 @@
 package com.altimetrik.interview.dto;
 
 import com.altimetrik.interview.enums.AvMode;
+import com.altimetrik.interview.enums.EvaluationStyle;
 import com.altimetrik.interview.enums.ParticipantAccessStatus;
 import com.altimetrik.interview.enums.ParticipantRole;
 import com.altimetrik.interview.enums.SessionStatus;
@@ -17,6 +18,7 @@ public class AccessLinkResponse {
     private String participantName;
     private String participantEmail;
     private AvMode avMode;
+    private EvaluationStyle evaluationStyle;
     private SessionStatus sessionStatus;
     private ParticipantAccessStatus accessStatus;
     private OffsetDateTime otpExpiresAt;

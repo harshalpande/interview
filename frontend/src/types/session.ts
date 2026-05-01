@@ -23,6 +23,7 @@ export type ActivityEventType =
   | 'MULTIPLE_FACES_DETECTED';
 export type TechnologySkill = 'JAVA' | 'PYTHON' | 'ANGULAR' | 'REACT' | 'SQL';
 export type InterviewMode = 'HUMAN_INTERVIEWER' | 'AI_INTERVIEWER';
+export type EvaluationStyle = 'STANDARD_MULTIPLE_QUESTIONS' | 'BANYAN';
 export type RecommendationDecision = 'YES' | 'NO' | 'REEVALUATION';
 export type IdentityCaptureStatus = 'PENDING' | 'SUCCESS' | 'FAILED' | 'SKIPPED';
 export type IdentityCaptureFailureReason = 'NO_CAMERA' | 'PERMISSION_DENIED' | 'CAMERA_IN_USE' | 'UNSUPPORTED' | 'DEVICE_ERROR' | 'USER_SKIPPED' | 'UNKNOWN';
@@ -206,6 +207,7 @@ export interface SessionResponse {
   id: string;
   technology: TechnologySkill;
   interviewMode?: InterviewMode | null;
+  evaluationStyle?: EvaluationStyle | null;
   yearsOfExperience?: number | null;
   targetRole?: string | null;
   startingDifficultyLevel?: number | null;
@@ -274,6 +276,7 @@ export interface CreateSessionRequest {
   technology: TechnologySkill;
   avMode: AvMode;
   interviewMode?: InterviewMode;
+  evaluationStyle?: EvaluationStyle;
   yearsOfExperience?: number | null;
   targetRole?: string | null;
   startingDifficultyLevel?: number | null;
@@ -290,6 +293,7 @@ export interface AccessLinkResponse {
   participantName: string;
   participantEmail: string;
   avMode: AvMode;
+  evaluationStyle?: EvaluationStyle | null;
   sessionStatus: SessionStatus;
   accessStatus: ParticipantAccessStatus;
   otpExpiresAt?: string | null;

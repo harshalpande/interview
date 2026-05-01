@@ -46,7 +46,8 @@ const HumanAiAssistantDrawer: React.FC<HumanAiAssistantDrawerProps> = ({
   const [previousAcceptedMeta, setPreviousAcceptedMeta] = React.useState<QuestionMeta | null>(null);
   const currentSection = draft?.section || draft?.question.concepts?.[0] || '';
   const candidateName = session.participants.find((participant) => participant.role === 'INTERVIEWEE')?.name || 'the candidate';
-  const shouldCreateNewTab = Boolean(activeFile?.submitted || activeFile?.editable === false);
+  const isBanyanStyle = session.evaluationStyle === 'BANYAN';
+  const shouldCreateNewTab = !isBanyanStyle && Boolean(activeFile?.submitted || activeFile?.editable === false);
   const isBusy = status === 'generating' || status === 'accepting';
 
   const generateDraft = async (mode: 'fresh' | 'regenerate' = 'fresh') => {
@@ -123,7 +124,7 @@ const HumanAiAssistantDrawer: React.FC<HumanAiAssistantDrawerProps> = ({
           {!draft ? (
             <div className="human-ai-assistant-actions human-ai-primary-action">
               <button type="button" className="control-btn btn-start" onClick={() => generateDraft()} disabled={status !== 'idle'}>
-                {status === 'generating' ? 'Generating...' : 'Generate Question'}
+                {status === 'generating' ? 'Generating...' : isBanyanStyle && previousAcceptedMeta ? 'Generate Next Level' : 'Generate Question'}
               </button>
             </div>
           ) : null}
@@ -137,7 +138,7 @@ const HumanAiAssistantDrawer: React.FC<HumanAiAssistantDrawerProps> = ({
                 {previousAcceptedMeta ? <span>Previous: {previousAcceptedMeta.level}, {previousAcceptedMeta.section}</span> : null}
               </div>
               <div className="human-ai-draft-tabs" role="tablist" aria-label="AI draft details">
-                <button type="button" className={activeDraftTab === 'question' ? 'is-active' : ''} onClick={() => setActiveDraftTab('question')}>Question</button>
+                <button type="button" className={activeDraftTab === 'question' ? 'is-active' : ''} onClick={() => setActiveDraftTab('question')}>{isBanyanStyle ? 'Level' : 'Question'}</button>
                 <button type="button" className={activeDraftTab === 'solution' ? 'is-active' : ''} onClick={() => setActiveDraftTab('solution')}>Solution</button>
                 <button type="button" className={activeDraftTab === 'complexity' ? 'is-active' : ''} onClick={() => setActiveDraftTab('complexity')}>Complexity</button>
                 <button type="button" className={activeDraftTab === 'time' ? 'is-active' : ''} onClick={() => setActiveDraftTab('time')}>Solve Time</button>
@@ -190,9 +191,11 @@ const HumanAiAssistantDrawer: React.FC<HumanAiAssistantDrawerProps> = ({
       {confirmAccept && draft ? (
         <div className="workspace-modal-backdrop human-ai-confirm-backdrop" role="presentation" onClick={() => setConfirmAccept(false)}>
           <div className="workspace-modal confirmation-modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
-            <h3>Accept AI question?</h3>
+            <h3>{isBanyanStyle ? 'Accept Banyan level?' : 'Accept AI question?'}</h3>
             <p className="workspace-modal-copy">
-              {shouldCreateNewTab
+              {isBanyanStyle
+                ? 'The same Banyan working tab will be updated with this next level. The reference solution will stay hidden from the editor.'
+                : shouldCreateNewTab
                 ? 'The active tab is already submitted or read-only. A new question tab will be created for this question.'
                 : 'The active tab content will be replaced with this question. The reference solution will stay hidden from the editor.'}
             </p>

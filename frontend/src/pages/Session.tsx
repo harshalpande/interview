@@ -141,6 +141,7 @@ const Session: React.FC = () => {
   const isGuidedQuestionSession = session?.technology === 'JAVA' || session?.technology === 'PYTHON';
   const isCodeWorkspaceSession = isFrontendWorkspaceSession || isGuidedQuestionSession;
   const isAiInterviewSession = session?.interviewMode === 'AI_INTERVIEWER';
+  const isBanyanStyleSession = session?.evaluationStyle === 'BANYAN';
   const isHumanInterviewSession = session?.interviewMode !== 'AI_INTERVIEWER';
   const isInAppAvSession = session?.avMode === 'IN_APP';
   const intervieweeName = interviewee?.name?.trim() || 'Interviewee';
@@ -694,6 +695,7 @@ const Session: React.FC = () => {
         frozenFilePath,
         files: summarizeAiQuestionFiles(files),
       });
+      let savedSessionAfterFreeze: SessionResponse | null = null;
       try {
         setAiQuestionProgressStage('saving');
         const latestCode = resolvePrimaryCodeFromFiles(session.technology, files);
@@ -717,6 +719,7 @@ const Session: React.FC = () => {
           files: summarizeAiQuestionFiles(savedSession.codeFiles || []),
         });
         refreshSession(savedSession);
+        savedSessionAfterFreeze = savedSession;
       } catch (saveError) {
         setAiQuestionProgressStage('idle');
         logAiQuestionFlow('saving frozen answer failed', {
@@ -747,6 +750,32 @@ const Session: React.FC = () => {
         }
       }
 
+      if (isBanyanStyleSession) {
+        const persistedFrozenFile = savedSessionAfterFreeze?.codeFiles?.find((file) => file.path === frozenFilePath);
+        if (!persistedFrozenFile?.runResult || persistedFrozenFile.runResult.exitStatus !== 0) {
+          try {
+            setAiQuestionProgressStage('ready');
+            logAiQuestionFlow('Banyan level failed; ending interview without next level', {
+              sessionId,
+              frozenFilePath,
+              exitStatus: persistedFrozenFile?.runResult?.exitStatus ?? null,
+            });
+            const endedSession = await sessionApi.endSession(sessionId, {
+              finalCode: resolvePrimaryCodeFromFiles(session.technology, savedSessionAfterFreeze?.codeFiles || files),
+              codeFiles: savedSessionAfterFreeze?.codeFiles || files,
+              activeFilePath: frozenFilePath,
+            });
+            refreshSession(endedSession);
+            pushSessionToast('Banyan level did not pass. The interview has ended for final evaluation.', 'warning');
+          } catch (endError) {
+            pushSessionToast(`Unable to end Banyan interview: ${mutationErrorMessage(endError)}`, 'warning');
+          } finally {
+            window.setTimeout(() => setAiQuestionProgressStage('idle'), 500);
+          }
+          return;
+        }
+      }
+
       if (!isAiInterviewSession) {
         const refreshed = await sessionApi.getSession(sessionId);
         refreshSession(refreshed);
@@ -754,7 +783,7 @@ const Session: React.FC = () => {
         return;
       }
 
-      const submittedAiQuestionCount = files.filter((file) => file.submitted && isManagedAiQuestionFile(file)).length;
+      const submittedAiQuestionCount = (savedSessionAfterFreeze?.codeFiles || files).filter((file) => file.submitted && isManagedAiQuestionFile(file)).length;
       const maxQuestions = session.maxQuestions ?? 5;
       if (submittedAiQuestionCount >= maxQuestions || (timeLeft ?? session.remainingSec) <= 0) {
         const refreshed = await sessionApi.getSession(sessionId);
@@ -766,6 +795,7 @@ const Session: React.FC = () => {
           files: summarizeAiQuestionFiles(refreshed.codeFiles || []),
         });
         refreshSession(refreshed);
+        setAiQuestionProgressStage('idle');
         return;
       }
 
@@ -813,7 +843,7 @@ const Session: React.FC = () => {
         window.setTimeout(() => setAiQuestionProgressStage('idle'), 500);
       }
     },
-    [isAiInterviewSession, refreshSession, reserveNextCodeVersion, role, session, sessionId, pushSessionToast, timeLeft, wsRole]
+    [isAiInterviewSession, isBanyanStyleSession, refreshSession, reserveNextCodeVersion, role, session, sessionId, pushSessionToast, timeLeft, wsRole]
   );
 
   React.useEffect(() => {
@@ -1241,6 +1271,7 @@ const Session: React.FC = () => {
         <PreStartGuidanceOverlay
           role={role}
           technology={session.technology}
+          evaluationStyle={session.evaluationStyle}
           onAcknowledge={handleAcknowledgePreStartGuide}
         />
       )}
@@ -1447,6 +1478,7 @@ const Session: React.FC = () => {
             <AiQuestionProgressPanel
               stage={aiQuestionProgressStage}
               firstQuestion={!hasManagedAiQuestion}
+              banyanStyle={isBanyanStyleSession}
             />
           ) : null}
 
@@ -1454,6 +1486,7 @@ const Session: React.FC = () => {
             <Editor
             sessionId={sessionId}
             participantRole={role}
+            evaluationStyle={session.evaluationStyle}
             executionLanguage={
               session.technology === 'PYTHON'
                 ? 'PYTHON'
@@ -1568,7 +1601,7 @@ const Session: React.FC = () => {
             {isInterviewer
               ? session.suspiciousRejected
                 ? `The application prefilled rejection feedback because the candidate triggered a suspicious resume rule. Review it and submit to finish the session.${session.suspiciousActivityReason ? ` Reason: ${session.suspiciousActivityReason}` : ''}`
-                : 'The editor has been frozen, final code/output have been saved, and your feedback is required before returning to the dashboard.'
+                : 'The editor is locked, final code/output have been saved, and your feedback is required before returning to the dashboard.'
               : session.suspiciousRejected
                 ? `${session.suspiciousActivityReason || 'This interview session could not be recovered within the allowed integrity controls.'} You will be redirected shortly.${typeof closeCountdown === 'number' ? ` This page will close in ${closeCountdown}.` : ''}`
                 : session.summary === 'INCOMPLETE'
@@ -1721,16 +1754,19 @@ const Session: React.FC = () => {
 function PreStartGuidanceOverlay({
   role,
   technology,
+  evaluationStyle,
   onAcknowledge,
 }: {
   role: 'interviewer' | 'interviewee';
   technology: SessionResponse['technology'];
+  evaluationStyle?: SessionResponse['evaluationStyle'];
   onAcknowledge: () => void;
 }) {
   const isInterviewer = role === 'interviewer';
   const isGuidedQuestionSession = technology === 'JAVA' || technology === 'PYTHON';
   const isFrontendWorkspaceSession = technology === 'ANGULAR' || technology === 'REACT';
-  const guidanceItems = buildPreStartGuidanceItems(role, technology);
+  const isBanyanStyle = evaluationStyle === 'BANYAN';
+  const guidanceItems = buildPreStartGuidanceItems(role, technology, evaluationStyle);
 
   return (
     <div className="prestart-guide-backdrop" role="presentation">
@@ -1756,7 +1792,9 @@ function PreStartGuidanceOverlay({
           ))}
         </div>
         <div className="prestart-guide-note">
-          {isGuidedQuestionSession
+          {isGuidedQuestionSession && isBanyanStyle
+            ? 'Banyan Style uses one evolving challenge; each successful Submit unlocks the next level, while a failed submitted level ends progression for evaluation.'
+            : isGuidedQuestionSession
             ? 'Java/Python questions are revealed one at a time; submitted tabs stay read-only.'
             : isFrontendWorkspaceSession
               ? 'Frontend workspaces build the current saved files and show output or preview on the right.'
@@ -1770,10 +1808,15 @@ function PreStartGuidanceOverlay({
   );
 }
 
-function buildPreStartGuidanceItems(role: 'interviewer' | 'interviewee', technology: SessionResponse['technology']) {
+function buildPreStartGuidanceItems(
+  role: 'interviewer' | 'interviewee',
+  technology: SessionResponse['technology'],
+  evaluationStyle?: SessionResponse['evaluationStyle']
+) {
   const isInterviewer = role === 'interviewer';
   const isGuidedQuestionSession = technology === 'JAVA' || technology === 'PYTHON';
   const isFrontendWorkspaceSession = technology === 'ANGULAR' || technology === 'REACT';
+  const isBanyanStyle = evaluationStyle === 'BANYAN';
   const runLabel = isFrontendWorkspaceSession ? 'Build' : isGuidedQuestionSession ? 'Run Active Tab' : 'Run';
   const runDescription = isFrontendWorkspaceSession
     ? 'Builds the workspace and refreshes output/preview. Shortcut: Ctrl + Enter.'
@@ -1809,7 +1852,12 @@ function buildPreStartGuidanceItems(role: 'interviewer' | 'interviewee', technol
     }
   } else if (isGuidedQuestionSession) {
     items.push(
-      { label: 'Freeze', description: 'Submits the active solution permanently and opens the next prepared question when one exists.' },
+      {
+        label: isBanyanStyle ? 'Submit' : 'Freeze',
+        description: isBanyanStyle
+          ? 'Submits the current Banyan level permanently. Passing unlocks the next level; failing ends progression for evaluation.'
+          : 'Submits the active solution permanently and opens the next prepared question when one exists.',
+      },
       { label: 'Submitted', description: 'Marks completed question tabs that can be reviewed but not edited.' }
     );
   }
@@ -1826,19 +1874,21 @@ export default Session;
 function AiQuestionProgressPanel({
   stage,
   firstQuestion,
+  banyanStyle,
 }: {
   stage: AiQuestionProgressStage;
   firstQuestion: boolean;
+  banyanStyle: boolean;
 }) {
   const normalizedStage = stage === 'idle' ? 'generating' : stage;
-  const steps = aiQuestionProgressSteps(firstQuestion);
+  const steps = aiQuestionProgressSteps(firstQuestion, banyanStyle);
   const activeIndex = Math.max(0, steps.findIndex((step) => step.stage === normalizedStage));
   const activeStep = steps[activeIndex] || steps[0];
 
   return (
     <div className="ai-question-progress-panel" role="status" aria-live="polite">
       <div className="ai-question-progress-copy">
-        <span className="ai-question-progress-kicker">{firstQuestion ? 'AI interviewer' : 'Next question'}</span>
+        <span className="ai-question-progress-kicker">{banyanStyle ? 'Banyan Style' : firstQuestion ? 'AI interviewer' : 'Next question'}</span>
         <h3 key={activeStep.stage}>{activeStep.title}</h3>
         <p key={`${activeStep.stage}-copy`}>{activeStep.description}</p>
       </div>
@@ -1863,12 +1913,12 @@ function AiQuestionProgressPanel({
   );
 }
 
-function aiQuestionProgressSteps(firstQuestion: boolean) {
+function aiQuestionProgressSteps(firstQuestion: boolean, banyanStyle: boolean) {
   return [
     ...(firstQuestion ? [] : [{
       stage: 'saving' as const,
       shortLabel: 'Save',
-      title: 'Saving your frozen answer',
+      title: banyanStyle ? 'Saving submitted level' : 'Saving your frozen answer',
       description: 'Your submitted solution and captured run evidence are being preserved.',
     }, {
       stage: 'evaluating' as const,
@@ -1879,8 +1929,12 @@ function aiQuestionProgressSteps(firstQuestion: boolean) {
     {
       stage: 'generating' as const,
       shortLabel: 'Generate',
-      title: firstQuestion ? 'Preparing your first question' : 'Generating the next question',
-      description: 'A fresh sandbox-ready problem is being created from the interview metadata.',
+      title: banyanStyle
+        ? firstQuestion ? 'Preparing Banyan Level 1' : 'Growing the next Banyan level'
+        : firstQuestion ? 'Preparing your first question' : 'Generating the next question',
+      description: banyanStyle
+        ? 'The challenge is being extended with the next requirement and validation checks.'
+        : 'A fresh sandbox-ready problem is being created from the interview metadata.',
     },
     {
       stage: 'validating' as const,
@@ -1891,8 +1945,10 @@ function aiQuestionProgressSteps(firstQuestion: boolean) {
     {
       stage: 'ready' as const,
       shortLabel: 'Ready',
-      title: 'Question ready',
-      description: 'The editor is being unlocked with the verified question.',
+      title: banyanStyle ? 'Banyan level ready' : 'Question ready',
+      description: banyanStyle
+        ? 'The editor is being unlocked with the next verified level.'
+        : 'The editor is being unlocked with the verified question.',
     },
   ];
 }

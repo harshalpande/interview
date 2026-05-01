@@ -14,6 +14,7 @@ import java.util.List;
 public class AiQuestionGenerationRequest {
     private String sessionId;
     private String technology;
+    private String evaluationStyle;
     private Integer yearsOfExperience;
     private String targetRole;
     private String startingDifficulty;
@@ -23,6 +24,8 @@ public class AiQuestionGenerationRequest {
     private Long timeRemainingSeconds;
     private String variationSeed;
     private Integer idealDurationMinutes;
+    private Integer banyanLevel;
+    private String previousBanyanChallenge;
     private String questionPolicy;
     private String evaluationRubric;
     private List<String> targetConcepts;

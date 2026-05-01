@@ -207,7 +207,7 @@ const AccessEntry: React.FC = () => {
 
   const roleLabel = access.role === 'INTERVIEWER' ? 'Interviewer' : 'Interviewee';
   const roleSlug = access.role === 'INTERVIEWER' ? 'interviewer' : 'interviewee';
-  const disclaimerContent = getDisclaimerContent(roleSlug, access.avMode);
+  const disclaimerContent = getDisclaimerContent(roleSlug, access.avMode, access.evaluationStyle);
   const expiryMs = access.otpExpiresAt ? Date.parse(access.otpExpiresAt) - now : 0;
   const secondsLeft = Math.max(0, Math.ceil(expiryMs / 1000));
   const otpExpired = Boolean(access.disclaimerAccepted && access.otpExpiresAt && secondsLeft <= 0 && !access.otpVerified);

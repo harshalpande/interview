@@ -51,6 +51,7 @@ import com.altimetrik.interview.enums.ActivityEventType;
 import com.altimetrik.interview.enums.AvMode;
 import com.altimetrik.interview.enums.CodeStorageMode;
 import com.altimetrik.interview.enums.ExecutionLanguage;
+import com.altimetrik.interview.enums.EvaluationStyle;
 import com.altimetrik.interview.enums.FeedbackRating;
 import com.altimetrik.interview.enums.FrontendWorkspaceStatus;
 import com.altimetrik.interview.enums.IdentityCaptureFailureReason;
@@ -105,6 +106,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
@@ -150,7 +152,7 @@ public class SessionService {
 
                 public static void main(String[] args) {
                     Assert.assertEquals(5, add(2, 3));
-                    System.out.println("All assertions passed");
+                    System.out.println("All Assertions are completed");
                 }
             }""";
     private static final String DEFAULT_PYTHON_TEMPLATE = """
@@ -279,10 +281,14 @@ public class SessionService {
         session.setStatus(SessionStatus.REGISTERED);
         session.setDurationSec(DEFAULT_DURATION_SEC);
         session.setExtensionUsed(false);
-        session.setTechnology(request.getTechnology() == null ? TechnologySkill.JAVA : request.getTechnology());
+        TechnologySkill technology = request.getTechnology() == null ? TechnologySkill.JAVA : request.getTechnology();
+        session.setTechnology(technology);
         InterviewMode interviewMode = request.getInterviewMode() == null ? InterviewMode.HUMAN_INTERVIEWER : request.getInterviewMode();
         validateInterviewerDetailsForMode(request, interviewMode);
         session.setInterviewMode(interviewMode);
+        session.setEvaluationStyle(!supportsEvaluationStyle(technology) || request.getEvaluationStyle() == null
+                ? EvaluationStyle.STANDARD_MULTIPLE_QUESTIONS
+                : request.getEvaluationStyle());
         session.setYearsOfExperience(normalizeYearsOfExperience(request.getYearsOfExperience()));
         session.setTargetRole(normalizeTargetRole(request.getTargetRole()));
         session.setStartingDifficultyLevel(normalizeDifficultyLevel(request.getStartingDifficultyLevel()));
@@ -338,6 +344,7 @@ public class SessionService {
                 .filter(file -> isManagedAiQuestionFile(session.getTechnology(), file))
                 .toList();
 
+        boolean banyanStyle = isBanyanStyle(session);
         long submittedCount = questionFiles.stream().filter(file -> Boolean.TRUE.equals(file.getSubmitted())).count();
         int maxQuestions = session.getMaxQuestions() == null ? 5 : session.getMaxQuestions();
         log.info("AI next-question state sessionId={} totalFiles={} managedQuestions={} submitted={} activePath={} files={}",
@@ -368,6 +375,10 @@ public class SessionService {
                     .build();
         }
 
+        if (banyanStyle && submittedCount > 0 && !lastSubmittedBanyanLevelPassed(questionFiles)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Banyan Style requires the current level to pass before the next level can be generated.");
+        }
+
         int questionNumber = (int) submittedCount + 1;
         int currentDifficulty = resolveCurrentAiDifficultyLevel(session, submittedCount);
         AiPolicyEngineService.QuestionPolicyPlan policyPlan = aiPolicyEngineService.questionPolicy(
@@ -380,6 +391,7 @@ public class SessionService {
         AiQuestionGenerationRequest generationRequest = AiQuestionGenerationRequest.builder()
                 .sessionId(sessionId)
                 .technology(session.getTechnology().name())
+                .evaluationStyle(evaluationStyle(session).name())
                 .yearsOfExperience(session.getYearsOfExperience())
                 .targetRole(session.getTargetRole())
                 .startingDifficulty(String.valueOf(session.getStartingDifficultyLevel() == null ? 1 : session.getStartingDifficultyLevel()))
@@ -389,12 +401,14 @@ public class SessionService {
                 .timeRemainingSeconds((long) calculateRemainingSec(session))
                 .variationSeed(sessionId + "-" + questionNumber + "-" + UUID.randomUUID())
                 .idealDurationMinutes(policyPlan.idealDurationMinutes())
+                .banyanLevel(banyanStyle ? questionNumber : null)
+                .previousBanyanChallenge(banyanStyle ? previousBanyanChallenge(session, questionFiles) : null)
                 .questionPolicy(policyPlan.questionPolicy())
                 .evaluationRubric(policyPlan.evaluationRubric())
                 .targetConcepts(policyPlan.targetConcepts())
                 .previousQuestionTitles(aiQuestionHistoryForGeneration(questionFiles))
                 .previousConcepts(policyPlan.previousConcepts())
-                .avoidConcepts(policyPlan.avoidConcepts())
+                .avoidConcepts(banyanStyle ? List.of() : policyPlan.avoidConcepts())
                 .forbiddenCapabilities(policyPlan.forbiddenCapabilities())
                 .requiredQuestionElements(policyPlan.requiredQuestionElements())
                 .sandboxRules(policyPlan.sandboxRules())
@@ -408,8 +422,12 @@ public class SessionService {
                 generationRequest.getPreviousQuestionTitles());
         AiQuestionResponse generated = generateValidatedAiQuestion(session, generationRequest, questionFiles);
 
-        EditableCodeFileDto generatedFile = buildAiQuestionFile(session.getTechnology(), generated, questionNumber, activeQuestion, files.size());
-        List<EditableCodeFileDto> nextFiles = upsertAiQuestionFile(files, generatedFile);
+        EditableCodeFileDto generatedFile = banyanStyle
+                ? buildBanyanQuestionFile(session.getTechnology(), generated, questionNumber)
+                : buildAiQuestionFile(session.getTechnology(), generated, questionNumber, activeQuestion, files.size());
+        List<EditableCodeFileDto> nextFiles = banyanStyle
+                ? upsertBanyanQuestionFile(session, files, generatedFile, questionNumber)
+                : upsertAiQuestionFile(files, generatedFile);
         validateWorkspaceFiles(session.getTechnology(), nextFiles);
         runResultRepository.deleteBySessionIdAndFilePath(sessionId, generatedFile.getPath());
         replaceCodeFiles(sessionId, nextFiles);
@@ -457,7 +475,9 @@ public class SessionService {
         List<EditableCodeFileDto> questionFiles = files.stream()
                 .filter(file -> isManagedAiQuestionFile(session.getTechnology(), file))
                 .toList();
-        int questionNumber = questionFiles.size() + 1;
+        boolean banyanStyle = isBanyanStyle(session);
+        long submittedCount = questionFiles.stream().filter(file -> Boolean.TRUE.equals(file.getSubmitted())).count();
+        int questionNumber = banyanStyle ? (int) submittedCount + 1 : questionFiles.size() + 1;
         int difficultyLevel = resolveHumanAssistDifficultyLevel(session, questionFiles, request);
         AiPolicyEngineService.QuestionPolicyPlan policyPlan = aiPolicyEngineService.questionPolicy(
                 session,
@@ -474,6 +494,7 @@ public class SessionService {
         AiQuestionGenerationRequest generationRequest = AiQuestionGenerationRequest.builder()
                 .sessionId(sessionId)
                 .technology(session.getTechnology().name())
+                .evaluationStyle(evaluationStyle(session).name())
                 .yearsOfExperience(session.getYearsOfExperience())
                 .targetRole(session.getTargetRole())
                 .startingDifficulty(String.valueOf(session.getStartingDifficultyLevel() == null ? 1 : session.getStartingDifficultyLevel()))
@@ -483,12 +504,14 @@ public class SessionService {
                 .timeRemainingSeconds((long) calculateRemainingSec(session))
                 .variationSeed(sessionId + "-human-assist-" + questionNumber + "-" + UUID.randomUUID())
                 .idealDurationMinutes(policyPlan.idealDurationMinutes())
+                .banyanLevel(banyanStyle ? questionNumber : null)
+                .previousBanyanChallenge(banyanStyle ? previousBanyanChallenge(session, questionFiles) : null)
                 .questionPolicy(policy)
                 .evaluationRubric(policyPlan.evaluationRubric())
                 .targetConcepts(targetConcepts)
                 .previousQuestionTitles(aiQuestionHistoryForGeneration(questionFiles))
                 .previousConcepts(policyPlan.previousConcepts())
-                .avoidConcepts(avoidConcepts)
+                .avoidConcepts(banyanStyle ? List.of() : avoidConcepts)
                 .forbiddenCapabilities(policyPlan.forbiddenCapabilities())
                 .requiredQuestionElements(policyPlan.requiredQuestionElements())
                 .sandboxRules(policyPlan.sandboxRules())
@@ -537,18 +560,26 @@ public class SessionService {
         List<EditableCodeFileDto> questionFiles = files.stream()
                 .filter(file -> isManagedAiQuestionFile(session.getTechnology(), file))
                 .toList();
-        int questionNumber = createNewTab
+        boolean banyanStyle = isBanyanStyle(session);
+        long submittedCount = questionFiles.stream().filter(file -> Boolean.TRUE.equals(file.getSubmitted())).count();
+        int questionNumber = banyanStyle
+                ? (int) submittedCount + 1
+                : createNewTab
                 ? questionFiles.size() + 1
                 : guidedQuestionNumber(activeFile, questionFiles.size() + 1);
         AiQuestionResponse question = toAiQuestionResponse(draft);
-        EditableCodeFileDto generatedFile = buildAiQuestionFile(
-                session.getTechnology(),
-                question,
-                questionNumber,
-                createNewTab ? null : activeFile,
-                files.size()
-        );
-        List<EditableCodeFileDto> nextFiles = upsertAiQuestionFile(files, generatedFile);
+        EditableCodeFileDto generatedFile = banyanStyle
+                ? buildBanyanQuestionFile(session.getTechnology(), question, questionNumber)
+                : buildAiQuestionFile(
+                        session.getTechnology(),
+                        question,
+                        questionNumber,
+                        createNewTab ? null : activeFile,
+                        files.size()
+                );
+        List<EditableCodeFileDto> nextFiles = banyanStyle
+                ? upsertBanyanQuestionFile(session, files, generatedFile, questionNumber)
+                : upsertAiQuestionFile(files, generatedFile);
         validateWorkspaceFiles(session.getTechnology(), nextFiles);
         runResultRepository.deleteBySessionIdAndFilePath(sessionId, generatedFile.getPath());
         replaceCodeFiles(sessionId, nextFiles);
@@ -559,8 +590,8 @@ public class SessionService {
         aiQuestionDraftRepository.save(draft);
 
         SessionResponse refreshed = getSession(sessionId);
-        log.info("Human interviewer AI draft accepted sessionId={} draftId={} path={} createNewTab={} codeVersion={}",
-                sessionId, draftId, generatedFile.getPath(), createNewTab, generatedCodeVersion);
+        log.info("Human interviewer AI draft accepted sessionId={} draftId={} path={} createNewTab={} banyanStyle={} codeVersion={}",
+                sessionId, draftId, generatedFile.getPath(), createNewTab, banyanStyle, generatedCodeVersion);
         return AiQuestionSessionResponse.builder()
                 .question(toAiQuestionResponse(generatedFile))
                 .session(refreshed)
@@ -717,7 +748,8 @@ public class SessionService {
                                                                             List<EditableCodeFileDto> submittedFiles) {
         List<AiSolutionEvaluationRequest> results = questionResults == null ? List.of() : questionResults;
         List<EditableCodeFileDto> files = submittedFiles == null ? List.of() : submittedFiles;
-        int expectedClean = Math.min(3, Math.max(1, session.getMaxQuestions() == null ? 5 : session.getMaxQuestions()));
+        int configuredLimit = Math.max(1, session.getMaxQuestions() == null ? 5 : session.getMaxQuestions());
+        int expectedClean = isBanyanStyle(session) ? configuredLimit : Math.min(3, configuredLimit);
         long cleanSolved = results.stream().filter(this::isCleanSolvedQuestion).count();
         long successfulRuns = results.stream().filter(this::hasSuccessfulQuestionRun).count();
         long integrityIssues = results.stream().filter(this::hasQuestionIntegrityViolation).count();
@@ -1709,6 +1741,11 @@ public class SessionService {
             if (exception.getStatusCode() == HttpStatus.SERVICE_UNAVAILABLE
                     || exception.getStatusCode() == HttpStatus.TOO_MANY_REQUESTS
                     || exception.getStatusCode() == HttpStatus.BAD_GATEWAY) {
+                if (isBanyanStyle(session)) {
+                    log.warn("AI provider unavailable for Banyan session {} level {}. Fallback is disabled to avoid generating an unrelated extension. Reason: {}",
+                            session.getId(), request.getQuestionNumber(), exception.getReason());
+                    throw exception;
+                }
                 log.warn("AI provider unavailable for session {} question {}. Using fallback question. Reason: {}",
                         session.getId(), request.getQuestionNumber(), exception.getReason());
                 return fallbackAiQuestion(session.getTechnology(), request, previousQuestionFiles);
@@ -1736,6 +1773,13 @@ public class SessionService {
             failures.add("Attempt " + attempt + ": " + validation.reason());
             log.warn("AI generated question failed validation for session {} question {} attempt {}: {}",
                     session.getId(), request.getQuestionNumber(), attempt, validation.reason());
+        }
+
+        if (isBanyanStyle(session)) {
+            throw new ResponseStatusException(
+                    HttpStatus.SERVICE_UNAVAILABLE,
+                    "Unable to prepare a validated Banyan level right now without changing the original challenge. " + String.join(" | ", failures)
+            );
         }
 
         AiQuestionResponse fallback = hardcodedFallbackAiQuestion(session.getTechnology(), request);
@@ -1771,9 +1815,15 @@ public class SessionService {
         if (starterAssertions.isEmpty()) {
             return QuestionValidationResult.invalid("starterCode did not contain runnable validation assertions");
         }
+        if (session.getTechnology() == TechnologySkill.JAVA && !hasJavaAssertionSuccessPrint(starterCode)) {
+            return QuestionValidationResult.invalid("starterCode did not print a success message after assertions");
+        }
         List<String> referenceAssertions = extractValidationLines(referenceSolution);
         if (referenceAssertions.isEmpty()) {
             return QuestionValidationResult.invalid("referenceSolution did not contain validation assertions");
+        }
+        if (session.getTechnology() == TechnologySkill.JAVA && !hasJavaAssertionSuccessPrint(referenceSolution)) {
+            return QuestionValidationResult.invalid("referenceSolution did not print a success message after assertions");
         }
         List<String> normalizedReferenceAssertions = referenceAssertions.stream()
                 .map(this::normalizeForIntegrity)
@@ -1807,6 +1857,16 @@ public class SessionService {
         }
         String compact = value.replaceAll("\\s+", " ").trim();
         return compact.length() > 240 ? compact.substring(0, 240) : compact;
+    }
+
+    private boolean hasJavaAssertionSuccessPrint(String source) {
+        if (source == null || source.isBlank()) {
+            return false;
+        }
+        String normalized = source.toLowerCase(Locale.ROOT);
+        return normalized.contains("system.out.println")
+                && normalized.contains("all")
+                && normalized.contains("assertion");
     }
 
     private record QuestionValidationResult(boolean valid, String reason) {
@@ -1960,7 +2020,7 @@ public class SessionService {
                         Assert.assertFalse(hasBalancedBrackets("{[(])}"));
                         Assert.assertTrue(hasBalancedBrackets("abc(def)[x]"));
                         Assert.assertFalse(hasBalancedBrackets("((("));
-                        System.out.println("All assertions passed");
+                        System.out.println("All Assertions are completed");
                     }
                 }
                 """
@@ -1978,7 +2038,7 @@ public class SessionService {
                         Assert.assertEquals(2, countCharOccurrences("Programming", 'g'));
                         Assert.assertEquals(1, countCharOccurrences("Test", 't'));
                         Assert.assertEquals(0, countCharOccurrences("", 'x'));
-                        System.out.println("All assertions passed");
+                        System.out.println("All Assertions are completed");
                     }
                 }
                 """;
@@ -2013,7 +2073,7 @@ public class SessionService {
                         Assert.assertFalse(hasBalancedBrackets("{[(])}"));
                         Assert.assertTrue(hasBalancedBrackets("abc(def)[x]"));
                         Assert.assertFalse(hasBalancedBrackets("((("));
-                        System.out.println("All assertions passed");
+                        System.out.println("All Assertions are completed");
                     }
                 }
                 """
@@ -2036,7 +2096,7 @@ public class SessionService {
                         Assert.assertEquals(2, countCharOccurrences("Programming", 'g'));
                         Assert.assertEquals(1, countCharOccurrences("Test", 't'));
                         Assert.assertEquals(0, countCharOccurrences("", 'x'));
-                        System.out.println("All assertions passed");
+                        System.out.println("All Assertions are completed");
                     }
                 }
                 """;
@@ -2186,6 +2246,28 @@ public class SessionService {
         return Math.min(5, startingLevel + (int) submittedCount);
     }
 
+    private EvaluationStyle evaluationStyle(InterviewSession session) {
+        return session.getEvaluationStyle() == null
+                ? EvaluationStyle.STANDARD_MULTIPLE_QUESTIONS
+                : session.getEvaluationStyle();
+    }
+
+    private boolean isBanyanStyle(InterviewSession session) {
+        return supportsEvaluationStyle(session.getTechnology()) && evaluationStyle(session) == EvaluationStyle.BANYAN;
+    }
+
+    private boolean supportsEvaluationStyle(TechnologySkill technology) {
+        return technology == TechnologySkill.JAVA || technology == TechnologySkill.PYTHON;
+    }
+
+    private boolean lastSubmittedBanyanLevelPassed(List<EditableCodeFileDto> questionFiles) {
+        return questionFiles == null || questionFiles.stream()
+                .filter(file -> Boolean.TRUE.equals(file.getSubmitted()))
+                .max(Comparator.comparingInt(file -> file.getSortOrder() == null ? 0 : file.getSortOrder()))
+                .map(file -> file.getRunResult() != null && Objects.equals(file.getRunResult().getExitStatus(), 0))
+                .orElse(false);
+    }
+
     private String sandboxRulesFor(TechnologySkill technology) {
         return switch (technology) {
             case JAVA -> "Java 17 only. Single source execution. Use org.junit.Assert assertions from main for validation. No file IO, network IO, databases, external processes, or external dependencies.";
@@ -2262,8 +2344,11 @@ public class SessionService {
         draft.setTechnology(session.getTechnology());
         draft.setQuestionNumber(questionNumber);
         draft.setTitle(firstNonBlank(question.getTitle(), "Question " + questionNumber));
-        draft.setFilePath(normalizeAiFilePath(session.getTechnology(), question.getFilePath(), defaultAiQuestionPath(session.getTechnology(), questionNumber)));
-        draft.setDisplayName("Question " + questionNumber);
+        boolean banyanStyle = isBanyanStyle(session);
+        draft.setFilePath(banyanStyle
+                ? banyanActivePath(session.getTechnology())
+                : normalizeAiFilePath(session.getTechnology(), question.getFilePath(), defaultAiQuestionPath(session.getTechnology(), questionNumber)));
+        draft.setDisplayName(banyanStyle ? "Banyan Level " + questionNumber : "Question " + questionNumber);
         draft.setProblemStatement(question.getProblemStatement());
         draft.setStarterCode(question.getStarterCode());
         draft.setReferenceSolution(question.getReferenceSolution());
@@ -2419,6 +2504,139 @@ public class SessionService {
                 .build();
     }
 
+    private EditableCodeFileDto buildBanyanQuestionFile(TechnologySkill technology,
+                                                        AiQuestionResponse generated,
+                                                        int level) {
+        String content = starterWithProblemStatement(technology, generated.getProblemStatement(), generated.getStarterCode());
+        int difficultyLevel = normalizeDifficultyLevel(generated.getDifficultyLevel(), generated.getDifficulty());
+        return EditableCodeFileDto.builder()
+                .path(banyanActivePath(technology))
+                .displayName("Banyan Level " + level)
+                .content(content)
+                .editable(true)
+                .sortOrder(0)
+                .enabledForCandidate(true)
+                .activeQuestion(true)
+                .submitted(false)
+                .difficultyLevel(difficultyLevel)
+                .idealDurationMinutes(normalizeIdealDuration(generated.getIdealDurationMinutes(), difficultyLevel))
+                .expectedTimeComplexity(normalizeShortText(generated.getExpectedTimeComplexity(), 80))
+                .expectedSpaceComplexity(normalizeShortText(generated.getExpectedSpaceComplexity(), 80))
+                .originalProblemStatement(generated.getProblemStatement())
+                .originalStarterCode(content)
+                .referenceSolution(generated.getReferenceSolution())
+                .questionConcepts(joinList(generated.getConcepts()))
+                .questionEvaluationFocus(joinList(generated.getEvaluationFocus()))
+                .candidateStartedAt(nowUtc())
+                .submittedAt(null)
+                .solveDurationSeconds(null)
+                .executeAttemptCount(0)
+                .questionIntegrityNotes("Original AI problem statement and validation tests captured.")
+                .build();
+    }
+
+    private List<EditableCodeFileDto> upsertBanyanQuestionFile(InterviewSession session,
+                                                               List<EditableCodeFileDto> files,
+                                                               EditableCodeFileDto generatedFile,
+                                                               int nextLevel) {
+        String activePath = banyanActivePath(session.getTechnology());
+        List<EditableCodeFileDto> nextFiles = new ArrayList<>();
+        for (EditableCodeFileDto file : files) {
+            if (activePath.equals(file.getPath()) && Boolean.TRUE.equals(file.getSubmitted())) {
+                int submittedLevel = Math.max(1, nextLevel - 1);
+                String archivePath = banyanArchivePath(session.getTechnology(), submittedLevel);
+                copyLatestRunResult(session.getId(), activePath, archivePath, "Banyan Level " + submittedLevel);
+                nextFiles.add(copyAsBanyanArchive(file, archivePath, submittedLevel));
+                continue;
+            }
+            if (!activePath.equals(file.getPath())) {
+                if (isAiQuestionFile(session.getTechnology(), file.getPath()) && !isManagedAiQuestionFile(session.getTechnology(), file)) {
+                    continue;
+                }
+                nextFiles.add(EditableCodeFileDto.builder()
+                        .path(file.getPath())
+                        .displayName(file.getDisplayName())
+                        .content(file.getContent())
+                        .editable(file.getEditable())
+                        .sortOrder(file.getSortOrder())
+                        .enabledForCandidate(file.getEnabledForCandidate())
+                        .activeQuestion(false)
+                        .submitted(file.getSubmitted())
+                        .difficultyLevel(file.getDifficultyLevel())
+                        .idealDurationMinutes(file.getIdealDurationMinutes())
+                        .expectedTimeComplexity(file.getExpectedTimeComplexity())
+                        .expectedSpaceComplexity(file.getExpectedSpaceComplexity())
+                        .questionIntegrityNotes(file.getQuestionIntegrityNotes())
+                        .originalProblemStatement(file.getOriginalProblemStatement())
+                        .originalStarterCode(file.getOriginalStarterCode())
+                        .referenceSolution(file.getReferenceSolution())
+                        .questionConcepts(file.getQuestionConcepts())
+                        .questionEvaluationFocus(file.getQuestionEvaluationFocus())
+                        .candidateStartedAt(file.getCandidateStartedAt())
+                        .submittedAt(file.getSubmittedAt())
+                        .solveDurationSeconds(file.getSolveDurationSeconds())
+                        .executeAttemptCount(file.getExecuteAttemptCount())
+                        .runResult(file.getRunResult())
+                        .aiEvaluation(file.getAiEvaluation())
+                        .changedAfterLastRun(file.getChangedAfterLastRun())
+                        .build());
+            }
+        }
+        nextFiles.add(generatedFile);
+        return normalizeEditableFileList(nextFiles);
+    }
+
+    private EditableCodeFileDto copyAsBanyanArchive(EditableCodeFileDto file, String archivePath, int level) {
+        return EditableCodeFileDto.builder()
+                .path(archivePath)
+                .displayName("Banyan Level " + level)
+                .content(file.getContent())
+                .editable(false)
+                .sortOrder(1000 + level)
+                .enabledForCandidate(false)
+                .activeQuestion(false)
+                .submitted(true)
+                .difficultyLevel(file.getDifficultyLevel())
+                .idealDurationMinutes(file.getIdealDurationMinutes())
+                .expectedTimeComplexity(file.getExpectedTimeComplexity())
+                .expectedSpaceComplexity(file.getExpectedSpaceComplexity())
+                .questionIntegrityNotes(file.getQuestionIntegrityNotes())
+                .originalProblemStatement(file.getOriginalProblemStatement())
+                .originalStarterCode(file.getOriginalStarterCode())
+                .referenceSolution(file.getReferenceSolution())
+                .questionConcepts(file.getQuestionConcepts())
+                .questionEvaluationFocus(file.getQuestionEvaluationFocus())
+                .candidateStartedAt(file.getCandidateStartedAt())
+                .submittedAt(file.getSubmittedAt())
+                .solveDurationSeconds(file.getSolveDurationSeconds())
+                .executeAttemptCount(file.getExecuteAttemptCount())
+                .aiEvaluation(file.getAiEvaluation())
+                .changedAfterLastRun(file.getChangedAfterLastRun())
+                .build();
+    }
+
+    private void copyLatestRunResult(String sessionId, String sourcePath, String targetPath, String displayName) {
+        if (sourcePath == null || targetPath == null || sourcePath.equals(targetPath)) {
+            return;
+        }
+        if (runResultRepository.findTopBySessionIdAndFilePathOrderByCompiledAtDesc(sessionId, targetPath).isPresent()) {
+            return;
+        }
+        runResultRepository.findTopBySessionIdAndFilePathOrderByCompiledAtDesc(sessionId, sourcePath)
+                .ifPresent(source -> {
+                    RunResult copy = new RunResult();
+                    copy.setSessionId(sessionId);
+                    copy.setFilePath(targetPath);
+                    copy.setDisplayName(displayName);
+                    copy.setSourceSnapshot(source.getSourceSnapshot());
+                    copy.setStdout(source.getStdout());
+                    copy.setStderr(source.getStderr());
+                    copy.setExitStatus(source.getExitStatus());
+                    copy.setExecutionTimeMs(source.getExecutionTimeMs());
+                    runResultRepository.save(copy);
+                });
+    }
+
     private List<EditableCodeFileDto> upsertAiQuestionFile(List<EditableCodeFileDto> files, EditableCodeFileDto generatedFile) {
         List<EditableCodeFileDto> nextFiles = new ArrayList<>();
         boolean replaced = false;
@@ -2482,6 +2700,36 @@ public class SessionService {
             case REACT -> "src/App.tsx";
             default -> "Question" + questionNumber + ".java";
         };
+    }
+
+    private String banyanActivePath(TechnologySkill technology) {
+        return technology == TechnologySkill.PYTHON ? "banyan.py" : "Banyan.java";
+    }
+
+    private String banyanArchivePath(TechnologySkill technology, int level) {
+        return technology == TechnologySkill.PYTHON
+                ? "banyan-level-" + level + ".py"
+                : "BanyanLevel" + level + ".java";
+    }
+
+    private String previousBanyanChallenge(InterviewSession session, List<EditableCodeFileDto> questionFiles) {
+        if (questionFiles == null || questionFiles.isEmpty()) {
+            return null;
+        }
+        String activePath = banyanActivePath(session.getTechnology());
+        Optional<String> activeSubmittedContent = questionFiles.stream()
+                .filter(file -> activePath.equals(file.getPath()) && Boolean.TRUE.equals(file.getSubmitted()))
+                .map(EditableCodeFileDto::getContent)
+                .filter(content -> content != null && !content.isBlank())
+                .findFirst();
+        if (activeSubmittedContent.isPresent()) {
+            return activeSubmittedContent.get();
+        }
+        return questionFiles.stream()
+                .filter(file -> Boolean.TRUE.equals(file.getSubmitted()))
+                .max(Comparator.comparing(file -> file.getSubmittedAt() == null ? OffsetDateTime.MIN : file.getSubmittedAt()))
+                .map(EditableCodeFileDto::getContent)
+                .orElse(null);
     }
 
     private int normalizeIdealDuration(Integer idealDurationMinutes, int difficultyLevel) {
@@ -2616,8 +2864,8 @@ public class SessionService {
     private String starterWithProblemStatement(TechnologySkill technology, String problemStatement, String starterCode) {
         String problem = problemStatement == null || problemStatement.isBlank()
                 ? "Implement the requested solution."
-                : problemStatement.trim();
-        String starter = starterCode == null ? "" : starterCode.trim();
+                : normalizeProblemStatementForComment(technology, problemStatement);
+        String starter = removeLeadingProblemCommentBlocks(technology, starterCode == null ? "" : starterCode.trim(), problem);
         String problemComment = switch (technology) {
             case PYTHON -> "\"\"\"\nAI Generated Problem Statement:\n" + problem + "\n\"\"\"\n\n";
             default -> "/*\nAI Generated Problem Statement:\n" + problem + "\n*/\n\n";
@@ -2629,6 +2877,148 @@ public class SessionService {
             case PYTHON, ANGULAR, REACT -> problemComment;
             default -> problemComment + "public class Main {\n    public static void main(String[] args) {\n        // TODO: implement\n    }\n}\n";
         };
+    }
+
+    private String normalizeProblemStatementForComment(TechnologySkill technology, String value) {
+        String normalized = value == null ? "" : value.trim();
+        boolean changed;
+        do {
+            changed = false;
+            if (normalized.regionMatches(true, 0, "AI Generated Problem Statement:", 0, "AI Generated Problem Statement:".length())) {
+                normalized = normalized.substring("AI Generated Problem Statement:".length()).trim();
+                changed = true;
+            }
+            if ((technology == TechnologySkill.PYTHON || technology == TechnologySkill.JAVA)
+                    && normalized.startsWith("/*") && normalized.endsWith("*/") && normalized.length() >= 4) {
+                normalized = normalized.substring(2, normalized.length() - 2).trim();
+                changed = true;
+            }
+            if (technology == TechnologySkill.PYTHON
+                    && ((normalized.startsWith("\"\"\"") && normalized.endsWith("\"\"\""))
+                    || (normalized.startsWith("'''") && normalized.endsWith("'''")))
+                    && normalized.length() >= 6) {
+                normalized = normalized.substring(3, normalized.length() - 3).trim();
+                changed = true;
+            }
+        } while (changed);
+
+        List<String> lines = new ArrayList<>();
+        for (String rawLine : normalized.split("\\R")) {
+            String line = rawLine.stripTrailing();
+            String leftTrimmed = line.stripLeading();
+            if (leftTrimmed.equals("/*") || leftTrimmed.equals("*/")) {
+                continue;
+            }
+            if (leftTrimmed.startsWith("*")) {
+                line = leftTrimmed.substring(1).stripLeading();
+            }
+            lines.add(line);
+        }
+        return collapseRepeatedProblemStatement(String.join("\n", lines).trim());
+    }
+
+    private String removeLeadingProblemCommentBlocks(TechnologySkill technology, String starter, String canonicalProblem) {
+        String remaining = starter == null ? "" : starter.trim();
+        while (!remaining.isBlank()) {
+            if (remaining.startsWith("*/")) {
+                remaining = remaining.substring(2).trim();
+                continue;
+            }
+            LeadingCommentBlock block = extractLeadingCommentBlock(technology, remaining);
+            if (block == null || !looksLikeProblemStatementBlock(technology, block.body(), canonicalProblem)) {
+                break;
+            }
+            remaining = block.remaining().trim();
+        }
+        return remaining;
+    }
+
+    private LeadingCommentBlock extractLeadingCommentBlock(TechnologySkill technology, String content) {
+        String trimmed = content == null ? "" : content.trim();
+        if (trimmed.startsWith("/*")) {
+            int end = trimmed.indexOf("*/", 2);
+            if (end >= 0) {
+                return new LeadingCommentBlock(trimmed.substring(2, end), trimmed.substring(end + 2));
+            }
+        }
+        if (technology == TechnologySkill.PYTHON) {
+            if (trimmed.startsWith("\"\"\"")) {
+                int end = trimmed.indexOf("\"\"\"", 3);
+                if (end >= 0) {
+                    return new LeadingCommentBlock(trimmed.substring(3, end), trimmed.substring(end + 3));
+                }
+            }
+            if (trimmed.startsWith("'''")) {
+                int end = trimmed.indexOf("'''", 3);
+                if (end >= 0) {
+                    return new LeadingCommentBlock(trimmed.substring(3, end), trimmed.substring(end + 3));
+                }
+            }
+        }
+        return null;
+    }
+
+    private boolean looksLikeProblemStatementBlock(TechnologySkill technology, String blockBody, String canonicalProblem) {
+        String normalizedBlock = normalizeProblemStatementForComment(technology, blockBody);
+        if (normalizedBlock.isBlank()) {
+            return false;
+        }
+        String lower = normalizedBlock.toLowerCase(Locale.ROOT);
+        if (lower.contains("ai generated problem statement")
+                || lower.contains("banyan level")
+                || lower.contains("problem statement:")
+                || lower.contains("new requirement")
+                || lower.contains("rules")
+                || lower.contains("examples:")) {
+            return true;
+        }
+        String comparableBlock = comparableProblemText(normalizedBlock);
+        String comparableProblem = comparableProblemText(canonicalProblem);
+        if (comparableBlock.isBlank() || comparableProblem.isBlank()) {
+            return false;
+        }
+        int sampleSize = Math.min(120, Math.min(comparableBlock.length(), comparableProblem.length()));
+        if (sampleSize < 30) {
+            return comparableBlock.equals(comparableProblem);
+        }
+        String blockSample = comparableBlock.substring(0, sampleSize);
+        String problemSample = comparableProblem.substring(0, sampleSize);
+        return comparableBlock.contains(problemSample) || comparableProblem.contains(blockSample);
+    }
+
+    private String comparableProblemText(String value) {
+        return value == null ? "" : value.toLowerCase(Locale.ROOT).replaceAll("\\s+", " ").trim();
+    }
+
+    private String collapseRepeatedProblemStatement(String value) {
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+        String normalized = value.trim();
+        String marker = "Banyan Level";
+        int firstMarker = normalized.indexOf(marker);
+        int secondMarker = firstMarker < 0 ? -1 : normalized.indexOf(marker, firstMarker + marker.length());
+        if (firstMarker < 0 || secondMarker <= firstMarker) {
+            return normalized;
+        }
+
+        String prefix = normalized.substring(0, firstMarker).trim();
+        String first = normalized.substring(firstMarker, secondMarker).trim();
+        String second = normalized.substring(secondMarker).trim();
+        String comparableFirst = comparableProblemText(first);
+        String comparableSecond = comparableProblemText(second);
+        if (comparableFirst.isBlank() || comparableSecond.isBlank()) {
+            return normalized;
+        }
+
+        int sampleSize = Math.min(100, Math.min(comparableFirst.length(), comparableSecond.length()));
+        if (sampleSize >= 30 && comparableFirst.contains(comparableSecond.substring(0, sampleSize))) {
+            return prefix.isBlank() ? first : prefix + "\n" + first;
+        }
+        return normalized;
+    }
+
+    private record LeadingCommentBlock(String body, String remaining) {
     }
 
     private EditableCodeFileDto resolveAiEvaluationTarget(InterviewSession session, String requestedFilePath) {
@@ -3091,6 +3481,9 @@ public class SessionService {
                 .id(session.getId())
                 .technology(session.getTechnology())
                 .interviewMode(session.getInterviewMode() == null ? InterviewMode.HUMAN_INTERVIEWER : session.getInterviewMode())
+                .evaluationStyle(session.getEvaluationStyle() == null
+                        ? EvaluationStyle.STANDARD_MULTIPLE_QUESTIONS
+                        : session.getEvaluationStyle())
                 .yearsOfExperience(session.getYearsOfExperience())
                 .targetRole(session.getTargetRole())
                 .startingDifficultyLevel(normalizeDifficultyLevel(session.getStartingDifficultyLevel()))
