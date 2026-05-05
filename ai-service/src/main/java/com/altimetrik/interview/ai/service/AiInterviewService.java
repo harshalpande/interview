@@ -29,7 +29,7 @@ public class AiInterviewService {
                 properties.getQuestionModel(),
                 questionInstructions(),
                 toJson(request),
-                5000,
+                questionMaxOutputTokens(request),
                 questionResponseFormat(),
                 AiQuestionResponse.class
         );
@@ -93,6 +93,124 @@ public class AiInterviewService {
         return openAiResponsesClient::createJsonResponse;
     }
 
+    private int questionMaxOutputTokens(AiQuestionGenerationRequest request) {
+        if (request == null) {
+            return properties.getQuestionMaxOutputTokens();
+        }
+        return "BANYAN".equalsIgnoreCase(request.evaluationStyle())
+                ? banyanQuestionMaxOutputTokens(request)
+                : standardQuestionMaxOutputTokens(request);
+    }
+
+    private int standardQuestionMaxOutputTokens(AiQuestionGenerationRequest request) {
+        int difficulty = normalizeLevel(request.currentDifficulty(), request.questionNumber());
+        ExperienceBand band = experienceBand(request.yearsOfExperience(), request.targetRole());
+        int estimate = 3200 + (difficulty * 350);
+        if (band.ordinal() >= ExperienceBand.SEVEN_TO_TEN.ordinal()) {
+            estimate += 400;
+        }
+        return clamp(estimate, 3000, properties.getQuestionMaxOutputTokens());
+    }
+
+    private int banyanQuestionMaxOutputTokens(AiQuestionGenerationRequest request) {
+        int level = request.banyanLevel() == null ? normalizeLevel(request.currentDifficulty(), request.questionNumber()) : request.banyanLevel();
+        ExperienceBand band = experienceBand(request.yearsOfExperience(), request.targetRole());
+        int estimate = banyanBaseTokenBudget(band, level);
+        estimate += Math.min(3500, estimatedTokens(request.previousBanyanChallenge()) / 2);
+        return clamp(estimate, 3500, properties.getBanyanQuestionMaxOutputTokens());
+    }
+
+    private int banyanBaseTokenBudget(ExperienceBand band, int level) {
+        if (level <= 1) {
+            return switch (band) {
+                case ONE_TO_THREE -> 4200;
+                case FOUR_TO_SIX -> 4800;
+                case SEVEN_TO_TEN -> 5400;
+                case ELEVEN_TO_FIFTEEN -> 5800;
+                case SIXTEEN_TO_TWENTY -> 6000;
+                case TWENTY_PLUS -> 6200;
+            };
+        }
+        if (level == 2) {
+            return switch (band) {
+                case ONE_TO_THREE -> 5600;
+                case FOUR_TO_SIX -> 6400;
+                case SEVEN_TO_TEN -> 7200;
+                case ELEVEN_TO_FIFTEEN -> 8000;
+                case SIXTEEN_TO_TWENTY -> 8400;
+                case TWENTY_PLUS -> 8600;
+            };
+        }
+        return switch (band) {
+            case ONE_TO_THREE -> 6800;
+            case FOUR_TO_SIX -> 7800;
+            case SEVEN_TO_TEN -> 9000;
+            case ELEVEN_TO_FIFTEEN -> 9800;
+            case SIXTEEN_TO_TWENTY -> 10400;
+            case TWENTY_PLUS -> 10800;
+        };
+    }
+
+    private int normalizeLevel(String level, Integer fallback) {
+        if (level != null) {
+            String digits = level.replaceAll("\\D+", "");
+            if (!digits.isBlank()) {
+                try {
+                    return clamp(Integer.parseInt(digits), 1, 5);
+                } catch (NumberFormatException ignored) {
+                    // Fall through to fallback.
+                }
+            }
+        }
+        return fallback == null ? 1 : clamp(fallback, 1, 5);
+    }
+
+    private int estimatedTokens(String value) {
+        if (value == null || value.isBlank()) {
+            return 0;
+        }
+        return Math.max(1, value.length() / 4);
+    }
+
+    private ExperienceBand experienceBand(Integer yearsOfExperience, String targetRole) {
+        int years = yearsOfExperience == null ? 0 : yearsOfExperience;
+        if (targetRole != null) {
+            String role = targetRole.toLowerCase();
+            if (role.contains("junior") || role.contains("associate") || role.contains("entry")) {
+                years = Math.min(years, 3);
+            }
+        }
+        if (years <= 3) {
+            return ExperienceBand.ONE_TO_THREE;
+        }
+        if (years <= 6) {
+            return ExperienceBand.FOUR_TO_SIX;
+        }
+        if (years <= 10) {
+            return ExperienceBand.SEVEN_TO_TEN;
+        }
+        if (years <= 15) {
+            return ExperienceBand.ELEVEN_TO_FIFTEEN;
+        }
+        if (years <= 20) {
+            return ExperienceBand.SIXTEEN_TO_TWENTY;
+        }
+        return ExperienceBand.TWENTY_PLUS;
+    }
+
+    private int clamp(int value, int min, int max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
+    private enum ExperienceBand {
+        ONE_TO_THREE,
+        FOUR_TO_SIX,
+        SEVEN_TO_TEN,
+        ELEVEN_TO_FIFTEEN,
+        SIXTEEN_TO_TWENTY,
+        TWENTY_PLUS
+    }
+
     private String toJson(Object value) {
         try {
             return objectMapper.writeValueAsString(value);
@@ -109,10 +227,16 @@ public class AiInterviewService {
                 Respect the supplied technology, experience, target role, numeric difficulty level, ideal duration, time left, previous concepts, previous question history, variationSeed, and sandbox rules.
                 If evaluationStyle is BANYAN, generate an evolving single-challenge level, not a new independent question.
                 For BANYAN level 1, create a base problem that can naturally grow through later requirements, preferably with a small existing class/model and one bug or missing method.
+                For BANYAN, apply deterministic experience bands from yearsOfExperience: 1-3, 4-6, 7-10, 11-15, 16-20, and 20+ years. Complexity may increase with the band and level, but it must never jump to a broad multi-feature problem in the first level.
+                For BANYAN level 1 and 1-3 year candidates, keep scope deliberately small: one intentional bug or one method to fix/implement, 3 to 5 validation assertions, one primary concept, and at most one simple model. Do not combine date calculation, eligibility, discount, upgrade, billing amount, sorting, and aggregation in the first level.
+                For BANYAN level 1 and 4-6 year candidates, use one small model and one method, or two tightly related methods, with one edge rule.
+                For BANYAN level 1 and 7+ year candidates, modest domain modeling is acceptable, but Level 1 must still be only the base foothold. Save policy combinations, ranking, summaries, optimization, and tradeoffs for later levels.
+                For BANYAN level 2, add exactly one new requirement or method. For BANYAN level 3+, add one measured complication at a time such as collection processing, sorting/tie-breaking, streams/lambdas for Java, or richer edge cases.
                 For BANYAN level 2 or above, previousBanyanChallenge is authoritative context. Extend the exact same business domain, classes, method names, data model, and candidate implementation shape with one additional requirement.
                 For BANYAN level 2 or above, starterCode must preserve all previous problem statements, all previous validation assertions, and the candidate's existing accepted code as much as possible. Add the new requirement below the previous requirements and append only the new validation assertions.
                 For BANYAN, never switch to an unrelated problem, unrelated function name, unrelated class model, or separate tab/question concept. The filePath should remain Banyan.java for Java or banyan.py for Python.
                 For BANYAN, displayName should be "Banyan Level N", title should mention the evolving challenge, and starterCode must contain all accumulated level requirements visible in comments plus all accumulated assertions.
+                For BANYAN, keep starterCode and referenceSolution concise. Preserve behavior and assertions, but avoid long explanations, excessive helper classes, or unnecessary boilerplate.
                 For all technologies, problemStatement must be plain text only. Do not wrap problemStatement in Java block comments, Python triple-quoted strings, or any other language comment delimiter.
                 If starterCode includes a problem statement comment, include it only once. Do not duplicate the same problem statement in both nested comment blocks.
                 Use variationSeed to choose a fresh problem shape; avoid common default prompts when another valid sandbox-ready question would fit.

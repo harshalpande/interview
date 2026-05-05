@@ -10,10 +10,41 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Set;
 
 @Service
 public class AiPolicyEngineService {
+
+    private static final String BANYAN_FAMILY_PREFIX = "banyan-family:";
+    private static final List<BanyanProblemFamily> BANYAN_PROBLEM_FAMILIES = List.of(
+            new BanyanProblemFamily("inventory-stock-management", "Inventory / Stock Management", "stock availability, reorder rules, reservations, and warehouse summaries"),
+            new BanyanProblemFamily("journey-route-trip-tracking", "Journey / Route / Trip Tracking", "trip segments, route progress, stops, fare/distance summaries, and validation rules"),
+            new BanyanProblemFamily("membership-subscription-billing", "Membership / Subscription / Billing", "plans, upgrades, renewals, discounts, billing cycles, and eligibility checks"),
+            new BanyanProblemFamily("obstacle-grid-movement-rules", "Obstacle / Movement / Grid Rules", "grid movement, blocked cells, path rules, scoring, and boundary handling"),
+            new BanyanProblemFamily("scheduling-booking-calendar-slots", "Scheduling / Booking / Calendar Slots", "time slots, conflicts, capacity, availability, and booking rules"),
+            new BanyanProblemFamily("ranking-leaderboard-scoring", "Ranking / Leaderboard / Scoring", "score aggregation, ranking ties, filters, and leaderboard summaries"),
+            new BanyanProblemFamily("validation-policy-rules-engine", "Validation / Policy Rules Engine", "rule validation, eligibility, policy failures, severity, and final decisions"),
+            new BanyanProblemFamily("order-cart-checkout", "Order / Cart / Checkout", "cart totals, item rules, checkout validation, tax/discount calculations, and order status"),
+            new BanyanProblemFamily("banking-wallet-ledger", "Banking / Wallet / Ledger", "wallet balances, transactions, reversals, ledger summaries, and consistency checks"),
+            new BanyanProblemFamily("library-book-borrowing", "Library / Book Borrowing", "book availability, borrow/return rules, late fees, limits, and member status"),
+            new BanyanProblemFamily("parking-lot-vehicle-slots", "Parking Lot / Vehicle Slots", "slot allocation, vehicle types, availability, fees, and release rules"),
+            new BanyanProblemFamily("hotel-room-allocation", "Hotel / Room Allocation", "room availability, guest allocation, stay duration, pricing, and upgrade rules"),
+            new BanyanProblemFamily("event-registration-waitlist", "Event Registration / Waitlist", "capacity, registrations, waitlists, cancellations, and attendee status"),
+            new BanyanProblemFamily("ticketing-queue-management", "Ticketing / Queue Management", "ticket priority, queues, assignment, resolution order, and SLA-like rules"),
+            new BanyanProblemFamily("attendance-leave-tracking", "Attendance / Leave Tracking", "daily presence, leave balances, approvals, penalties, and monthly summaries"),
+            new BanyanProblemFamily("delivery-shipment-tracking", "Delivery / Shipment Tracking", "shipment states, route checkpoints, delays, delivery attempts, and status summaries"),
+            new BanyanProblemFamily("food-ordering-restaurant-table-flow", "Food Ordering / Restaurant Table Flow", "orders, table capacity, menu availability, billing, and kitchen status"),
+            new BanyanProblemFamily("hospital-appointment-triage", "Hospital / Appointment Triage", "patient priority, appointment slots, doctor availability, and triage decisions"),
+            new BanyanProblemFamily("exam-marks-grade-processing", "Exam / Marks / Grade Processing", "marks, grades, pass rules, revaluation, ranks, and subject summaries"),
+            new BanyanProblemFamily("course-student-enrollment", "Course / Student Enrollment", "course capacity, prerequisites, enrollment status, waitlists, and credit limits"),
+            new BanyanProblemFamily("employee-shift-planning", "Employee Shift Planning", "shift assignment, coverage rules, conflicts, availability, and overtime checks"),
+            new BanyanProblemFamily("coupon-discount-rules", "Coupon / Discount Rules", "coupon eligibility, stacking rules, thresholds, exclusions, and final payable amount"),
+            new BanyanProblemFamily("notification-preference-rules", "Notification Preference Rules", "channel preferences, opt-outs, priority, quiet hours, and delivery decisions"),
+            new BanyanProblemFamily("expense-split-settlement", "Expense Split / Settlement", "shared expenses, balances, settlements, rounding, and payer summaries"),
+            new BanyanProblemFamily("device-health-sensor-alerts", "Device Health / Sensor Alerts", "sensor readings, thresholds, alert levels, recovery, and health summaries"),
+            new BanyanProblemFamily("resource-capacity-planning", "Resource Capacity Planning", "resource allocation, capacity limits, utilization, conflicts, and planning summaries")
+    );
 
     public QuestionPolicyPlan questionPolicy(InterviewSession session,
                                              int difficultyLevel,
@@ -21,7 +52,11 @@ public class AiPolicyEngineService {
                                              List<EditableCodeFileDto> previousQuestions,
                                              int timeRemainingSeconds) {
         TechnologySkill technology = session.getTechnology() == null ? TechnologySkill.JAVA : session.getTechnology();
-        List<String> targetConcepts = targetConcepts(technology, difficultyLevel, questionNumber);
+        boolean banyanStyle = session.getEvaluationStyle() == EvaluationStyle.BANYAN;
+        BanyanProblemFamily banyanFamily = banyanStyle ? resolveBanyanFamily(session, previousQuestions) : null;
+        List<String> targetConcepts = banyanStyle
+                ? banyanTargetConcepts(technology, difficultyLevel, questionNumber, banyanFamily)
+                : targetConcepts(technology, difficultyLevel, questionNumber);
         List<String> previousConcepts = previousConcepts(previousQuestions);
         List<String> avoidConcepts = avoidConcepts(previousConcepts, targetConcepts);
         List<String> forbiddenCapabilities = forbiddenCapabilities(technology);
@@ -29,8 +64,21 @@ public class AiPolicyEngineService {
         int idealDurationMinutes = idealDurationMinutes(difficultyLevel, timeRemainingSeconds, session.getYearsOfExperience());
         String sandboxRules = sandboxRules(technology);
         String rubric = evaluationRubric(session, difficultyLevel);
-        String styleGuidance = session.getEvaluationStyle() == EvaluationStyle.BANYAN
-                ? "Evaluation style: Banyan Style. Generate one evolving challenge level in the same single file. Level 1 seeds a growable problem. Level 2+ must extend the same domain/classes/methods and include all previous requirements and validation expectations plus new assertions. Do not generate a separate or unrelated question."
+        String experienceScope = experienceScopeGuidance(session, difficultyLevel, questionNumber, banyanStyle);
+        String styleGuidance = banyanStyle
+                ? """
+                  Evaluation style: Banyan Style. Generate one evolving challenge level in the same single file.
+                  Locked Banyan problem family: %s (%s). Family marker: %s%s.
+                  Level 1 must start from this family and should not default to generic string/array/frequency-counting unless the family naturally requires it.
+                  Level 1 must be a foothold, not the complete domain problem. It should introduce only the smallest useful part of the family.
+                  Level 2+ must extend the exact same family, business domain, classes/methods, data model, and accepted candidate implementation. Add one new requirement and new validation assertions without changing the family.
+                  Do not generate a separate, unrelated, or generic collection/top-k conversion unless that is a natural next rule inside the locked family.
+                  """.formatted(
+                        banyanFamily.title(),
+                        banyanFamily.description(),
+                        BANYAN_FAMILY_PREFIX,
+                        banyanFamily.key()
+                )
                 : "Evaluation style: Standard Multiple Questions. Generate a standalone independent question.";
 
         String questionPolicy = """
@@ -42,6 +90,7 @@ public class AiPolicyEngineService {
                 Required question elements: %s.
                 Forbidden capabilities: %s.
                 Expected candidate duration: %d minutes.
+                Experience and level scope: %s.
                 Calibrate question scope to the candidate experience and target role: fair, practical, sandbox-ready, and concept-focused rather than trick-heavy.
                 Prefer questions that test reasoning, edge cases, and implementation clarity over memorized syntax, while keeping the evaluation standard intact.
                 The question must be executable in the current sandbox and must include validation checks in starterCode.
@@ -56,7 +105,8 @@ public class AiPolicyEngineService {
                 avoidConcepts.isEmpty() ? "none captured" : String.join(", ", avoidConcepts),
                 String.join(", ", requiredElements),
                 String.join(", ", forbiddenCapabilities),
-                idealDurationMinutes
+                idealDurationMinutes,
+                experienceScope
         );
 
         return new QuestionPolicyPlan(
@@ -152,6 +202,47 @@ public class AiPolicyEngineService {
         };
     }
 
+    private List<String> banyanTargetConcepts(TechnologySkill technology,
+                                              int difficultyLevel,
+                                              int questionNumber,
+                                              BanyanProblemFamily family) {
+        List<String> concepts = new ArrayList<>();
+        concepts.add(BANYAN_FAMILY_PREFIX + family.key());
+        concepts.add(family.title());
+        concepts.add(family.description());
+        concepts.addAll(targetConcepts(technology, difficultyLevel, questionNumber));
+        concepts.add("evolving single challenge");
+        concepts.add("preserve previous Banyan requirements");
+        concepts.add("append level-specific validation assertions");
+        return List.copyOf(concepts);
+    }
+
+    private BanyanProblemFamily resolveBanyanFamily(InterviewSession session, List<EditableCodeFileDto> previousQuestions) {
+        String existingFamily = previousQuestions == null ? null : previousQuestions.stream()
+                .flatMap(question -> splitConcepts(question.getQuestionConcepts()).stream())
+                .filter(concept -> concept.startsWith(BANYAN_FAMILY_PREFIX))
+                .map(concept -> concept.substring(BANYAN_FAMILY_PREFIX.length()).trim())
+                .filter(concept -> !concept.isBlank())
+                .findFirst()
+                .orElse(null);
+        if (existingFamily != null) {
+            return BANYAN_PROBLEM_FAMILIES.stream()
+                    .filter(family -> family.key().equals(existingFamily))
+                    .findFirst()
+                    .orElse(BANYAN_PROBLEM_FAMILIES.get(0));
+        }
+
+        String seed = String.join("|",
+                valueOrDefault(session.getId(), "unspecified-session"),
+                session.getTechnology() == null ? TechnologySkill.JAVA.name() : session.getTechnology().name(),
+                valueOrDefault(session.getTargetRole(), "unspecified"),
+                String.valueOf(session.getYearsOfExperience() == null ? 0 : session.getYearsOfExperience()),
+                String.valueOf(session.getStartingDifficultyLevel() == null ? 1 : session.getStartingDifficultyLevel())
+        );
+        int index = Math.floorMod(Objects.hash(seed), BANYAN_PROBLEM_FAMILIES.size());
+        return BANYAN_PROBLEM_FAMILIES.get(index);
+    }
+
     private List<String> forbiddenCapabilities(TechnologySkill technology) {
         List<String> common = new ArrayList<>(List.of(
                 "file IO",
@@ -193,8 +284,8 @@ public class AiPolicyEngineService {
     }
 
     private String evaluationRubric(InterviewSession session, int difficultyLevel) {
-        int years = session.getYearsOfExperience() == null ? 0 : session.getYearsOfExperience();
-        String seniorGuidance = years >= 6 || difficultyLevel >= 4
+        ExperienceBand experienceBand = experienceBand(session);
+        String seniorGuidance = experienceBand.ordinal() >= ExperienceBand.SEVEN_TO_TEN.ordinal() || difficultyLevel >= 4
                 ? "For senior-level evaluation, code quality, complexity, API clarity, and edge-case reasoning carry stronger weight."
                 : "For junior/mid-level evaluation, correctness and basic edge-case handling carry stronger weight.";
         return """
@@ -204,6 +295,55 @@ public class AiPolicyEngineService {
                 Execution attempts are a soft confidence signal because the IDE has no debugger.
                 %s
                 """.formatted(seniorGuidance);
+    }
+
+    private String experienceScopeGuidance(InterviewSession session,
+                                           int difficultyLevel,
+                                           int questionNumber,
+                                           boolean banyanStyle) {
+        ExperienceBand band = experienceBand(session);
+        if (!banyanStyle) {
+            return switch (band) {
+                case ONE_TO_THREE -> "1-3 year profile: keep the question direct, with one primary concept and a small implementation surface.";
+                case FOUR_TO_SIX -> "4-6 year profile: use practical rules and edge cases, but keep the implementation narrow and time-boxed.";
+                case SEVEN_TO_TEN -> "7-10 year profile: include design judgement or efficient data handling, without turning it into a broad system exercise.";
+                case ELEVEN_TO_FIFTEEN -> "11-15 year profile: allow richer tradeoffs and API clarity checks, while keeping the task executable in one file.";
+                case SIXTEEN_TO_TWENTY -> "16-20 year profile: test architecture-minded code structure and edge-case discipline within a focused sandbox task.";
+                case TWENTY_PLUS -> "20+ year profile: test clarity, simplification, and tradeoff judgement, not unnecessary breadth.";
+            };
+        }
+        return banyanExperienceScope(band, normalizeDifficulty(difficultyLevel), questionNumber);
+    }
+
+    private String banyanExperienceScope(ExperienceBand band, int difficultyLevel, int questionNumber) {
+        String deterministicRule = "Complexity must increase deterministically by level: each new level adds exactly one new requirement and matching assertions. Do not add multiple independent features in one level.";
+        if (questionNumber <= 1) {
+            return deterministicRule + " " + switch (band) {
+                case ONE_TO_THREE -> "Banyan Level 1 for 1-3 years: start with one small intentional bug or one focused missing method. Use no model or one very small model, 3 to 5 assertions, one primary concept, and one business rule only. Avoid date math, money rules, sorting, aggregation, multiple models, or combined eligibility/discount/final-total logic.";
+                case FOUR_TO_SIX -> "Banyan Level 1 for 4-6 years: use one small model and one method, or two tightly related methods, with 4 to 6 assertions and one edge rule. Save collections-heavy processing and multi-rule decisions for later levels.";
+                case SEVEN_TO_TEN -> "Banyan Level 1 for 7-10 years: establish a modest domain base with one or two models and at most two related methods. Include clear edge cases, but do not include the full final workflow in Level 1.";
+                case ELEVEN_TO_FIFTEEN -> "Banyan Level 1 for 11-15 years: allow a slightly richer base API, but keep it as the trunk of the challenge with at most two related operations. Save policy combinations, ranking, summaries, or optimization for later levels.";
+                case SIXTEEN_TO_TWENTY -> "Banyan Level 1 for 16-20 years: test clean modeling and simple rule implementation, not breadth. Keep the first level compact so later levels can add design pressure.";
+                case TWENTY_PLUS -> "Banyan Level 1 for 20+ years: test simplification, naming, and clean base design. Do not overload Level 1; use later levels for tradeoffs and richer constraints.";
+            };
+        }
+        if (difficultyLevel <= 2) {
+            return deterministicRule + " " + switch (band) {
+                case ONE_TO_THREE -> "For 1-3 years, add one small method or one extra branch in the existing method. Keep assertions simple and avoid introducing advanced APIs.";
+                case FOUR_TO_SIX -> "For 4-6 years, add one practical rule or one collection-based helper. Keep the data model stable.";
+                case SEVEN_TO_TEN -> "For 7-10 years, add one collection, map, or sorting rule only if it naturally follows the existing domain.";
+                case ELEVEN_TO_FIFTEEN -> "For 11-15 years, add one policy or edge-case dimension, not a second workflow.";
+                case SIXTEEN_TO_TWENTY, TWENTY_PLUS -> "For high-experience profiles, add one design-pressure rule at a time and keep the challenge solvable in the editor.";
+            };
+        }
+        return deterministicRule + " " + switch (band) {
+            case ONE_TO_THREE -> "For 1-3 years, Level 3+ may introduce simple collections or maps, but only after earlier levels are passed.";
+            case FOUR_TO_SIX -> "For 4-6 years, Level 3+ may introduce sorting, grouping, or a small summary calculation.";
+            case SEVEN_TO_TEN -> "For 7-10 years, Level 3+ may introduce streams/lambdas or efficient data-structure choices when appropriate.";
+            case ELEVEN_TO_FIFTEEN -> "For 11-15 years, Level 3+ may introduce tradeoffs, policy composition, or cleaner API expectations.";
+            case SIXTEEN_TO_TWENTY -> "For 16-20 years, Level 3+ may introduce maintainability, extensibility, or performance constraints, one at a time.";
+            case TWENTY_PLUS -> "For 20+ years, Level 3+ may test simplifying a richer rule set while still keeping each level bounded.";
+        };
     }
 
     private int idealDurationMinutes(int difficultyLevel, int timeRemainingSeconds, Integer yearsOfExperience) {
@@ -282,6 +422,30 @@ public class AiPolicyEngineService {
         return Math.max(1, Math.min(5, difficultyLevel));
     }
 
+    private ExperienceBand experienceBand(InterviewSession session) {
+        int years = session.getYearsOfExperience() == null ? 0 : session.getYearsOfExperience();
+        String role = valueOrDefault(session.getTargetRole(), "").toLowerCase(Locale.ROOT);
+        if (role.contains("junior") || role.contains("associate") || role.contains("entry")) {
+            years = Math.min(years, 3);
+        }
+        if (years <= 3) {
+            return ExperienceBand.ONE_TO_THREE;
+        }
+        if (years <= 6) {
+            return ExperienceBand.FOUR_TO_SIX;
+        }
+        if (years <= 10) {
+            return ExperienceBand.SEVEN_TO_TEN;
+        }
+        if (years <= 15) {
+            return ExperienceBand.ELEVEN_TO_FIFTEEN;
+        }
+        if (years <= 20) {
+            return ExperienceBand.SIXTEEN_TO_TWENTY;
+        }
+        return ExperienceBand.TWENTY_PLUS;
+    }
+
     private String valueOrDefault(String value, String fallback) {
         return value == null || value.isBlank() ? fallback : value.trim();
     }
@@ -311,5 +475,17 @@ public class AiPolicyEngineService {
             String recommendationPolicy,
             String evaluationRubric
     ) {
+    }
+
+    private record BanyanProblemFamily(String key, String title, String description) {
+    }
+
+    private enum ExperienceBand {
+        ONE_TO_THREE,
+        FOUR_TO_SIX,
+        SEVEN_TO_TEN,
+        ELEVEN_TO_FIFTEEN,
+        SIXTEEN_TO_TWENTY,
+        TWENTY_PLUS
     }
 }

@@ -421,6 +421,9 @@ public class SessionService {
                 submittedCount,
                 generationRequest.getPreviousQuestionTitles());
         AiQuestionResponse generated = generateValidatedAiQuestion(session, generationRequest, questionFiles);
+        if (banyanStyle) {
+            generated = withRequiredConcepts(generated, policyPlan.targetConcepts());
+        }
 
         EditableCodeFileDto generatedFile = banyanStyle
                 ? buildBanyanQuestionFile(session.getTechnology(), generated, questionNumber)
@@ -522,6 +525,9 @@ public class SessionService {
                 request == null ? null : request.getSectionMode(),
                 request == null ? null : request.getComplexityDirection());
         AiQuestionResponse generated = generateValidatedAiQuestion(session, generationRequest, questionFiles);
+        if (banyanStyle) {
+            generated = withRequiredConcepts(generated, targetConcepts);
+        }
         AiQuestionDraft draft = persistAiQuestionDraft(session, generated, questionNumber);
         return AiInterviewerQuestionDraftResponse.builder()
                 .draftId(draft.getId())
@@ -2338,6 +2344,25 @@ public class SessionService {
                 .build();
     }
 
+    private AiQuestionResponse withRequiredConcepts(AiQuestionResponse question, List<String> requiredConcepts) {
+        if (question == null || requiredConcepts == null || requiredConcepts.isEmpty()) {
+            return question;
+        }
+        LinkedHashSet<String> concepts = new LinkedHashSet<>();
+        requiredConcepts.stream()
+                .filter(concept -> concept != null && !concept.isBlank())
+                .map(String::trim)
+                .forEach(concepts::add);
+        if (question.getConcepts() != null) {
+            question.getConcepts().stream()
+                    .filter(concept -> concept != null && !concept.isBlank())
+                    .map(String::trim)
+                    .forEach(concepts::add);
+        }
+        question.setConcepts(List.copyOf(concepts));
+        return question;
+    }
+
     private AiQuestionDraft persistAiQuestionDraft(InterviewSession session, AiQuestionResponse question, int questionNumber) {
         AiQuestionDraft draft = new AiQuestionDraft();
         draft.setSessionId(session.getId());
@@ -2367,8 +2392,9 @@ public class SessionService {
     private String resolveQuestionSection(List<String> concepts, List<String> evaluationFocus) {
         if (concepts != null) {
             for (String concept : concepts) {
-                if (concept != null && !concept.isBlank()) {
-                    return concept.trim();
+                String normalized = concept == null ? "" : concept.trim();
+                if (!normalized.isBlank() && !normalized.toLowerCase(Locale.ROOT).startsWith("banyan-family:")) {
+                    return normalized;
                 }
             }
         }

@@ -219,33 +219,34 @@ const Result: React.FC = () => {
             <div className="participant-info">
               <span className="participant-label">Interviewer</span>
               <span className="participant-name">{interviewer?.name}</span>
-              <span>{interviewer?.email}</span>
+              <span className="participant-detail">{interviewer?.email}</span>
             </div>
             <div className="participant-info">
               <span className="participant-label">Interviewee</span>
               <span className="participant-name">{interviewee?.name}</span>
-              <span>{interviewee?.email}</span>
+              <span className="participant-detail">{interviewee?.email}</span>
+              <span className="participant-detail">{formatExperience(session.yearsOfExperience)}</span>
             </div>
             <div className="participant-info">
               <span className="participant-label">Status</span>
               <span className="participant-name">{STATUS_LABELS[session.status] || session.status}</span>
-              <span>{formatDateTime(session.endedAt || session.createdAt)}</span>
+              <span className="participant-detail">{formatDateTime(session.endedAt || session.createdAt)}</span>
             </div>
             <div className="participant-info">
               <span className="participant-label">Suspicious Activity</span>
               <span className="participant-name">{activityEvents.length}</span>
-              <span>{activityEvents.length === 1 ? 'event observed' : 'events observed'}</span>
+              <span className="participant-detail">{activityEvents.length === 1 ? 'event observed' : 'events observed'}</span>
             </div>
             <div className="participant-info">
               <span className="participant-label">AI Recommendation</span>
               <span className="participant-name">{aiRecommendationHeaderValue(session)}</span>
-              <span>{aiRecommendationHeaderDetail(session)}</span>
+              <span className="participant-detail">{aiRecommendationHeaderDetail(session)}</span>
             </div>
             {showHumanRecommendationTab ? (
               <div className="participant-info">
                 <span className="participant-label">{firstName(interviewer?.name, 'Interviewer')}'s Recommendation</span>
                 <span className="participant-name">{humanRecommendationHeaderValue(session.feedback || session.feedbackDraft)}</span>
-                <span>{humanRecommendationHeaderDetail(session.feedback || session.feedbackDraft)}</span>
+                <span className="participant-detail">{humanRecommendationHeaderDetail(session.feedback || session.feedbackDraft)}</span>
               </div>
             ) : null}
           </div>
@@ -1003,6 +1004,13 @@ function formatFailureReason(reason: string) {
 
 function formatParticipantRole(role: string) {
   return role === 'INTERVIEWER' ? 'Interviewer' : 'Interviewee';
+}
+
+function formatExperience(yearsOfExperience?: number | null) {
+  if (yearsOfExperience === null || yearsOfExperience === undefined) {
+    return 'Experience: Not captured';
+  }
+  return `Experience: ${yearsOfExperience} year${yearsOfExperience === 1 ? '' : 's'}`;
 }
 
 function buildAuditJourneyStages(events: AuthAuditEvent[]) {
