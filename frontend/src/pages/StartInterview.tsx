@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Button } from '../components/Button';
 import { sessionApi } from '../services/sessionApi';
-import type { AvMode, CreateSessionRequest, InterviewMode, TechnologySkill } from '../types/session';
+import type { AvMode, CreateSessionRequest, EvaluationStyle, InterviewMode, TechnologySkill } from '../types/session';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { getBrowserTimeZone } from '../utils/dateTime';
 import './StartInterview.css';
@@ -70,15 +70,17 @@ const StartInterview: React.FC = () => {
     technology,
     avMode: 'EXTERNAL',
     interviewMode: 'HUMAN_INTERVIEWER',
+    evaluationStyle: 'STANDARD_MULTIPLE_QUESTIONS',
     yearsOfExperience: 0,
     targetRole: '',
     startingDifficultyLevel: 1,
     maxQuestions: 5,
   });
-  const [registrationStep, setRegistrationStep] = useState<1 | 2>(1);
+  const [registrationStep, setRegistrationStep] = useState<1 | 2 | 3>(1);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const targetRoleOptions = useMemo(() => TARGET_ROLES_BY_TECHNOLOGY[technology] || TARGET_ROLES_BY_TECHNOLOGY.JAVA, [technology]);
+  const supportsEvaluationStyle = technology === 'JAVA' || technology === 'PYTHON';
 
   useEffect(() => {
     if (!formData.targetRole || !targetRoleOptions.includes(formData.targetRole)) {
@@ -88,6 +90,15 @@ const StartInterview: React.FC = () => {
       }));
     }
   }, [formData.targetRole, targetRoleOptions]);
+
+  useEffect(() => {
+    if (!supportsEvaluationStyle && formData.evaluationStyle !== 'STANDARD_MULTIPLE_QUESTIONS') {
+      setFormData((previous) => ({
+        ...previous,
+        evaluationStyle: 'STANDARD_MULTIPLE_QUESTIONS',
+      }));
+    }
+  }, [formData.evaluationStyle, supportsEvaluationStyle]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     setFormData({
@@ -111,6 +122,13 @@ const StartInterview: React.FC = () => {
     }));
   };
 
+  const handleEvaluationStyleChange = (evaluationStyle: EvaluationStyle) => {
+    setFormData((previous) => ({
+      ...previous,
+      evaluationStyle,
+    }));
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
       e.preventDefault();
       try {
@@ -124,6 +142,7 @@ const StartInterview: React.FC = () => {
           interviewerEmail: interviewMode === 'AI_INTERVIEWER' ? 'ai-interviewer@interview.local' : formData.interviewerEmail,
           interviewerTimeZone: interviewMode === 'AI_INTERVIEWER' ? undefined : formData.interviewerTimeZone,
           avMode: interviewMode === 'AI_INTERVIEWER' ? 'EXTERNAL' : avMode,
+          evaluationStyle: supportsEvaluationStyle ? formData.evaluationStyle ?? 'STANDARD_MULTIPLE_QUESTIONS' : 'STANDARD_MULTIPLE_QUESTIONS',
           yearsOfExperience: Number(formData.yearsOfExperience ?? 0),
           targetRole: formData.targetRole?.trim(),
           startingDifficultyLevel: Number(formData.startingDifficultyLevel ?? 1),
@@ -145,18 +164,16 @@ const StartInterview: React.FC = () => {
 
   return (
     <div className="page-shell">
-      <div className="page-card form-card">
+      <div className="page-card form-card registration-card">
       <div className="page-kicker">Register Interview</div>
-      <h2>Register interview</h2>
-      <form onSubmit={handleSubmit} className="stack-form start-interview-form" autoComplete="off">
+      <form onSubmit={handleSubmit} className={`stack-form start-interview-form registration-step-${registrationStep}`} autoComplete="off">
         <input type="text" name="ghostUser" autoComplete="username" tabIndex={-1} aria-hidden="true" className="sr-only-input" />
         <input type="password" name="ghostPassword" autoComplete="new-password" tabIndex={-1} aria-hidden="true" className="sr-only-input" />
         {registrationStep === 1 ? (
           <>
           <div className="registration-section form-group-full">
             <div>
-              <span className="registration-section-kicker">Interview Attributes</span>
-              <h3>Mode and evaluation scope</h3>
+              <span className="registration-section-kicker">Interview Mode</span>
             </div>
             <div className="registration-mode-layout">
             <div className="mode-toggle-options" role="radiogroup" aria-label="Interview mode">
@@ -187,26 +204,65 @@ const StartInterview: React.FC = () => {
             </div>
             </div>
           </div>
-          {formData.interviewMode !== 'AI_INTERVIEWER' ? (
-            <div className="registration-section form-group-full">
-              <div>
-                <span className="registration-section-kicker">Interviewer</span>
-                <h3>Human interviewer details</h3>
-              </div>
-            <div className="form-group">
-              <label htmlFor="interviewerName">Interviewer Name</label>
-              <input id="interviewerName" name="interviewerName" autoComplete="off" value={formData.interviewerName} onChange={handleChange} required />
-            </div>
-            <div className="form-group">
-              <label htmlFor="interviewerEmail">Interviewer Email</label>
-              <input id="interviewerEmail" name="interviewerEmail" type="email" autoComplete="new-password" inputMode="email" value={formData.interviewerEmail} onChange={handleChange} required />
-            </div>
-            </div>
-          ) : null}
+          {supportsEvaluationStyle ? (
           <div className="registration-section form-group-full">
             <div>
-              <span className="registration-section-kicker">Candidate</span>
-              <h3>Candidate profile</h3>
+              <span className="registration-section-kicker">Evaluation Style</span>
+            </div>
+            <div className="registration-mode-layout">
+              <div className="mode-toggle-options" role="radiogroup" aria-label="Evaluation style">
+                <label className={`av-mode-option ${formData.evaluationStyle !== 'BANYAN' ? 'selected' : ''}`}>
+                  <input
+                    type="radio"
+                    name="evaluationStyle"
+                    value="STANDARD_MULTIPLE_QUESTIONS"
+                    checked={formData.evaluationStyle !== 'BANYAN'}
+                    onChange={() => handleEvaluationStyleChange('STANDARD_MULTIPLE_QUESTIONS')}
+                  />
+                  <span className="av-mode-option-title">Standard Multiple Questions</span>
+                </label>
+                <label className={`av-mode-option ${formData.evaluationStyle === 'BANYAN' ? 'selected' : ''}`}>
+                  <input
+                    type="radio"
+                    name="evaluationStyle"
+                    value="BANYAN"
+                    checked={formData.evaluationStyle === 'BANYAN'}
+                    onChange={() => handleEvaluationStyleChange('BANYAN')}
+                  />
+                  <span className="av-mode-option-title">Banyan Style</span>
+                </label>
+              </div>
+              <div className="registration-mode-detail">
+                <strong>{evaluationStyleTitle(formData.evaluationStyle)}</strong>
+                <p>{evaluationStyleCopy(formData.evaluationStyle)}</p>
+              </div>
+            </div>
+          </div>
+          ) : null}
+          <div className="start-interview-actions">
+            <Button type="button" onClick={() => setRegistrationStep(2)}>Continue</Button>
+          </div>
+          </>
+        ) : registrationStep === 2 ? (
+          <>
+          {formData.interviewMode !== 'AI_INTERVIEWER' ? (
+            <div className="registration-section registration-interviewer-section form-group-full">
+              <div>
+                <span className="registration-section-kicker">Interviewer Details</span>
+              </div>
+              <div className="form-group">
+                <label htmlFor="interviewerName">Interviewer Name</label>
+                <input id="interviewerName" name="interviewerName" autoComplete="off" value={formData.interviewerName} onChange={handleChange} required />
+              </div>
+              <div className="form-group">
+                <label htmlFor="interviewerEmail">Interviewer Email</label>
+                <input id="interviewerEmail" name="interviewerEmail" type="email" autoComplete="new-password" inputMode="email" value={formData.interviewerEmail} onChange={handleChange} required />
+              </div>
+            </div>
+          ) : null}
+          <div className="registration-section registration-candidate-section form-group-full">
+            <div>
+              <span className="registration-section-kicker">Candidate Details</span>
             </div>
             <div className="form-group">
               <label htmlFor="intervieweeName">Interviewee Name</label>
@@ -239,12 +295,13 @@ const StartInterview: React.FC = () => {
               </select>
             </div>
             <div className="form-group">
-              <label htmlFor="maxQuestions">Max Questions</label>
+              <label htmlFor="maxQuestions">{supportsEvaluationStyle && formData.evaluationStyle === 'BANYAN' ? 'Max Levels' : 'Max Questions'}</label>
               <input id="maxQuestions" name="maxQuestions" type="number" min="1" max="5" value={formData.maxQuestions ?? 5} onChange={handleChange} required />
             </div>
           </div>
           <div className="start-interview-actions">
-            <Button type="button" onClick={() => setRegistrationStep(2)}>Continue</Button>
+            <Button type="button" variant="secondary" onClick={() => setRegistrationStep(1)}>Back</Button>
+            <Button type="button" onClick={() => setRegistrationStep(3)}>Continue</Button>
           </div>
           </>
         ) : (
@@ -284,13 +341,14 @@ const StartInterview: React.FC = () => {
           )}
           <div className="registration-review">
             <ReviewChip label="Mode" value={formData.interviewMode === 'AI_INTERVIEWER' ? 'AI Interview' : 'Human Interview'} />
+            {supportsEvaluationStyle ? <ReviewChip label="Style" value={formData.evaluationStyle === 'BANYAN' ? 'Banyan Style' : 'Standard Multiple Questions'} /> : null}
             <ReviewChip label="Candidate" value={formData.intervieweeName || 'Not entered'} />
             <ReviewChip label="Target Role" value={formData.targetRole || 'Not selected'} />
             <ReviewChip label="Difficulty" value={`Level ${formData.startingDifficultyLevel ?? 1}`} />
           </div>
           </div>
         <div className="start-interview-actions">
-          <Button type="button" variant="secondary" onClick={() => setRegistrationStep(1)}>Back</Button>
+          <Button type="button" variant="secondary" onClick={() => setRegistrationStep(2)}>Back</Button>
           <Button type="submit">Register</Button>
         </div>
           </>
@@ -321,4 +379,15 @@ function modeDetailCopy(mode?: InterviewMode) {
     return 'The AI interviewer starts the coding flow, generates validated questions, evaluates submissions, and prepares an advisory recommendation for mandatory human review.';
   }
   return 'A human interviewer leads the conversation, controls question selection, and can optionally use the AI Assistant to draft validated questions and reference solutions.';
+}
+
+function evaluationStyleTitle(style?: EvaluationStyle) {
+  return style === 'BANYAN' ? 'Banyan Style' : 'Standard Multiple Questions';
+}
+
+function evaluationStyleCopy(style?: EvaluationStyle) {
+  if (style === 'BANYAN') {
+    return 'One coding challenge grows level by level just like Indian Banyan Tree. Each level must pass before the next requirement is unlocked.';
+  }
+  return 'Separate questions are generated across the interview. Each submitted question is evaluated independently.';
 }

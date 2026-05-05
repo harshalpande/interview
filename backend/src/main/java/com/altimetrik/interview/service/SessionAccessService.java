@@ -358,6 +358,7 @@ public class SessionAccessService {
                 .participantName(participant.getName())
                 .participantEmail(participant.getEmail())
                 .avMode(session.getAvMode())
+                .evaluationStyle(session.getEvaluationStyle())
                 .sessionStatus(session.getStatus())
                 .accessStatus(challenge.getStatus())
                 .otpExpiresAt(challenge.getOtpExpiresAt())

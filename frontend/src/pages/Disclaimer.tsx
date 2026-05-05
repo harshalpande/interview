@@ -6,6 +6,7 @@ import { useSessionStore } from '../stores/sessionStore';
 import { sessionApi } from '../services/sessionApi';
 import { formatDateTime, getLocalTimeZoneLabel } from '../utils/dateTime';
 import { useBackGuard } from '../hooks/useBackGuard';
+import type { EvaluationStyle } from '../types/session';
 import './Disclaimer.css';
 
 const interviewerPointsForInAppAv = [
@@ -55,14 +56,27 @@ const intervieweePointsForExternalAv = [
   'The interview is designed for 60 minutes unless the interviewer grants the one permitted 15-minute extension.',
 ];
 
-export function getDisclaimerContent(role: 'interviewer' | 'interviewee', avMode: 'IN_APP' | 'EXTERNAL' = 'EXTERNAL') {
-  const points = role === 'interviewer'
+export function getDisclaimerContent(
+  role: 'interviewer' | 'interviewee',
+  avMode: 'IN_APP' | 'EXTERNAL' = 'EXTERNAL',
+  evaluationStyle?: EvaluationStyle | null
+) {
+  const isBanyanStyle = evaluationStyle === 'BANYAN';
+  const basePoints = role === 'interviewer'
     ? avMode === 'IN_APP'
       ? interviewerPointsForInAppAv
       : interviewerPointsForExternalAv
     : avMode === 'IN_APP'
       ? intervieweePointsForInAppAv
       : intervieweePointsForExternalAv;
+  const points = [
+    ...basePoints,
+    ...(isBanyanStyle
+      ? role === 'interviewer'
+        ? ['This session uses Banyan Style: one coding challenge grows level by level. Each level must pass before the next requirement is unlocked, and failed submitted levels move the session to evaluation.']
+        : ['This session uses Banyan Style: one coding challenge grows level by level. You must keep earlier behavior working while adding each new requirement; submitting a level with failing validation ends the challenge for evaluation.']
+      : ['This session uses Standard Multiple Questions: separate coding questions may be evaluated independently across the interview.']),
+  ];
   const subtitle = role === 'interviewer'
     ? 'Please review the interviewer responsibilities, privacy obligations, and fair-use expectations before continuing.'
     : 'Please review the interview monitoring, privacy, and conduct expectations carefully before continuing.';
@@ -128,7 +142,11 @@ const Disclaimer: React.FC = () => {
 
   const participantRole = role === 'interviewer' ? 'INTERVIEWER' : 'INTERVIEWEE';
   const participant = session?.participants.find((entry) => entry.role === participantRole);
-  const { points, subtitle, acknowledgement } = getDisclaimerContent(role, session?.avMode === 'IN_APP' ? 'IN_APP' : 'EXTERNAL');
+  const { points, subtitle, acknowledgement } = getDisclaimerContent(
+    role,
+    session?.avMode === 'IN_APP' ? 'IN_APP' : 'EXTERNAL',
+    session?.evaluationStyle
+  );
 
   const handleAccept = async () => {
     try {

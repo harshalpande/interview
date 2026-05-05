@@ -24,6 +24,7 @@ public class H2EnumColumnRepair implements ApplicationRunner {
             "ALTER TABLE interview_sessions ALTER COLUMN feedback_draft_recommendation_decision SET DATA TYPE VARCHAR(64)",
             "ALTER TABLE interview_sessions ALTER COLUMN technology SET DATA TYPE VARCHAR(64)",
             "ALTER TABLE interview_sessions ALTER COLUMN interview_mode SET DATA TYPE VARCHAR(64)",
+            "ALTER TABLE interview_sessions ALTER COLUMN evaluation_style SET DATA TYPE VARCHAR(64)",
             "ALTER TABLE interview_sessions ALTER COLUMN starting_difficulty SET DATA TYPE VARCHAR(64)",
             "ALTER TABLE interview_sessions ALTER COLUMN av_mode SET DATA TYPE VARCHAR(64)",
             "ALTER TABLE participants ALTER COLUMN role SET DATA TYPE VARCHAR(64)",

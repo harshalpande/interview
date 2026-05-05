@@ -25,8 +25,10 @@ ai:
     gemini-question-model: ${GEMINI_MODEL_QUESTION:gemini-2.5-flash}
     gemini-evaluation-model: ${GEMINI_MODEL_EVALUATION:gemini-2.5-flash}
     gemini-recommendation-model: ${GEMINI_MODEL_RECOMMENDATION:gemini-2.5-flash}
-    request-timeout-seconds: ${AI_REQUEST_TIMEOUT_SECONDS:60}
+    request-timeout-seconds: ${AI_REQUEST_TIMEOUT_SECONDS:90}
     max-retries: ${AI_MAX_RETRIES:2}
+    question-max-output-tokens: ${AI_QUESTION_MAX_OUTPUT_TOKENS:5000}
+    banyan-question-max-output-tokens: ${AI_BANYAN_QUESTION_MAX_OUTPUT_TOKENS:10000}
 
 management:
   endpoints:

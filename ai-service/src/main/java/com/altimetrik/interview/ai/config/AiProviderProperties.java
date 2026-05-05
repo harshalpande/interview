@@ -46,6 +46,12 @@ public class AiProviderProperties {
     @Min(0)
     private int maxRetries = 2;
 
+    @Min(500)
+    private int questionMaxOutputTokens = 5000;
+
+    @Min(500)
+    private int banyanQuestionMaxOutputTokens = 10000;
+
     public boolean isGeminiProvider() {
         return "gemini".equalsIgnoreCase(name);
     }
