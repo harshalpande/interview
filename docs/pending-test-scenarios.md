@@ -73,3 +73,28 @@ This document tracks scenarios that are still pending validation because the cur
   - candidate sees the correct integrity notice
   - interviewer sees alerts only for confirmed suspicious events
   - Result Workspace summarizes `INFO`, `WARNING`, and `SUSPICIOUS` counts correctly
+
+## 4. SMTP Platform Failure Alert Delivery
+
+### Scenario
+
+- Configure `APP_EMAIL_MODE=smtp` with a working provider.
+- Trigger a backend-owned platform failure that produces an unhandled backend exception or a 5xx `ResponseStatusException`.
+- Confirm one platform failure alert email is delivered to `APP_ALERTS_TO`.
+- Repeat the same failure several times within `APP_ALERTS_DEDUPE_WINDOW_SECONDS`.
+
+### Why It Is Still Pending
+
+- Local validation can confirm alert generation through logging mode.
+- End-to-end SMTP delivery depends on provider/domain rules. `APP_ALERTS_TO` currently uses `kkool.harshal@gmail.com` because the Altimetrik domain is blocking delivery.
+
+### Recommended Future Test Setup
+
+- Test once with `APP_EMAIL_MODE=logging`.
+- Test once with `APP_EMAIL_MODE=smtp` and the active Postmark/Mailgun configuration.
+- Verify:
+  - genuine platform failures send alert emails
+  - candidate compile/runtime/assertion errors do not send alert emails
+  - repeated same-error failures are deduplicated across sessions during the suppression window
+  - alert body includes trace id, span id, session id when available, request details, dedupe key, and stack trace
+  - the same trace id is searchable in Grafana

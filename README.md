@@ -19,6 +19,7 @@ Frontend interview technologies currently available in the UI:
 Documentation is consolidated under `docs/`:
 - `docs/README.md` (developer guide: local + Docker, DB profiles, H2 console)
 - `docs/architecture.md` (architecture diagram + key flows)
+- `docs/observability-alerting.md` (Loki/Grafana log search and platform failure alert emails)
 - `docs/objectives.md` (objectives achieved, features, shortcomings)
 - `docs/resume-session-design.md` (persistent session resume behavior and use cases)
 - `docs/pending-test-scenarios.md` (scenarios still pending validation due to environment limitations)
