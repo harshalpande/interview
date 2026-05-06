@@ -332,7 +332,7 @@ public class SessionService {
     public AiQuestionSessionResponse generateNextAiQuestion(String sessionId) {
         InterviewSession session = getRequiredSession(sessionId);
         ensureAiInterview(session);
-        log.info("AI next-question request received sessionId={} status={} technology={} maxQuestions={}",
+        log.debug("AI next-question request received sessionId={} status={} technology={} maxQuestions={}",
                 sessionId, session.getStatus(), session.getTechnology(), session.getMaxQuestions());
         if (session.getStatus() != SessionStatus.ACTIVE) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "AI questions can be generated only while the interview is active.");
@@ -347,7 +347,7 @@ public class SessionService {
         boolean banyanStyle = isBanyanStyle(session);
         long submittedCount = questionFiles.stream().filter(file -> Boolean.TRUE.equals(file.getSubmitted())).count();
         int maxQuestions = session.getMaxQuestions() == null ? 5 : session.getMaxQuestions();
-        log.info("AI next-question state sessionId={} totalFiles={} managedQuestions={} submitted={} activePath={} files={}",
+        log.debug("AI next-question state sessionId={} totalFiles={} managedQuestions={} submitted={} activePath={} files={}",
                 sessionId,
                 files.size(),
                 questionFiles.size(),
@@ -367,7 +367,7 @@ public class SessionService {
                 .findFirst()
                 .orElse(null);
         if (activeQuestion != null) {
-            log.info("AI next-question returning existing active question sessionId={} path={} displayName={} difficulty={}",
+            log.debug("AI next-question returning existing active question sessionId={} path={} displayName={} difficulty={}",
                     sessionId, activeQuestion.getPath(), activeQuestion.getDisplayName(), activeQuestion.getDifficultyLevel());
             return AiQuestionSessionResponse.builder()
                     .question(toAiQuestionResponse(activeQuestion))
@@ -413,13 +413,12 @@ public class SessionService {
                 .requiredQuestionElements(policyPlan.requiredQuestionElements())
                 .sandboxRules(policyPlan.sandboxRules())
                 .build();
-        log.info("AI next-question generating sessionId={} questionNumber={} difficulty={} remainingSec={} submittedCount={} previousTitles={}",
+        log.info("AI next-question generation started sessionId={} questionNumber={} difficulty={} remainingSec={} submittedCount={}",
                 sessionId,
                 questionNumber,
                 currentDifficulty,
                 generationRequest.getTimeRemainingSeconds(),
-                submittedCount,
-                generationRequest.getPreviousQuestionTitles());
+                submittedCount);
         AiQuestionResponse generated = generateValidatedAiQuestion(session, generationRequest, questionFiles);
         if (banyanStyle) {
             generated = withRequiredConcepts(generated, policyPlan.targetConcepts());
@@ -435,17 +434,14 @@ public class SessionService {
         runResultRepository.deleteBySessionIdAndFilePath(sessionId, generatedFile.getPath());
         replaceCodeFiles(sessionId, nextFiles);
         Long generatedCodeVersion = advanceCodeVersionForGeneratedAiQuestion(sessionId, nextFiles, generatedFile.getContent());
-        log.info("AI next-question persisted sessionId={} generatedPath={} displayName={} difficulty={} nextFiles={}",
+        log.info("AI next-question persisted sessionId={} generatedPath={} displayName={} difficulty={}",
                 sessionId,
                 generatedFile.getPath(),
                 generatedFile.getDisplayName(),
-                generatedFile.getDifficultyLevel(),
-                describeAiQuestionFiles(nextFiles.stream()
-                        .filter(file -> isManagedAiQuestionFile(session.getTechnology(), file))
-                        .toList()));
+                generatedFile.getDifficultyLevel());
 
         SessionResponse refreshed = getSession(sessionId);
-        log.info("AI next-question response sessionId={} responseQuestionPath={} refreshedActivePath={} refreshedCodeVersion={} refreshedFiles={}",
+        log.debug("AI next-question response sessionId={} responseQuestionPath={} refreshedActivePath={} refreshedCodeVersion={} refreshedFiles={}",
                 sessionId,
                 generatedFile.getPath(),
                 refreshed.getCodeFiles() == null ? "none" : refreshed.getCodeFiles().stream()
@@ -457,7 +453,7 @@ public class SessionService {
                 refreshed.getCodeFiles() == null ? "[]" : describeAiQuestionFiles(refreshed.getCodeFiles().stream()
                         .filter(file -> isManagedAiQuestionFile(session.getTechnology(), file))
                         .toList()));
-        log.info("AI next-question code version advanced sessionId={} generatedCodeVersion={} refreshedCodeVersion={}",
+        log.debug("AI next-question code version advanced sessionId={} generatedCodeVersion={} refreshedCodeVersion={}",
                 sessionId, generatedCodeVersion, refreshed.getCodeVersion());
         return AiQuestionSessionResponse.builder()
                 .question(toAiQuestionResponse(generatedFile))
@@ -3917,13 +3913,13 @@ public class SessionService {
 
     private void captureFinalPreviewIfAvailable(InterviewSession session, ExecuteResponse executionResult) {
         if (!supportsFinalPreview(session.getTechnology())) {
-            log.info("Skipping final preview capture for session {} because technology {} does not support it",
+            log.debug("Skipping final preview capture for session {} because technology {} does not support it",
                     session.getId(), session.getTechnology());
             session.setFinalPreviewPath(null);
             return;
         }
         if (!hasDurableFrontendPreview(executionResult)) {
-            log.info("Skipping final preview capture for session {} because the final build result is not durable: success={} exitCode={} previewUrl={} stderrLength={} compileErrorCount={}",
+            log.debug("Skipping final preview capture for session {} because the final build result is not durable: success={} exitCode={} previewUrl={} stderrLength={} compileErrorCount={}",
                     session.getId(),
                     executionResult != null && executionResult.isSuccess(),
                     executionResult == null ? null : executionResult.getExitCode(),

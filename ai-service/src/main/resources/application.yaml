@@ -31,6 +31,9 @@ ai:
     banyan-question-max-output-tokens: ${AI_BANYAN_QUESTION_MAX_OUTPUT_TOKENS:10000}
 
 management:
+  tracing:
+    sampling:
+      probability: ${MANAGEMENT_TRACING_SAMPLING_PROBABILITY:1.0}
   endpoints:
     web:
       exposure:

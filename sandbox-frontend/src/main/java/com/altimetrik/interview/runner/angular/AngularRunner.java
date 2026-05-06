@@ -125,7 +125,7 @@ public class AngularRunner implements PersistentFrontendRunner {
         validateEditableFiles(files);
         Path workspaceDir = Files.createTempDirectory("angular-workspace-");
         Path templateRoot = resolveTemplateRoot();
-        log.info("Angular workspace initializing with templateRoot={} workspaceDir={} editableFileCount={}",
+        log.debug("Angular workspace initializing templateRoot={} workspaceDir={} editableFileCount={}",
                 templateRoot, workspaceDir, files == null ? DEFAULT_FILES.size() : files.size());
         copyTemplateWorkspace(templateRoot, workspaceDir);
         patchEditableFiles(workspaceDir, files == null || files.isEmpty() ? DEFAULT_FILES : files);
@@ -144,7 +144,7 @@ public class AngularRunner implements PersistentFrontendRunner {
     @Override
     public FrontendBuildResult buildInWorkspace(Path workspaceDir, long timeoutMs) {
         try {
-            log.info("Angular warm build starting in persistent workspace={}", workspaceDir);
+            log.debug("Angular warm build starting workspaceDir={}", workspaceDir);
             return runBuild(workspaceDir, timeoutMs > 0 ? timeoutMs : DEFAULT_TIMEOUT_MS);
         } catch (Exception exception) {
             log.error("Angular build error in persistent workspace {}", workspaceDir, exception);
@@ -341,7 +341,7 @@ public class AngularRunner implements PersistentFrontendRunner {
             }
             Path previewRoot = resolvePreviewRoot(workspaceDir);
             String previewId = previewStorageService.storePreview(previewRoot);
-            log.info("Angular build completed successfully workspaceDir={} previewRoot={} previewId={}",
+            log.debug("Angular build completed successfully workspaceDir={} previewRoot={} previewId={}",
                     workspaceDir, previewRoot, previewId);
             return FrontendBuildResult.success(stdout, stderr, exitCode, executionTimeMs, "/workspace/preview/" + previewId + "/");
         } catch (ExecutionException exception) {

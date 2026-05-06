@@ -188,7 +188,7 @@ public class GeminiGenerateContentClient {
     }
 
     private ResponseStatusException mapGeminiError(WebClientResponseException exception) {
-        log.error("Gemini request failed status={} body={}", exception.getStatusCode(), exception.getResponseBodyAsString());
+        log.error("Gemini request failed status={} bodyPreview={}", exception.getStatusCode(), preview(exception.getResponseBodyAsString()));
         if (exception.getStatusCode().value() == 429) {
             return new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, "Gemini quota or rate limit has been reached.");
         }

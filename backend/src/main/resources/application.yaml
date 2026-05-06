@@ -116,6 +116,9 @@ springdoc:
     path: /swagger-ui.html
 
 management:
+  tracing:
+    sampling:
+      probability: ${MANAGEMENT_TRACING_SAMPLING_PROBABILITY:1.0}
   health:
     mail:
       enabled: false

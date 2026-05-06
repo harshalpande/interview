@@ -38,7 +38,7 @@ public class CompilerController {
      */
     @PostMapping
     public ResponseEntity<CompileResponse> compile(@RequestBody CompileRequest request) {
-        log.info("Received compile request");
+        log.debug("Compile request received language={}", request.getLanguage());
         
         if (request.getSourceCode() == null || request.getSourceCode().trim().isEmpty()) {
             return ResponseEntity.badRequest()
@@ -49,7 +49,7 @@ public class CompilerController {
         }
 
         CompileResponse response = sandboxClientService.compile(request);
-        log.info("Compile response: success={}, language={}", response.isSuccess(), request.getLanguage());
+        log.debug("Compile completed success={} language={}", response.isSuccess(), request.getLanguage());
         return ResponseEntity.ok(response);
     }
 
@@ -62,8 +62,8 @@ public class CompilerController {
      */
     @PostMapping("/run")
     public ResponseEntity<ExecuteResponse> execute(@RequestBody ExecuteRequest request) {
-        log.info("Received execute request with timeout={}ms, memory={}MB", 
-                 request.getTimeoutMs(), request.getMemoryLimitMb());
+        log.debug("Execute request received timeoutMs={} memoryLimitMb={} language={}",
+                request.getTimeoutMs(), request.getMemoryLimitMb(), request.getLanguage());
         
         if (!hasExecutablePayload(request)) {
             return ResponseEntity.badRequest()
@@ -75,7 +75,7 @@ public class CompilerController {
 
         ExecuteResponse response = sandboxClientService.execute(request);
         sessionService.recordQuestionRunResult(request, response);
-        log.info("Execute response: success={}, exitCode={}, executionTime={}ms, language={}",
+        log.debug("Execute completed success={} exitCode={} executionTimeMs={} language={}",
                 response.isSuccess(), response.getExitCode(), response.getExecutionTimeMs(), request.getLanguage());
         return ResponseEntity.ok(response);
     }

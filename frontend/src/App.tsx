@@ -14,6 +14,10 @@ import { SessionProvider } from './providers/SessionProvider';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import './App.css';
 
+const ISSUE_REPORT_TO = 'hpande@altimetrik.com';
+const ISSUE_REPORT_SUBJECT = 'Issue observed';
+const ISSUE_REPORT_BODY = 'Add description and screenshot(s) to report the challenge you are facing. The more detailed, the better.';
+
 function LegacyDisclaimerRedirect() {
   const { role } = useParams();
   return <Navigate to={role ? `/java/disclaimer/${role}` : '/'} replace />;
@@ -36,6 +40,9 @@ function LegacyResultRedirect() {
 
 function AppContent() {
   const location = useLocation();
+  const [showIssueFallback, setShowIssueFallback] = React.useState(false);
+  const fallbackTimerRef = React.useRef<number | null>(null);
+  const autoHideTimerRef = React.useRef<number | null>(null);
   const isJavaFlow = location.pathname === '/java' || location.pathname.startsWith('/java/');
   const isDashboard = location.pathname === '/';
   const headerTitle = isJavaFlow
@@ -44,10 +51,49 @@ function AppContent() {
       ? 'Live Coding Interview - Recent Sessions'
       : 'Live Coding Interview';
 
+  React.useEffect(() => () => {
+    if (fallbackTimerRef.current) {
+      window.clearTimeout(fallbackTimerRef.current);
+    }
+    if (autoHideTimerRef.current) {
+      window.clearTimeout(autoHideTimerRef.current);
+    }
+  }, []);
+
+  const handleReportIssue = () => {
+    setShowIssueFallback(false);
+    if (fallbackTimerRef.current) {
+      window.clearTimeout(fallbackTimerRef.current);
+    }
+    if (autoHideTimerRef.current) {
+      window.clearTimeout(autoHideTimerRef.current);
+    }
+
+    window.location.href = issueReportMailto();
+    fallbackTimerRef.current = window.setTimeout(() => {
+      if (document.visibilityState === 'visible') {
+        setShowIssueFallback(true);
+        autoHideTimerRef.current = window.setTimeout(() => {
+          setShowIssueFallback(false);
+        }, 10000);
+      }
+    }, 1200);
+  };
+
   return (
     <div className="App">
       <header className="app-header">
         <h1>{headerTitle}</h1>
+        <div className="app-header-actions">
+          <button type="button" className="app-report-link" onClick={handleReportIssue}>
+            Report an Issue
+          </button>
+        </div>
+        {showIssueFallback && (
+          <div className="app-issue-fallback" role="status">
+            If your mail client did not open, send an email to <strong>{ISSUE_REPORT_TO}</strong> with subject <strong>{ISSUE_REPORT_SUBJECT}</strong>.
+          </div>
+        )}
       </header>
       <main className="app-main">
         <Routes>
@@ -71,6 +117,10 @@ function AppContent() {
       </main>
     </div>
   );
+}
+
+function issueReportMailto() {
+  return `mailto:${ISSUE_REPORT_TO}?subject=${encodeURIComponent(ISSUE_REPORT_SUBJECT)}&body=${encodeURIComponent(ISSUE_REPORT_BODY)}`;
 }
 
 function App() {
