@@ -36,6 +36,11 @@
 - Share link UX:
   - Copy button shows `Copied`
   - Optional `REACT_APP_PUBLIC_ORIGIN` for nicer demo URLs
+- Centralized observability:
+  - Spring service logs include trace/span fields and rolling file retention
+  - Promtail ships service logs to Loki
+  - Grafana provides the `Interview Platform - Logs & Exceptions` dashboard
+  - Backend-owned platform failure alerts email genuine application failures while excluding candidate code errors
 
 ## Shortcomings / Limitations
 
@@ -47,10 +52,12 @@
 - AuthN/AuthZ is currently open (no login / RBAC).
 - H2 is fine for dev/demo; production would typically use Postgres/MySQL with migrations.
 - Higher-environment Microsoft Exchange SMTP settings are still pending; local/Docker SMTP can be configured with Postmark or another SMTP provider.
+- Platform failure alert dedupe is in-memory in Phase 1. It suppresses repeated same-error emails while the backend is running, but suppression state is reset by backend redeploy/restart.
 
 ## Future Enhancements
 
 - Move the phase 1 Question Policy/Rubric Engine from backend Java classes into DB/admin-managed tables. The future schema should capture technology-specific concept coverage, difficulty-level rules, forbidden sandbox capabilities, required validation patterns, duration guidance, rubric weights, and human-review recommendation rules.
+- Move platform alert history/deduplication into durable storage or a notification service if alerts later need to originate from multiple services.
 - Based on the product demo held on April 22, 2026, the recommended standard operating position is to keep external AV as the default session mode, using Microsoft Teams or Zoom based on interviewer availability, so the platform experience remains centered on the interview editor, collaboration workflow, and evaluation journey rather than on embedded AV.
 - In-app AV remains available as a supported option for sessions that explicitly require it, but it should be treated as an exception path rather than the default operating model.
 - Shift the next product phase toward performance analysis and future-scope enhancements while preserving this editor-first interview workflow.

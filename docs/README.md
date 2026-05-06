@@ -23,7 +23,8 @@ This repo contains a small interview platform:
 - Registration can select `Human Interviewer` or `AI Interviewer`, plus an evaluation style: `Standard Multiple Questions` or `Banyan Style`. Both modes capture candidate years of experience, a technology-specific target role, starting difficulty level from 1 to 5, and max question/level count. Human mode keeps AV mode selection on the follow-up setup step so the registration page stays focused on candidate/interview attributes.
 - A standalone `ai-service/` Spring Boot WebFlux service owns the AI boundary. It is configured through `AI_PROVIDER`, provider API key/base URL variables, model names, timeout, and retry environment variables. `AI_PROVIDER=openai` uses `AI_API_KEY`/`AI_BASE_URL` and prefers `OPENAI_MODEL_QUESTION`, `OPENAI_MODEL_EVALUATION`, and `OPENAI_MODEL_RECOMMENDATION`. `AI_PROVIDER=gemini` uses `GEMINI_API_KEY`/`GEMINI_BASE_URL` and prefers `GEMINI_MODEL_QUESTION`, `GEMINI_MODEL_EVALUATION`, and `GEMINI_MODEL_RECOMMENDATION`. The generic `AI_MODEL_*` values remain fallback overrides only.
 - AI question generation now uses dynamic output-token sizing. `AI_QUESTION_MAX_OUTPUT_TOKENS` and `AI_BANYAN_QUESTION_MAX_OUTPUT_TOKENS` are ceilings, while the service derives the actual request budget from evaluation style, Banyan level, candidate experience/role, difficulty, and accumulated Banyan context.
-- Spring services use Micrometer Tracing with Brave for `traceId`/`spanId` propagation in logs, and write standard-pattern logs to console and rolling files. Docker mounts per-service logs under `${LOGS_BINDMOUNT_DIR:-C:/Users/hpande/Documents/workspace/bindmount/interview-logs}`. Rolling defaults are `10MB` per file, `250MB` total per service, and `7` calendar days retention to cover a normal 5-working-day window. Runtime application logs default to `INFO`; detailed app diagnostics can be enabled with `LOGGING_LEVEL_COM_ALTIMETRIK=DEBUG`. Central log aggregation uses Loki at `http://localhost:3100`, Promtail ships the mounted service log files to Loki, and Grafana is exposed at `http://localhost:3001` with Loki provisioned as the default data source.
+- Spring services use Micrometer Tracing with Brave for `traceId`/`spanId` propagation in logs, and write standard-pattern logs to console and rolling files. Docker mounts per-service logs under `${LOGS_BINDMOUNT_DIR:-C:/Users/hpande/Documents/workspace/bindmount/interview-logs}`. Rolling defaults are `50MB` per file, `1GB` total per service, and `2` calendar days retention so local files act as a short Promtail buffer while Loki remains the 7-day searchable store. Runtime application logs default to `INFO`; detailed app diagnostics can be enabled with `LOGGING_LEVEL_COM_ALTIMETRIK=DEBUG`. Central log aggregation uses Loki at `http://localhost:3100`, Promtail ships the mounted service log files to Loki, and Grafana is exposed at `http://localhost:3001` with Loki provisioned as the default data source.
+- The provisioned Grafana dashboard is available under folder `Interview` as `Interview Platform - Logs & Exceptions`. See `docs/observability-alerting.md` for log search examples, dashboard usage, and platform failure alert behavior.
 - Docker Compose exposes the AI service on `http://localhost:8084` and connects the backend to it through `AI_SERVICE_BASE_URL`.
 - AI service endpoints now support `/api/ai/questions/generate`, `/api/ai/questions/evaluate`, `/api/ai/interviews/recommendation`, and live provider readiness through `/api/ai/status/provider`.
 - For AI interviews, the backend checks provider readiness before sending candidate access. If the model is unavailable, OTP delivery is blocked with a user-facing message.
@@ -129,6 +130,17 @@ SPRING_MAIL_SMTP_SSL_ENABLE=false
 
 Subject prefixes identify the sending environment. Use `LOCAL`, `DEV`, `UAT`, and no prefix for production as configured by deployment. Higher-environment Microsoft Exchange SMTP details are still pending and should be completed before UAT/production email rollout.
 
+Platform failure alerts are backend-owned Phase 1 emails for genuine application failures only. Candidate compile errors, runtime exceptions, assertion failures, and sandbox output shown in the editor Error tab are interview evidence and do not trigger alert emails. Similar outage-style failures are deduplicated across sessions by normalized category/root-cause fingerprint for the configured suppression window. Full operational details are in `docs/observability-alerting.md`. Configure alerts with:
+
+```env
+APP_ALERTS_ENABLED=true
+APP_ALERTS_TO=kkool.harshal@gmail.com
+APP_ALERTS_DEDUPE_WINDOW_SECONDS=300
+APP_ALERTS_MAX_STACKTRACE_CHARS=12000
+```
+
+`APP_ALERTS_TO` currently points to Gmail because the Altimetrik domain is blocking delivery; change it to the official Altimetrik recipient when domain delivery is allowed.
+
 ## Run With Docker (Recommended)
 
 Prereqs: Docker + Docker Compose.
@@ -158,6 +170,9 @@ Note:
 - Backend API: `http://localhost:8081/api`
 - Sandbox Backend API: `http://localhost:8082/api`
 - Sandbox Frontend API: `http://localhost:8083/api`
+- Loki: `http://localhost:3100`
+- Grafana: `http://localhost:3001`
+- Grafana dashboard: `http://localhost:3001/d/interview-logs/interview-platform-logs-and-exceptions`
 - H2 Console: `http://localhost:8081/api/h2-console`
 - Backend Swagger: `http://localhost:8081/api/swagger-ui.html`
 - Sandbox Backend Swagger: `http://localhost:8082/api/swagger-ui.html`

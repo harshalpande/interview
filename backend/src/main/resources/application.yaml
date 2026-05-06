@@ -97,6 +97,11 @@ app:
         connection-timeout-ms: ${MAILGUN_SPRING_MAIL_SMTP_CONNECTION_TIMEOUT_MS:${SPRING_MAIL_SMTP_CONNECTION_TIMEOUT_MS:30000}}
         timeout-ms: ${MAILGUN_SPRING_MAIL_SMTP_TIMEOUT_MS:${SPRING_MAIL_SMTP_TIMEOUT_MS:30000}}
         write-timeout-ms: ${MAILGUN_SPRING_MAIL_SMTP_WRITE_TIMEOUT_MS:${SPRING_MAIL_SMTP_WRITE_TIMEOUT_MS:30000}}
+  alerts:
+    enabled: ${APP_ALERTS_ENABLED:true}
+    to: ${APP_ALERTS_TO:kkool.harshal@gmail.com}
+    dedupe-window-seconds: ${APP_ALERTS_DEDUPE_WINDOW_SECONDS:300}
+    max-stacktrace-chars: ${APP_ALERTS_MAX_STACKTRACE_CHARS:12000}
   public-origin: ${APP_PUBLIC_ORIGIN:http://localhost:3000}
   storage:
     root: ${APP_STORAGE_PATH:C:/Users/hpande/Documents/workspace/bindmount}

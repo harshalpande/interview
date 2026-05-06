@@ -10,15 +10,23 @@ flowchart LR
   BE -->|JPA| DB[(H2 Database)]
   BE -->|REST /api/compile*| SBB[Sandbox Backend]
   BE -->|REST /api/workspace*| SBF[Sandbox Frontend]
+  BE -->|Platform failure alerts| SMTP[SMTP Provider]
   SBB -->|ProcessBuilder| JVM[javac/java/python sandbox]
   SBF -->|Persistent workspace + watcher| FW[Angular/React workspace]
   BE -->|Store final preview artifact| FS[(Bind-mounted storage)]
+  BE -->|Rolling logs| LOGS[(Host log files)]
+  AIS[AI Service] -->|Rolling logs| LOGS
+  SBB -->|Rolling logs| LOGS
+  SBF -->|Rolling logs| LOGS
+  LOGS -->|Promtail| LOKI[Loki]
+  LOKI -->|Datasource| GRAF[Grafana]
 
   subgraph Backend
     BE
     WS
     DB
     FS
+    LOGS
   end
 
   subgraph Sandboxes
@@ -26,6 +34,11 @@ flowchart LR
     SBF
     JVM
     FW
+  end
+
+  subgraph Observability
+    LOKI
+    GRAF
   end
 ```
 
@@ -51,7 +64,8 @@ flowchart LR
 - `ai-service` owns provider configuration, question generation, solution evaluation, interview recommendation prompts, and later voice/transcript analysis. It supports OpenAI and Gemini behind the `AI_PROVIDER` toggle.
 - Provider-specific models are resolved inside `ai-service`: OpenAI prefers `OPENAI_MODEL_*`, Gemini prefers `GEMINI_MODEL_*`, and generic `AI_MODEL_*` values are only backward-compatible fallbacks.
 - AI question generation uses dynamic max-output-token sizing. Standard and Banyan token properties act as ceilings; the AI service derives the actual request budget from evaluation style, Banyan level, candidate experience/role, difficulty, and accumulated previous Banyan content. The frontend Nginx API proxy allows longer reads so valid Banyan generation is not cut off by the browser-facing proxy while the backend waits for AI validation.
-- Spring services use Micrometer Tracing with Brave for `traceId`/`spanId` propagation in logs. Logs use a shared Logback pattern and rolling file policy. Logs include timestamp, level, application name, `traceId`, `spanId`, thread, logger, message, and full stack trace. Docker mounts logs under `${LOGS_BINDMOUNT_DIR:-C:/Users/hpande/Documents/workspace/bindmount/interview-logs}` per service. Rolling uses a `10MB` max file size, `250MB` total size cap per service, and `7` calendar days of retention, which covers a normal 5-working-day window across weekends. Application logs default to `INFO`, while `LOGGING_LEVEL_COM_ALTIMETRIK=DEBUG` enables detailed diagnostics when needed. Promtail ships mounted service log files to Loki for centralized search, with Loki retention set to `168h`. Grafana is exposed at `http://localhost:3001` with Loki provisioned as the default data source.
+- Spring services use Micrometer Tracing with Brave for `traceId`/`spanId` propagation in logs. Logs use a shared Logback pattern and rolling file policy. Logs include timestamp, level, application name, `traceId`, `spanId`, thread, logger, message, and full stack trace. Docker mounts logs under `${LOGS_BINDMOUNT_DIR:-C:/Users/hpande/Documents/workspace/bindmount/interview-logs}` per service. Rolling uses a `50MB` max file size, `1GB` total size cap per service, and `2` calendar days of retention. Local log files are a short safety buffer for Promtail; Loki is the searchable source of truth with retention set to `168h`. Application logs default to `INFO`, while `LOGGING_LEVEL_COM_ALTIMETRIK=DEBUG` enables detailed diagnostics when needed. Promtail ships mounted service log files to Loki for centralized search. Grafana is exposed at `http://localhost:3001` with Loki provisioned as the default data source.
+- Platform failure alerts are implemented inside the backend as Phase 1 alerting. The global API exception handler sends emails only for genuine platform failures such as unhandled backend exceptions or 5xx `ResponseStatusException` flows. Candidate compile errors, candidate runtime exceptions, failed assertions, and sandbox execution output are normal interview evidence and are intentionally excluded from alert emails. Alerts use the existing `EmailService` provider toggle, include trace/span/session/request details and stack trace, and suppress similar outage-style duplicates across sessions using a normalized category/root-cause fingerprint for the configured window. `APP_ALERTS_TO` defaults to `kkool.harshal@gmail.com` until Altimetrik domain delivery is unblocked. Detailed operations are documented in `docs/observability-alerting.md`.
 - The service is configured only through environment variables; API keys must not be committed.
 - Initial Docker endpoint: `http://localhost:8084/api/ai/status`.
 - Live provider-readiness endpoint: `http://localhost:8084/api/ai/status/provider`.
