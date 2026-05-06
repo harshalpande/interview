@@ -129,7 +129,7 @@ public class ReactRunner implements PersistentFrontendRunner {
         validateEditableFiles(files);
         Path workspaceDir = Files.createTempDirectory("react-workspace-");
         Path templateRoot = resolveTemplateRoot();
-        log.info("React workspace initializing with templateRoot={} workspaceDir={} editableFileCount={}",
+        log.debug("React workspace initializing templateRoot={} workspaceDir={} editableFileCount={}",
                 templateRoot, workspaceDir, files == null ? DEFAULT_FILES.size() : files.size());
         copyTemplateWorkspace(templateRoot, workspaceDir);
         patchEditableFiles(workspaceDir, files == null || files.isEmpty() ? DEFAULT_FILES : files);
@@ -148,7 +148,7 @@ public class ReactRunner implements PersistentFrontendRunner {
     @Override
     public FrontendBuildResult buildInWorkspace(Path workspaceDir, long timeoutMs) {
         try {
-            log.info("React warm build starting in persistent workspace={}", workspaceDir);
+            log.debug("React warm build starting workspaceDir={}", workspaceDir);
             return runBuild(workspaceDir, timeoutMs > 0 ? timeoutMs : DEFAULT_TIMEOUT_MS);
         } catch (Exception exception) {
             log.error("React build error in persistent workspace {}", workspaceDir, exception);
@@ -334,7 +334,7 @@ public class ReactRunner implements PersistentFrontendRunner {
 
             Path previewRoot = resolvePreviewRoot(workspaceDir);
             String previewId = previewStorageService.storePreview(previewRoot);
-            log.info("React build completed successfully workspaceDir={} previewRoot={} previewId={}",
+            log.debug("React build completed successfully workspaceDir={} previewRoot={} previewId={}",
                     workspaceDir, previewRoot, previewId);
             return FrontendBuildResult.success(stdout, stderr, exitCode, executionTimeMs, "/workspace/preview/" + previewId + "/");
         } catch (ExecutionException exception) {

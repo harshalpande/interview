@@ -85,7 +85,7 @@ public class OpenAiResponsesClient {
     }
 
     private ResponseStatusException mapOpenAiError(WebClientResponseException exception) {
-        log.error("OpenAI request failed status={} body={}", exception.getStatusCode(), exception.getResponseBodyAsString());
+        log.error("OpenAI request failed status={} bodyPreview={}", exception.getStatusCode(), preview(exception.getResponseBodyAsString()));
         if (exception.getStatusCode().value() == 429) {
             return new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, "OpenAI quota or rate limit has been reached.");
         }
@@ -122,5 +122,13 @@ public class OpenAiResponsesClient {
             return mapOpenAiError(exception);
         }
         return throwable;
+    }
+
+    private String preview(String value) {
+        if (value == null) {
+            return "";
+        }
+        String compact = value.replaceAll("\\s+", " ").trim();
+        return compact.length() <= 500 ? compact : compact.substring(0, 500) + "...";
     }
 }

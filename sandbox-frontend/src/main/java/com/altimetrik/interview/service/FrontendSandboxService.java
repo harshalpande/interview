@@ -48,7 +48,7 @@ public class FrontendSandboxService {
     public BuildResponse build(BuildRequest request) {
         FrontendRunner runner = resolveRunner(request.getLanguage());
         long timeoutMs = request.getTimeoutMs() > 0 ? request.getTimeoutMs() : runner.defaultTimeoutMs();
-        log.info("Frontend build start language={} sessionId={} workspaceId={} fileCount={} timeoutMs={}",
+        log.debug("Frontend build start language={} sessionId={} workspaceId={} fileCount={} timeoutMs={}",
                 request.getLanguage(),
                 request.getSessionId(),
                 request.getWorkspaceId(),
@@ -57,7 +57,7 @@ public class FrontendSandboxService {
         FrontendBuildResult result = buildWithWorkspaceReuse(request, runner, timeoutMs);
         String previewPath = resolvePreviewPath(request, result);
         String workspaceId = resolveWorkspaceId(request);
-        log.info("Frontend build result language={} sessionId={} workspaceId={} success={} exitCode={} executionTimeMs={} stdoutLength={} stderrLength={} compileErrorCount={} rawPreviewPath={} resolvedPreviewPath={} message={}",
+        log.debug("Frontend build result language={} sessionId={} workspaceId={} success={} exitCode={} executionTimeMs={} stdoutLength={} stderrLength={} compileErrorCount={} rawPreviewPath={} resolvedPreviewPath={} message={}",
                 request.getLanguage(),
                 request.getSessionId(),
                 workspaceId,
@@ -91,7 +91,7 @@ public class FrontendSandboxService {
                 return workspaceRegistryService.withSessionLock(request.getSessionId(), () -> {
                     WorkspaceResponse existing = workspaceRegistryService.findBySessionId(request.getSessionId()).orElse(null);
                     if (existing != null) {
-                        log.info("Frontend workspace create reuse language={} sessionId={} workspaceId={}",
+                        log.debug("Frontend workspace create reuse language={} sessionId={} workspaceId={}",
                                 request.getLanguage(), request.getSessionId(), existing.getWorkspaceId());
                         return existing;
                     }
@@ -161,7 +161,7 @@ public class FrontendSandboxService {
         FrontendRunner runner = resolveRunner(workspace.getLanguage());
         Path workspaceRoot = workspaceRegistryService.resolveWorkspaceRoot(workspaceId)
                 .orElseThrow(() -> new IllegalArgumentException("Workspace root not found for " + workspaceId));
-        log.info("Frontend workspace patch start language={} workspaceId={} fileCount={} workspaceRoot={}",
+        log.debug("Frontend workspace patch start language={} workspaceId={} fileCount={} workspaceRoot={}",
                 workspace.getLanguage(),
                 workspaceId,
                 request == null || request.getFiles() == null ? 0 : request.getFiles().size(),
@@ -171,7 +171,7 @@ public class FrontendSandboxService {
             try {
                 return workspaceRegistryService.withWorkspaceLock(workspaceId, () -> {
                     persistentRunner.patchWorkspaceFiles(workspaceRoot, request == null ? null : request.getFiles());
-                    log.info("Frontend workspace patch complete language={} workspaceId={} fileCount={}",
+                    log.debug("Frontend workspace patch complete language={} workspaceId={} fileCount={}",
                             workspace.getLanguage(),
                             workspaceId,
                             request == null || request.getFiles() == null ? 0 : request.getFiles().size());
@@ -249,7 +249,7 @@ public class FrontendSandboxService {
             if (workspaceRoot != null && workspaceId != null && !workspaceId.isBlank()) {
                 try {
                     return workspaceRegistryService.withWorkspaceLock(workspaceId, () -> {
-                        log.info("Frontend build using persistent workspace language={} sessionId={} workspaceId={} workspaceRoot={}",
+                        log.debug("Frontend build using persistent workspace language={} sessionId={} workspaceId={} workspaceRoot={}",
                                 request.getLanguage(), request.getSessionId(), workspaceId, workspaceRoot);
                         boolean watcherAlive = workspaceRegistryService.resolveProcess(workspaceId)
                                 .map(Process::isAlive)
@@ -272,7 +272,7 @@ public class FrontendSandboxService {
                                     }
                                     return watcherResult;
                                 }
-                                log.info("{} live preview build still updating for workspaceId={}, returning current warm preview",
+                                log.debug("{} live preview build still updating for workspaceId={}, returning current warm preview",
                                         request.getLanguage(), workspaceId);
                                 return FrontendBuildResult.success(
                                         request.getLanguage() + " live preview is updating.",
@@ -298,7 +298,7 @@ public class FrontendSandboxService {
                     return FrontendBuildResult.error(exception.getMessage());
                 }
             }
-            log.info("Frontend build has no persistent workspace language={} sessionId={} workspaceId={}, falling back to cold build",
+            log.debug("Frontend build has no persistent workspace language={} sessionId={} workspaceId={}, falling back to cold build",
                     request.getLanguage(), request.getSessionId(), request.getWorkspaceId());
         }
         return runner.build(request.getFiles(), timeoutMs);

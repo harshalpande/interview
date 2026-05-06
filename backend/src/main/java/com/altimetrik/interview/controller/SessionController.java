@@ -246,7 +246,7 @@ public class SessionController {
     @PostMapping("/{id}/ai/questions/next")
     public ResponseEntity<AiQuestionSessionResponse> generateNextAiQuestion(@PathVariable String id) {
         AiQuestionSessionResponse response = sessionService.generateNextAiQuestion(id);
-        log.info("AI next-question controller response sessionId={} questionPath={} sessionCodeVersion={} activePath={}",
+        log.debug("AI next-question controller response sessionId={} questionPath={} sessionCodeVersion={} activePath={}",
                 id,
                 response.getQuestion() == null ? "none" : response.getQuestion().getFilePath(),
                 response.getSession() == null ? null : response.getSession().getCodeVersion(),
@@ -422,7 +422,7 @@ public class SessionController {
     }
 
     private void broadcastSession(SessionResponse response, String type, String message) {
-        log.info("Broadcasting session update sessionId={} type={} version={} activePath={} message={}",
+        log.debug("Broadcasting session update sessionId={} type={} version={} activePath={} message={}",
                 response.getId(),
                 type,
                 response.getCodeVersion(),

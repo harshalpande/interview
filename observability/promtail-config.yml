@@ -1,0 +1,70 @@
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: interview-backend
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: interview-service-files
+          service: backend
+          app: java-compiler-backend
+          __path__: /var/log/interview/backend/java-compiler-backend/application.log
+    pipeline_stages:
+      - regex:
+          expression: '^\S+\s+(?P<level>TRACE|DEBUG|INFO|WARN|ERROR)\s+\[(?P<logged_app>[^\]]+)\]'
+      - labels:
+          level:
+
+  - job_name: interview-ai-service
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: interview-service-files
+          service: ai-service
+          app: interview-ai-service
+          __path__: /var/log/interview/ai-service/interview-ai-service/application.log
+    pipeline_stages:
+      - regex:
+          expression: '^\S+\s+(?P<level>TRACE|DEBUG|INFO|WARN|ERROR)\s+\[(?P<logged_app>[^\]]+)\]'
+      - labels:
+          level:
+
+  - job_name: interview-sandbox-backend
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: interview-service-files
+          service: sandbox-backend
+          app: sandbox-backend
+          __path__: /var/log/interview/sandbox-backend/sandbox-backend/application.log
+    pipeline_stages:
+      - regex:
+          expression: '^\S+\s+(?P<level>TRACE|DEBUG|INFO|WARN|ERROR)\s+\[(?P<logged_app>[^\]]+)\]'
+      - labels:
+          level:
+
+  - job_name: interview-sandbox-frontend
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: interview-service-files
+          service: sandbox-frontend
+          app: sandbox-frontend
+          __path__: /var/log/interview/sandbox-frontend/sandbox-frontend/application.log
+    pipeline_stages:
+      - regex:
+          expression: '^\S+\s+(?P<level>TRACE|DEBUG|INFO|WARN|ERROR)\s+\[(?P<logged_app>[^\]]+)\]'
+      - labels:
+          level:

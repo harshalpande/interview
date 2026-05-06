@@ -36,7 +36,8 @@ public class WorkspaceController {
 
     @PostMapping("/workspace/build")
     public ResponseEntity<BuildResponse> build(@RequestBody BuildRequest request) {
-        log.info("Received frontend build request for {}", request.getLanguage());
+        log.debug("Frontend build request received language={} sessionId={} workspaceId={}",
+                request.getLanguage(), request.getSessionId(), request.getWorkspaceId());
         boolean hasFiles = request.getFiles() != null && !request.getFiles().isEmpty();
         boolean hasWorkspaceReference = (request.getWorkspaceId() != null && !request.getWorkspaceId().isBlank())
                 || (request.getSessionId() != null && !request.getSessionId().isBlank());
@@ -49,7 +50,7 @@ public class WorkspaceController {
         }
 
         BuildResponse response = frontendSandboxService.build(request);
-        log.info("Frontend build response: success={}, exitCode={}, executionTime={}ms, language={}",
+        log.debug("Frontend build completed success={} exitCode={} executionTimeMs={} language={}",
                 response.isSuccess(), response.getExitCode(), response.getExecutionTimeMs(), request.getLanguage());
         return ResponseEntity.ok(response);
     }

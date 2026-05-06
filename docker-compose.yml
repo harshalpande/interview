@@ -1,6 +1,50 @@
-
-
 services:
+  loki:
+    image: grafana/loki:2.9.8
+    container_name: interview-loki
+    command: -config.file=/etc/loki/local-config.yml
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./observability/loki-config.yml:/etc/loki/local-config.yml:ro
+      - loki-data:/loki
+    networks:
+      - java-compiler-network
+    restart: unless-stopped
+
+  promtail:
+    image: grafana/promtail:2.9.8
+    container_name: interview-promtail
+    command: -config.file=/etc/promtail/config.yml
+    volumes:
+      - ./observability/promtail-config.yml:/etc/promtail/config.yml:ro
+      - "${LOGS_BINDMOUNT_DIR:-C:/Users/hpande/Documents/workspace/bindmount/interview-logs}:/var/log/interview:ro"
+      - promtail-positions:/tmp
+    networks:
+      - java-compiler-network
+    depends_on:
+      - loki
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    container_name: interview-grafana
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_USERS_DEFAULT_THEME=light
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    networks:
+      - java-compiler-network
+    depends_on:
+      - loki
+    restart: unless-stopped
+
   ai-service:
     build:
       context: ./ai-service
@@ -26,7 +70,14 @@ services:
       - AI_REQUEST_TIMEOUT_SECONDS=${AI_REQUEST_TIMEOUT_SECONDS:-60}
       - AI_MAX_RETRIES=${AI_MAX_RETRIES:-2}
       - AI_TEMPERATURE=${AI_TEMPERATURE:-0.2}
+      - LOG_PATH=${LOG_PATH:-/logs}
+      - LOG_MAX_FILE_SIZE=${LOG_MAX_FILE_SIZE:-10MB}
+      - LOG_MAX_HISTORY_DAYS=${LOG_MAX_HISTORY_DAYS:-7}
+      - LOG_TOTAL_SIZE_CAP=${LOG_TOTAL_SIZE_CAP:-250MB}
+      - MANAGEMENT_TRACING_SAMPLING_PROBABILITY=${MANAGEMENT_TRACING_SAMPLING_PROBABILITY:-1.0}
       - JAVA_OPTS=-Xmx512m -Xms256m
+    volumes:
+      - "${LOGS_BINDMOUNT_DIR:-C:/Users/hpande/Documents/workspace/bindmount/interview-logs}/ai-service:/logs"
     networks:
       - java-compiler-network
     restart: unless-stopped
@@ -36,6 +87,8 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+    depends_on:
+      - loki
 
   sandbox-frontend:
     build:
@@ -46,16 +99,25 @@ services:
       - "8083:8080"
     environment:
       - JAVA_OPTS=-Xmx512m -Xms256m
-      - LOGGING_LEVEL_COM_ALTIMETRIK=DEBUG
+      - LOG_PATH=${LOG_PATH:-/logs}
+      - LOG_MAX_FILE_SIZE=${LOG_MAX_FILE_SIZE:-10MB}
+      - LOG_MAX_HISTORY_DAYS=${LOG_MAX_HISTORY_DAYS:-7}
+      - LOG_TOTAL_SIZE_CAP=${LOG_TOTAL_SIZE_CAP:-250MB}
+      - MANAGEMENT_TRACING_SAMPLING_PROBABILITY=${MANAGEMENT_TRACING_SAMPLING_PROBABILITY:-1.0}
+      - LOGGING_LEVEL_COM_ALTIMETRIK=${LOGGING_LEVEL_COM_ALTIMETRIK:-INFO}
+    volumes:
+      - "${LOGS_BINDMOUNT_DIR:-C:/Users/hpande/Documents/workspace/bindmount/interview-logs}/sandbox-frontend:/logs"
     networks:
       - java-compiler-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/api/actuator/health"]
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:8080/api/actuator/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
+    depends_on:
+      - loki
 
   sandbox-backend:
     build:
@@ -66,18 +128,26 @@ services:
       - "8082:8080"
     environment:
       - JAVA_OPTS=-Xmx512m -Xms256m
-      - LOGGING_LEVEL_COM_ALTIMETRIK=DEBUG
+      - LOG_PATH=${LOG_PATH:-/logs}
+      - LOG_MAX_FILE_SIZE=${LOG_MAX_FILE_SIZE:-10MB}
+      - LOG_MAX_HISTORY_DAYS=${LOG_MAX_HISTORY_DAYS:-7}
+      - LOG_TOTAL_SIZE_CAP=${LOG_TOTAL_SIZE_CAP:-250MB}
+      - MANAGEMENT_TRACING_SAMPLING_PROBABILITY=${MANAGEMENT_TRACING_SAMPLING_PROBABILITY:-1.0}
+      - LOGGING_LEVEL_COM_ALTIMETRIK=${LOGGING_LEVEL_COM_ALTIMETRIK:-INFO}
     volumes:
       - /tmp:/tmp
+      - "${LOGS_BINDMOUNT_DIR:-C:/Users/hpande/Documents/workspace/bindmount/interview-logs}/sandbox-backend:/logs"
     networks:
       - java-compiler-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/api/actuator/health"]
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8080/api/actuator/health').read()\""]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
+    depends_on:
+      - loki
 
   backend:
     build:
@@ -120,9 +190,15 @@ services:
       - MAILGUN_SPRING_MAIL_PASSWORD=${MAILGUN_SPRING_MAIL_PASSWORD:-}
       - MANAGEMENT_HEALTH_MAIL_ENABLED=false
       - JAVA_OPTS=-Xmx512m -Xms256m
-      - LOGGING_LEVEL_COM_ALTIMETRIK=DEBUG
+      - LOG_PATH=${LOG_PATH:-/logs}
+      - LOG_MAX_FILE_SIZE=${LOG_MAX_FILE_SIZE:-10MB}
+      - LOG_MAX_HISTORY_DAYS=${LOG_MAX_HISTORY_DAYS:-7}
+      - LOG_TOTAL_SIZE_CAP=${LOG_TOTAL_SIZE_CAP:-250MB}
+      - MANAGEMENT_TRACING_SAMPLING_PROBABILITY=${MANAGEMENT_TRACING_SAMPLING_PROBABILITY:-1.0}
+      - LOGGING_LEVEL_COM_ALTIMETRIK=${LOGGING_LEVEL_COM_ALTIMETRIK:-INFO}
     volumes:
       - "${BINDMOUNT_DIR:-C:/Users/hpande/Documents/workspace/bindmount}:/data" # Persistent H2 DB (Windows bind mount)
+      - "${LOGS_BINDMOUNT_DIR:-C:/Users/hpande/Documents/workspace/bindmount/interview-logs}/backend:/logs"
     dns:
       - 8.8.8.8
       - 1.1.1.1
@@ -130,6 +206,9 @@ services:
       - java-compiler-network
     depends_on:
       - sandbox-backend
+      - sandbox-frontend
+      - ai-service
+      - loki
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/api/actuator/health"]
@@ -156,3 +235,8 @@ services:
 networks:
   java-compiler-network:
     driver: bridge
+
+volumes:
+  loki-data:
+  promtail-positions:
+  grafana-data:

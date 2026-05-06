@@ -38,19 +38,19 @@ public class SandboxClientService {
 
     public ExecuteResponse execute(ExecuteRequest request) {
         if (isFrontendLanguage(request.getLanguage())) {
-            log.info("Frontend execute request language={} sessionId={} codeFileCount={} timeoutMs={} memoryLimitMb={}",
+            log.debug("Frontend execute request language={} sessionId={} codeFileCount={} timeoutMs={} memoryLimitMb={}",
                     request.getLanguage(),
                     request.getSessionId(),
                     request.getCodeFiles() == null ? 0 : request.getCodeFiles().size(),
                     request.getTimeoutMs(),
                     request.getMemoryLimitMb());
             FrontendWorkspaceResponse workspace = resolveFrontendWorkspace(request.getSessionId(), request.getLanguage(), request.getCodeFiles());
-            log.info("Frontend workspace resolved language={} sessionId={} workspaceId={} previewPath={}",
+            log.debug("Frontend workspace resolved language={} sessionId={} workspaceId={} previewPath={}",
                     request.getLanguage(),
                     request.getSessionId(),
                     workspace == null ? null : workspace.getWorkspaceId(),
                     workspace == null ? null : workspace.getPreviewPath());
-            log.info("Frontend build dispatch language={} sessionId={} workspaceId={} fallbackFileCount={}",
+            log.debug("Frontend build dispatch language={} sessionId={} workspaceId={} fallbackFileCount={}",
                     request.getLanguage(),
                     request.getSessionId(),
                     workspace == null ? null : workspace.getWorkspaceId(),
@@ -64,7 +64,7 @@ public class SandboxClientService {
                     .livePreviewMode(request.isLivePreviewMode())
                     .build());
             String previewUrl = resolveFrontendPreviewUrl(response.getPreviewPath());
-            log.info("Frontend sandbox execution completed language={} sessionId={} success={} exitCode={} executionTimeMs={} previewPath={} previewUrl={} stderrLength={} compileErrorCount={} message={}",
+            log.debug("Frontend sandbox execution completed language={} sessionId={} success={} exitCode={} executionTimeMs={} previewPath={} previewUrl={} stderrLength={} compileErrorCount={} message={}",
                     request.getLanguage(),
                     request.getSessionId(),
                     response.isSuccess(),
