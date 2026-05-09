@@ -1,0 +1,247 @@
+services:
+  loki:
+    image: grafana/loki:2.9.8
+    container_name: interview-loki
+    command: -config.file=/etc/loki/local-config.yml
+    ports:
+      - "${LOKI_PORT:-3100}:3100"
+    volumes:
+      - ./observability/loki-config.yml:/etc/loki/local-config.yml:ro
+      - loki-data:/loki
+    networks:
+      - interview-network
+    restart: unless-stopped
+
+  promtail:
+    image: grafana/promtail:2.9.8
+    container_name: interview-promtail
+    command: -config.file=/etc/promtail/config.yml
+    volumes:
+      - ./observability/promtail-config.yml:/etc/promtail/config.yml:ro
+      - "${AWS_LOGS_DIR:-/opt/interview/logs}:/var/log/interview:ro"
+      - promtail-positions:/tmp
+    networks:
+      - interview-network
+    depends_on:
+      - loki
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    container_name: interview-grafana
+    ports:
+      - "${GRAFANA_PORT:-3001}:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_USERS_DEFAULT_THEME=light
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    networks:
+      - interview-network
+    depends_on:
+      - loki
+    restart: unless-stopped
+
+  ai-service:
+    build:
+      context: ./ai-service
+      dockerfile: Dockerfile
+    container_name: interview-ai-service
+    ports:
+      - "${AI_SERVICE_PORT:-8084}:8080"
+    environment:
+      - AI_PROVIDER=${AI_PROVIDER:-openai}
+      - AI_API_KEY=${AI_API_KEY:-}
+      - AI_BASE_URL=${AI_BASE_URL:-https://api.openai.com/v1}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GEMINI_BASE_URL=${GEMINI_BASE_URL:-https://generativelanguage.googleapis.com/v1beta}
+      - AI_MODEL_QUESTION=${AI_MODEL_QUESTION:-gpt-4.1-mini}
+      - AI_MODEL_EVALUATION=${AI_MODEL_EVALUATION:-gpt-4.1-mini}
+      - AI_MODEL_RECOMMENDATION=${AI_MODEL_RECOMMENDATION:-gpt-4.1-mini}
+      - OPENAI_MODEL_QUESTION=${OPENAI_MODEL_QUESTION:-gpt-4.1-mini}
+      - OPENAI_MODEL_EVALUATION=${OPENAI_MODEL_EVALUATION:-gpt-4.1-mini}
+      - OPENAI_MODEL_RECOMMENDATION=${OPENAI_MODEL_RECOMMENDATION:-gpt-4.1-mini}
+      - GEMINI_MODEL_QUESTION=${GEMINI_MODEL_QUESTION:-gemini-2.5-flash}
+      - GEMINI_MODEL_EVALUATION=${GEMINI_MODEL_EVALUATION:-gemini-2.5-flash}
+      - GEMINI_MODEL_RECOMMENDATION=${GEMINI_MODEL_RECOMMENDATION:-gemini-2.5-flash}
+      - AI_REQUEST_TIMEOUT_SECONDS=${AI_REQUEST_TIMEOUT_SECONDS:-60}
+      - AI_MAX_RETRIES=${AI_MAX_RETRIES:-2}
+      - AI_TEMPERATURE=${AI_TEMPERATURE:-0.2}
+      - LOG_PATH=/logs
+      - LOG_MAX_FILE_SIZE=${LOG_MAX_FILE_SIZE:-50MB}
+      - LOG_MAX_HISTORY_DAYS=${LOG_MAX_HISTORY_DAYS:-2}
+      - LOG_TOTAL_SIZE_CAP=${LOG_TOTAL_SIZE_CAP:-1GB}
+      - MANAGEMENT_TRACING_SAMPLING_PROBABILITY=${MANAGEMENT_TRACING_SAMPLING_PROBABILITY:-1.0}
+      - LOGGING_LEVEL_COM_ALTIMETRIK=${LOGGING_LEVEL_COM_ALTIMETRIK:-INFO}
+      - JAVA_OPTS=-Xmx512m -Xms256m
+    volumes:
+      - "${AWS_LOGS_DIR:-/opt/interview/logs}/ai-service:/logs"
+    networks:
+      - interview-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    depends_on:
+      - loki
+
+  sandbox-frontend:
+    build:
+      context: .
+      dockerfile: sandbox-frontend/Dockerfile
+    container_name: sandbox-frontend
+    ports:
+      - "${SANDBOX_FRONTEND_PORT:-8083}:8080"
+    environment:
+      - JAVA_OPTS=-Xmx512m -Xms256m
+      - LOG_PATH=/logs
+      - LOG_MAX_FILE_SIZE=${LOG_MAX_FILE_SIZE:-50MB}
+      - LOG_MAX_HISTORY_DAYS=${LOG_MAX_HISTORY_DAYS:-2}
+      - LOG_TOTAL_SIZE_CAP=${LOG_TOTAL_SIZE_CAP:-1GB}
+      - MANAGEMENT_TRACING_SAMPLING_PROBABILITY=${MANAGEMENT_TRACING_SAMPLING_PROBABILITY:-1.0}
+      - LOGGING_LEVEL_COM_ALTIMETRIK=${LOGGING_LEVEL_COM_ALTIMETRIK:-INFO}
+    volumes:
+      - "${AWS_LOGS_DIR:-/opt/interview/logs}/sandbox-frontend:/logs"
+    networks:
+      - interview-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:8080/api/actuator/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    depends_on:
+      - loki
+
+  sandbox-backend:
+    build:
+      context: .
+      dockerfile: sandbox-backend/Dockerfile
+    container_name: sandbox-backend
+    ports:
+      - "${SANDBOX_BACKEND_PORT:-8082}:8080"
+    environment:
+      - JAVA_OPTS=-Xmx512m -Xms256m
+      - LOG_PATH=/logs
+      - LOG_MAX_FILE_SIZE=${LOG_MAX_FILE_SIZE:-50MB}
+      - LOG_MAX_HISTORY_DAYS=${LOG_MAX_HISTORY_DAYS:-2}
+      - LOG_TOTAL_SIZE_CAP=${LOG_TOTAL_SIZE_CAP:-1GB}
+      - MANAGEMENT_TRACING_SAMPLING_PROBABILITY=${MANAGEMENT_TRACING_SAMPLING_PROBABILITY:-1.0}
+      - LOGGING_LEVEL_COM_ALTIMETRIK=${LOGGING_LEVEL_COM_ALTIMETRIK:-INFO}
+    volumes:
+      - sandbox-tmp:/tmp
+      - "${AWS_LOGS_DIR:-/opt/interview/logs}/sandbox-backend:/logs"
+    networks:
+      - interview-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8080/api/actuator/health').read()\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    depends_on:
+      - loki
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: interview-backend
+    ports:
+      - "${BACKEND_PORT:-8081}:8080"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - SANDBOX_BASE_URL=http://sandbox-backend:8080/api
+      - SANDBOX_FRONTEND_BASE_URL=http://sandbox-frontend:8080/api
+      - SANDBOX_FRONTEND_PUBLIC_BASE_URL=${SANDBOX_FRONTEND_PUBLIC_BASE_URL:-http://localhost:8083/api}
+      - AI_SERVICE_BASE_URL=http://ai-service:8080/api
+      - APP_PUBLIC_ORIGIN=${APP_PUBLIC_ORIGIN:-}
+      - APP_EMAIL_MODE=${APP_EMAIL_MODE:-logging}
+      - APP_EMAIL_PROVIDER=${APP_EMAIL_PROVIDER:-postmark}
+      - APP_EMAIL_FROM_ADDRESS=${APP_EMAIL_FROM_ADDRESS:-no-reply@example.com}
+      - APP_EMAIL_FROM_NAME=${APP_EMAIL_FROM_NAME:-Interview Platform}
+      - APP_EMAIL_SUBJECT_PREFIX=${APP_EMAIL_SUBJECT_PREFIX:-AWS}
+      - SPRING_MAIL_HOST=${SPRING_MAIL_HOST:-}
+      - SPRING_MAIL_PORT=${SPRING_MAIL_PORT:-2525}
+      - SPRING_MAIL_USERNAME=${SPRING_MAIL_USERNAME:-}
+      - SPRING_MAIL_PASSWORD=${SPRING_MAIL_PASSWORD:-}
+      - SPRING_MAIL_SMTP_AUTH=${SPRING_MAIL_SMTP_AUTH:-true}
+      - SPRING_MAIL_SMTP_STARTTLS_ENABLE=${SPRING_MAIL_SMTP_STARTTLS_ENABLE:-true}
+      - SPRING_MAIL_SMTP_STARTTLS_REQUIRED=${SPRING_MAIL_SMTP_STARTTLS_REQUIRED:-false}
+      - SPRING_MAIL_SMTP_SSL_ENABLE=${SPRING_MAIL_SMTP_SSL_ENABLE:-false}
+      - POSTMARK_APP_EMAIL_FROM_ADDRESS=${POSTMARK_APP_EMAIL_FROM_ADDRESS:-${APP_EMAIL_FROM_ADDRESS:-no-reply@example.com}}
+      - POSTMARK_APP_EMAIL_FROM_NAME=${POSTMARK_APP_EMAIL_FROM_NAME:-${APP_EMAIL_FROM_NAME:-Interview Platform}}
+      - POSTMARK_SPRING_MAIL_HOST=${POSTMARK_SPRING_MAIL_HOST:-smtp.postmarkapp.com}
+      - POSTMARK_SPRING_MAIL_PORT=${POSTMARK_SPRING_MAIL_PORT:-2525}
+      - POSTMARK_SPRING_MAIL_USERNAME=${POSTMARK_SPRING_MAIL_USERNAME:-}
+      - POSTMARK_SPRING_MAIL_PASSWORD=${POSTMARK_SPRING_MAIL_PASSWORD:-}
+      - MAILGUN_APP_EMAIL_FROM_ADDRESS=${MAILGUN_APP_EMAIL_FROM_ADDRESS:-${APP_EMAIL_FROM_ADDRESS:-no-reply@example.com}}
+      - MAILGUN_APP_EMAIL_FROM_NAME=${MAILGUN_APP_EMAIL_FROM_NAME:-${APP_EMAIL_FROM_NAME:-Interview Platform}}
+      - MAILGUN_SPRING_MAIL_HOST=${MAILGUN_SPRING_MAIL_HOST:-smtp.mailgun.org}
+      - MAILGUN_SPRING_MAIL_PORT=${MAILGUN_SPRING_MAIL_PORT:-587}
+      - MAILGUN_SPRING_MAIL_USERNAME=${MAILGUN_SPRING_MAIL_USERNAME:-}
+      - MAILGUN_SPRING_MAIL_PASSWORD=${MAILGUN_SPRING_MAIL_PASSWORD:-}
+      - MANAGEMENT_HEALTH_MAIL_ENABLED=false
+      - APP_ALERTS_ENABLED=${APP_ALERTS_ENABLED:-true}
+      - APP_ALERTS_TO=${APP_ALERTS_TO:-}
+      - APP_ALERTS_DEDUPE_WINDOW_SECONDS=${APP_ALERTS_DEDUPE_WINDOW_SECONDS:-300}
+      - APP_ALERTS_MAX_STACKTRACE_CHARS=${APP_ALERTS_MAX_STACKTRACE_CHARS:-12000}
+      - JAVA_OPTS=-Xmx512m -Xms256m
+      - LOG_PATH=/logs
+      - LOG_MAX_FILE_SIZE=${LOG_MAX_FILE_SIZE:-50MB}
+      - LOG_MAX_HISTORY_DAYS=${LOG_MAX_HISTORY_DAYS:-2}
+      - LOG_TOTAL_SIZE_CAP=${LOG_TOTAL_SIZE_CAP:-1GB}
+      - MANAGEMENT_TRACING_SAMPLING_PROBABILITY=${MANAGEMENT_TRACING_SAMPLING_PROBABILITY:-1.0}
+      - LOGGING_LEVEL_COM_ALTIMETRIK=${LOGGING_LEVEL_COM_ALTIMETRIK:-INFO}
+    volumes:
+      - "${AWS_DATA_DIR:-/opt/interview/data}:/data"
+      - "${AWS_LOGS_DIR:-/opt/interview/logs}/backend:/logs"
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    networks:
+      - interview-network
+    depends_on:
+      - sandbox-backend
+      - sandbox-frontend
+      - ai-service
+      - loki
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: interview-frontend
+    ports:
+      - "${FRONTEND_PORT:-80}:3000"
+    networks:
+      - interview-network
+    depends_on:
+      - backend
+      - sandbox-backend
+    restart: unless-stopped
+
+networks:
+  interview-network:
+    driver: bridge
+
+volumes:
+  loki-data:
+  promtail-positions:
+  grafana-data:
+  sandbox-tmp:

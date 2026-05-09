@@ -5,6 +5,7 @@
 import type { EditableCodeFile } from './session';
 
 export type ExecutionLanguage = 'JAVA' | 'PYTHON' | 'ANGULAR' | 'REACT';
+export type ExecutionPriority = 'REGISTERED_INTERVIEW' | 'PREPARATION';
 
 export interface CompileRequest {
   sourceCode: string;
@@ -27,6 +28,7 @@ export interface ExecuteRequest {
   timeoutMs?: number;
   memoryLimitMb?: number;
   livePreviewMode?: boolean;
+  executionPriority?: ExecutionPriority;
 }
 
 export interface ExecuteResponse {

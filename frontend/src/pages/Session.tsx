@@ -239,6 +239,23 @@ const Session: React.FC = () => {
     return nextVersion;
   }, [currentSession?.codeVersion, session?.codeVersion]);
 
+  const applySessionTimeLeft = React.useCallback((nextSession: SessionResponse) => {
+    setTimeLeft((previous) => {
+      if (nextSession.status !== 'ACTIVE') {
+        return nextSession.remainingSec;
+      }
+      if (previous === null || previous === undefined) {
+        return nextSession.remainingSec;
+      }
+      const durationIncreased = nextSession.durationSec > (currentSession?.durationSec ?? nextSession.durationSec);
+      const extensionJustUsed = Boolean(nextSession.extensionUsed) && !Boolean(currentSession?.extensionUsed);
+      if (durationIncreased || extensionJustUsed) {
+        return nextSession.remainingSec;
+      }
+      return nextSession.remainingSec > previous + 2 ? previous : nextSession.remainingSec;
+    });
+  }, [currentSession?.durationSec, currentSession?.extensionUsed]);
+
   React.useEffect(() => {
     if (session) {
       const safeSession = mergeIncomingSession(session);
@@ -248,7 +265,7 @@ const Session: React.FC = () => {
       if (currentSession !== safeSession) {
         setSession(safeSession);
       }
-      setTimeLeft(safeSession.remainingSec);
+      applySessionTimeLeft(safeSession);
       if (safeSession.feedback) {
         setFeedback({
           rating: safeSession.feedback.rating,
@@ -263,7 +280,7 @@ const Session: React.FC = () => {
         });
       }
     }
-  }, [currentSession, mergeIncomingSession, queryClient, session, sessionId, setSession]);
+  }, [applySessionTimeLeft, currentSession, mergeIncomingSession, queryClient, session, sessionId, setSession]);
 
   React.useEffect(() => {
     suspiciousRejectionNoticeShownRef.current = false;
@@ -354,9 +371,9 @@ const Session: React.FC = () => {
       queryClient.setQueryData(['session', sessionId], safeSession);
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
       setSession(safeSession);
-      setTimeLeft(safeSession.remainingSec);
+      applySessionTimeLeft(safeSession);
     },
-    [mergeIncomingSession, queryClient, sessionId, setSession]
+    [applySessionTimeLeft, mergeIncomingSession, queryClient, sessionId, setSession]
   );
 
   const pushPersistentToast = React.useCallback((message: string, tone: ToastItem['tone'] = 'warning') => {
@@ -550,7 +567,12 @@ const Session: React.FC = () => {
         setCurrentCode(message.code);
       }
       if (typeof message.timeLeft === 'number') {
-        setTimeLeft(message.timeLeft);
+        setTimeLeft((previous) => {
+          if (previous === null || previous === undefined || message.type === 'SESSION_EXTEND') {
+            return message.timeLeft!;
+          }
+          return message.timeLeft! > previous + 2 ? previous : message.timeLeft!;
+        });
       }
       if (
         message.type === 'ACTIVITY_EVENT' &&
@@ -1186,7 +1208,7 @@ const Session: React.FC = () => {
   const canStart = (isInterviewer || canCandidateControlAiInterview) && session.status === 'READY_TO_START';
   const canEnd = (isInterviewer || canCandidateControlAiInterview) && session.status === 'ACTIVE';
   const canExtend =
-    isInterviewer && session.status === 'ACTIVE' && !session.extensionUsed && displayedTimeLeft <= 15 * 60;
+    isInterviewer && !isAiInterview && session.status === 'ACTIVE' && !session.extensionUsed && displayedTimeLeft <= 15 * 60;
   const showEditor = session.status !== 'ENDED' && session.status !== 'EXPIRED';
   const showPreStartState = showEditor && session.status !== 'ACTIVE';
   const waitingForFeedback = isInterviewer && session.status === 'ENDED' && !session.feedback;
@@ -1320,6 +1342,15 @@ const Session: React.FC = () => {
                     disabled={endMutation.isPending}
                   >
                     {endMutation.isPending ? 'Ending...' : 'End Interview'}
+                  </button>
+                )}
+                {canExtend && (
+                  <button
+                    className="control-btn btn-extend session-status-inline-action"
+                    onClick={() => extendMutation.mutate()}
+                    disabled={extendMutation.isPending}
+                  >
+                    {extendMutation.isPending ? 'Extending...' : 'Extend Once by 15 Minutes'}
                   </button>
                 )}
               </div>

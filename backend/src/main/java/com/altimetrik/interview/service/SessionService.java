@@ -44,6 +44,7 @@ import com.altimetrik.interview.entity.InterviewSession;
 import com.altimetrik.interview.entity.InterviewQuestionBank;
 import com.altimetrik.interview.entity.Participant;
 import com.altimetrik.interview.entity.ParticipantAccessChallenge;
+import com.altimetrik.interview.entity.QuestionSeries;
 import com.altimetrik.interview.entity.RunResult;
 import com.altimetrik.interview.entity.SessionActivityEvent;
 import com.altimetrik.interview.enums.ActivityEventSeverity;
@@ -63,6 +64,9 @@ import com.altimetrik.interview.enums.ParticipantRole;
 import com.altimetrik.interview.enums.RecommendationDecision;
 import com.altimetrik.interview.enums.ResumeReason;
 import com.altimetrik.interview.enums.SessionStatus;
+import com.altimetrik.interview.enums.QuestionSource;
+import com.altimetrik.interview.enums.QuestionSourceFlow;
+import com.altimetrik.interview.enums.QuestionStarterType;
 import com.altimetrik.interview.enums.TechnologySkill;
 import com.altimetrik.interview.repository.CodeFileRepository;
 import com.altimetrik.interview.repository.CodeStateRepository;
@@ -72,6 +76,7 @@ import com.altimetrik.interview.repository.FrontendWorkspaceRepository;
 import com.altimetrik.interview.repository.InterviewQuestionBankRepository;
 import com.altimetrik.interview.repository.ParticipantRepository;
 import com.altimetrik.interview.repository.ParticipantAccessChallengeRepository;
+import com.altimetrik.interview.repository.QuestionSeriesRepository;
 import com.altimetrik.interview.repository.RunResultRepository;
 import com.altimetrik.interview.repository.SessionActivityEventRepository;
 import com.altimetrik.interview.repository.SessionRepository;
@@ -107,6 +112,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.UUID;
 
 @Service
@@ -267,11 +274,14 @@ public class SessionService {
     private final FeedbackRepository feedbackRepository;
     private final FrontendWorkspaceRepository frontendWorkspaceRepository;
     private final InterviewQuestionBankRepository interviewQuestionBankRepository;
+    private final QuestionSeriesRepository questionSeriesRepository;
     private final SessionActivityEventRepository sessionActivityEventRepository;
     private final SandboxClientService sandboxClientService;
     private final FrontendSandboxClientService frontendSandboxClientService;
     private final AiInterviewClientService aiInterviewClientService;
     private final AiPolicyEngineService aiPolicyEngineService;
+    private final CandidateQuestionHistoryService candidateQuestionHistoryService;
+    private final BanyanCandidateContentService banyanCandidateContentService;
     private final IdentitySnapshotStorageService identitySnapshotStorageService;
     private final FinalPreviewStorageService finalPreviewStorageService;
 
@@ -433,6 +443,7 @@ public class SessionService {
         validateWorkspaceFiles(session.getTechnology(), nextFiles);
         runResultRepository.deleteBySessionIdAndFilePath(sessionId, generatedFile.getPath());
         replaceCodeFiles(sessionId, nextFiles);
+        recordQuestionHistory(session, generatedFile);
         Long generatedCodeVersion = advanceCodeVersionForGeneratedAiQuestion(sessionId, nextFiles, generatedFile.getContent());
         log.info("AI next-question persisted sessionId={} generatedPath={} displayName={} difficulty={}",
                 sessionId,
@@ -585,6 +596,7 @@ public class SessionService {
         validateWorkspaceFiles(session.getTechnology(), nextFiles);
         runResultRepository.deleteBySessionIdAndFilePath(sessionId, generatedFile.getPath());
         replaceCodeFiles(sessionId, nextFiles);
+        recordQuestionHistory(session, generatedFile);
         Long generatedCodeVersion = advanceCodeVersionForGeneratedAiQuestion(sessionId, nextFiles, generatedFile.getContent());
 
         draft.setAccepted(true);
@@ -1763,6 +1775,18 @@ public class SessionService {
             return generateAiQuestionOrFallback(session, request, previousQuestionFiles);
         }
 
+        AiQuestionResponse reusableQuestion = questionBankFallback(session.getTechnology(), request, previousQuestionFiles, session);
+        if (reusableQuestion != null) {
+            QuestionValidationResult reusableValidation = validateGeneratedQuestion(session, reusableQuestion, request.getQuestionNumber());
+            if (reusableValidation.valid()) {
+                log.info("Using reusable question-bank entry sessionId={} questionNumber={} questionBankId={} style={}",
+                        session.getId(), request.getQuestionNumber(), reusableQuestion.getQuestionBankId(), evaluationStyle(session));
+                return reusableQuestion;
+            }
+            log.warn("Reusable question-bank entry failed validation sessionId={} questionBankId={} reason={}",
+                    session.getId(), reusableQuestion.getQuestionBankId(), reusableValidation.reason());
+        }
+
         List<String> failures = new ArrayList<>();
         int maxAttempts = 3;
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -1770,7 +1794,7 @@ public class SessionService {
             AiQuestionResponse generated = generateAiQuestionOrFallback(session, request, previousQuestionFiles);
             QuestionValidationResult validation = validateGeneratedQuestion(session, generated, request.getQuestionNumber());
             if (validation.valid()) {
-                return generated;
+                return cacheQuestionIfNeeded(session, request, generated);
             }
             failures.add("Attempt " + attempt + ": " + validation.reason());
             log.warn("AI generated question failed validation for session {} question {} attempt {}: {}",
@@ -1789,7 +1813,7 @@ public class SessionService {
         if (fallbackValidation.valid()) {
             log.warn("Using validated fallback question for session {} question {} after AI validation failures: {}",
                     session.getId(), request.getQuestionNumber(), String.join(" | ", failures));
-            return fallback;
+            return cacheQuestionIfNeeded(session, request, fallback);
         }
 
         failures.add("Fallback: " + fallbackValidation.reason());
@@ -1811,6 +1835,16 @@ public class SessionService {
         String referenceSolution = question.getReferenceSolution() == null ? "" : question.getReferenceSolution();
         if (referenceSolution.isBlank()) {
             return QuestionValidationResult.invalid("referenceSolution was empty");
+        }
+        if (isBanyanStyle(session)) {
+            Optional<String> hintViolation = banyanCandidateContentService.candidateFacingHintViolation(
+                    question.getProblemStatement(),
+                    question.getStarterCode()
+            );
+            if (hintViolation.isPresent()) {
+                return QuestionValidationResult.invalid("candidate-facing question contains hint language: " + hintViolation.get());
+            }
+            starterCode = banyanCandidateContentService.cleanseCandidateFacingResponse(question).getStarterCode();
         }
 
         List<String> starterAssertions = extractValidationLines(starterCode);
@@ -1884,7 +1918,7 @@ public class SessionService {
     private AiQuestionResponse fallbackAiQuestion(TechnologySkill technology,
                                                   AiQuestionGenerationRequest request,
                                                   List<EditableCodeFileDto> previousQuestionFiles) {
-        AiQuestionResponse questionBankFallback = questionBankFallback(technology, request, previousQuestionFiles);
+        AiQuestionResponse questionBankFallback = questionBankFallback(technology, request, previousQuestionFiles, null);
         if (questionBankFallback != null) {
             return questionBankFallback;
         }
@@ -1904,15 +1938,34 @@ public class SessionService {
 
     private AiQuestionResponse questionBankFallback(TechnologySkill technology,
                                                     AiQuestionGenerationRequest request,
-                                                    List<EditableCodeFileDto> previousQuestionFiles) {
+                                                    List<EditableCodeFileDto> previousQuestionFiles,
+                                                    InterviewSession session) {
         if (technology != TechnologySkill.JAVA && technology != TechnologySkill.PYTHON) {
             return null;
         }
         int requestedLevel = normalizeDifficultyLevel(null, request.getCurrentDifficulty());
         List<String> previousTitles = request.getPreviousQuestionTitles() == null ? List.of() : request.getPreviousQuestionTitles();
-        List<InterviewQuestionBank> candidates = interviewQuestionBankRepository.findByTechnologyAndActiveTrueOrderByDifficultyLevelAscTitleAsc(technology);
+        EvaluationStyle style = resolveEvaluationStyle(request.getEvaluationStyle());
+        String email = session == null ? null : intervieweeEmail(session.getId());
+        Integer years = session == null ? request.getYearsOfExperience() : session.getYearsOfExperience();
+        String targetRole = session == null ? request.getTargetRole() : session.getTargetRole();
+        Set<String> seenQuestionIds = candidateQuestionHistoryService.seenQuestionIds(email, technology, years, targetRole, style);
+        Set<String> seenSeriesIds = candidateQuestionHistoryService.seenSeriesIds(email, technology, years, targetRole, style);
+        Map<String, Long> questionUsage = candidateQuestionHistoryService.questionUsageCounts(technology, years, targetRole, style);
+        Map<String, Long> seriesUsage = candidateQuestionHistoryService.seriesUsageCounts(technology, years, targetRole, style);
+        List<InterviewQuestionBank> candidates = interviewQuestionBankRepository.findByTechnologyAndActiveTrueOrderByDifficultyLevelAscTitleAsc(technology).stream()
+                .filter(question -> questionMatchesStyle(question, style))
+                .filter(question -> questionMatchesExperience(question, years))
+                .filter(question -> questionMatchesTargetRole(question, targetRole))
+                .filter(question -> question.getId() == null || !seenQuestionIds.contains(question.getId()))
+                .toList();
         if (candidates.isEmpty()) {
             return null;
+        }
+
+        if (style == EvaluationStyle.BANYAN) {
+            InterviewQuestionBank banyan = selectBanyanQuestion(candidates, request, previousQuestionFiles, seenSeriesIds, seriesUsage);
+            return banyan == null ? null : toAiQuestionResponse(banyan, request);
         }
 
         List<InterviewQuestionBank> exactLevelCandidates = candidates.stream()
@@ -1928,25 +1981,235 @@ public class SessionService {
         List<InterviewQuestionBank> selectionPool = !exactLevelCandidates.isEmpty()
                 ? exactLevelCandidates
                 : !nearLevelCandidates.isEmpty() ? nearLevelCandidates : candidates;
-        InterviewQuestionBank selected = selectionPool.get(Math.floorMod(
-                Objects.hash(request.getSessionId(), request.getQuestionNumber(), request.getVariationSeed(), requestedLevel),
-                selectionPool.size()));
+        InterviewQuestionBank selected = selectLeastUsedQuestion(selectionPool, questionUsage, false);
 
+        return toAiQuestionResponse(selected, request);
+    }
+
+    private InterviewQuestionBank selectBanyanQuestion(List<InterviewQuestionBank> candidates,
+                                                       AiQuestionGenerationRequest request,
+                                                       List<EditableCodeFileDto> previousQuestionFiles,
+                                                       Set<String> seenSeriesIds,
+                                                       Map<String, Long> seriesUsage) {
+        int sequenceNumber = request.getBanyanLevel() == null ? request.getQuestionNumber() == null ? 1 : request.getQuestionNumber() : request.getBanyanLevel();
+        if (sequenceNumber <= 1) {
+            List<InterviewQuestionBank> pool = candidates.stream()
+                    .filter(question -> question.getSequenceNumber() != null && question.getSequenceNumber() == 1)
+                    .filter(question -> question.getStarterType() == QuestionStarterType.BUG_FIX)
+                    .filter(question -> question.getSeriesId() == null || seenSeriesIds == null || !seenSeriesIds.contains(question.getSeriesId()))
+                    .toList();
+            return selectLeastUsedQuestion(pool, seriesUsage, true);
+        }
+
+        String currentSeriesId = previousQuestionFiles == null ? null : previousQuestionFiles.stream()
+                .map(EditableCodeFileDto::getQuestionSeriesId)
+                .filter(value -> value != null && !value.isBlank())
+                .findFirst()
+                .orElse(null);
+        if (currentSeriesId == null) {
+            return null;
+        }
+        return candidates.stream()
+                .filter(question -> currentSeriesId.equals(question.getSeriesId()))
+                .filter(question -> question.getSequenceNumber() != null && question.getSequenceNumber() == sequenceNumber)
+                .findFirst()
+                .orElse(null);
+    }
+
+    private InterviewQuestionBank selectLeastUsedQuestion(List<InterviewQuestionBank> pool,
+                                                          Map<String, Long> usageCounts,
+                                                          boolean bySeries) {
+        if (pool == null || pool.isEmpty()) {
+            return null;
+        }
+        long lowestUsage = pool.stream()
+                .mapToLong(question -> usageCounts.getOrDefault(usageKey(question, bySeries), 0L))
+                .min()
+                .orElse(0L);
+        List<InterviewQuestionBank> leastUsed = pool.stream()
+                .filter(question -> usageCounts.getOrDefault(usageKey(question, bySeries), 0L) == lowestUsage)
+                .toList();
+        return leastUsed.get(ThreadLocalRandom.current().nextInt(leastUsed.size()));
+    }
+
+    private String usageKey(InterviewQuestionBank question, boolean bySeries) {
+        String key = bySeries ? question.getSeriesId() : question.getId();
+        return key == null ? "" : key;
+    }
+
+    private AiQuestionResponse toAiQuestionResponse(InterviewQuestionBank selected, AiQuestionGenerationRequest request) {
         return AiQuestionResponse.builder()
                 .title(selected.getTitle())
                 .filePath(selected.getFilePath())
-                .displayName("Question " + (request.getQuestionNumber() == null ? 1 : request.getQuestionNumber()))
+                .displayName(isBanyanRequest(request)
+                        ? "Banyan Level " + (selected.getSequenceNumber() == null ? request.getQuestionNumber() : selected.getSequenceNumber())
+                        : "Question " + (request.getQuestionNumber() == null ? 1 : request.getQuestionNumber()))
                 .problemStatement(selected.getProblemStatement())
                 .starterCode(selected.getStarterCode())
                 .difficulty(String.valueOf(normalizeDifficultyLevel(selected.getDifficultyLevel())))
                 .difficultyLevel(normalizeDifficultyLevel(selected.getDifficultyLevel()))
                 .idealDurationMinutes(normalizeIdealDuration(selected.getIdealDurationMinutes(), normalizeDifficultyLevel(selected.getDifficultyLevel())))
+                .questionBankId(selected.getId())
+                .questionSeriesId(selected.getSeriesId())
+                .questionSequenceNumber(selected.getSequenceNumber())
                 .referenceSolution(selected.getReferenceSolution())
                 .expectedTimeComplexity(selected.getExpectedTimeComplexity())
                 .expectedSpaceComplexity(selected.getExpectedSpaceComplexity())
                 .concepts(splitList(selected.getConcepts()))
                 .evaluationFocus(splitList(selected.getEvaluationFocus()))
                 .build();
+    }
+
+    private boolean questionMatchesStyle(InterviewQuestionBank question, EvaluationStyle style) {
+        EvaluationStyle effectiveStyle = question.getEvaluationStyle() == null
+                ? EvaluationStyle.STANDARD_MULTIPLE_QUESTIONS
+                : question.getEvaluationStyle();
+        return effectiveStyle == (style == null ? EvaluationStyle.STANDARD_MULTIPLE_QUESTIONS : style);
+    }
+
+    private boolean questionMatchesExperience(InterviewQuestionBank question, Integer yearsOfExperience) {
+        return question.getExperienceBand() == null
+                || question.getExperienceBand().isBlank()
+                || question.getExperienceBand().equals(candidateQuestionHistoryService.experienceBand(yearsOfExperience));
+    }
+
+    private boolean questionMatchesTargetRole(InterviewQuestionBank question, String targetRole) {
+        return question.getTargetRole() == null
+                || question.getTargetRole().isBlank()
+                || candidateQuestionHistoryService.targetRoleKey(question.getTargetRole()).equals(candidateQuestionHistoryService.targetRoleKey(targetRole));
+    }
+
+    private boolean isBanyanRequest(AiQuestionGenerationRequest request) {
+        return request != null && EvaluationStyle.BANYAN.name().equalsIgnoreCase(request.getEvaluationStyle());
+    }
+
+    private EvaluationStyle resolveEvaluationStyle(String value) {
+        if (value == null || value.isBlank()) {
+            return EvaluationStyle.STANDARD_MULTIPLE_QUESTIONS;
+        }
+        try {
+            return EvaluationStyle.valueOf(value.trim().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException ignored) {
+            return EvaluationStyle.STANDARD_MULTIPLE_QUESTIONS;
+        }
+    }
+
+    private void recordQuestionHistory(InterviewSession session, EditableCodeFileDto generatedFile) {
+        if (generatedFile == null || generatedFile.getQuestionBankId() == null || generatedFile.getQuestionBankId().isBlank()) {
+            return;
+        }
+        candidateQuestionHistoryService.recordAssignment(
+                intervieweeEmail(session.getId()),
+                session.getTechnology(),
+                session.getYearsOfExperience(),
+                session.getTargetRole(),
+                evaluationStyle(session),
+                generatedFile.getQuestionBankId(),
+                generatedFile.getQuestionSeriesId(),
+                generatedFile.getQuestionSequenceNumber(),
+                QuestionSourceFlow.INTERVIEW,
+                session.getId()
+        );
+    }
+
+    private String intervieweeEmail(String sessionId) {
+        return participantRepository.findBySessionIdAndRole(sessionId, ParticipantRole.INTERVIEWEE)
+                .map(Participant::getEmail)
+                .orElse(null);
+    }
+
+    private AiQuestionResponse cacheQuestionIfNeeded(InterviewSession session,
+                                                     AiQuestionGenerationRequest request,
+                                                     AiQuestionResponse question) {
+        if (question == null || question.getQuestionBankId() != null) {
+            return question;
+        }
+        if (session.getTechnology() != TechnologySkill.JAVA && session.getTechnology() != TechnologySkill.PYTHON) {
+            return question;
+        }
+
+        EvaluationStyle style = evaluationStyle(session);
+        String seriesId = style == EvaluationStyle.BANYAN ? ensureQuestionSeries(session, question) : null;
+        int sequenceNumber = style == EvaluationStyle.BANYAN
+                ? request.getBanyanLevel() == null ? request.getQuestionNumber() == null ? 1 : request.getQuestionNumber() : request.getBanyanLevel()
+                : request.getQuestionNumber() == null ? 1 : request.getQuestionNumber();
+
+        InterviewQuestionBank saved = new InterviewQuestionBank();
+        saved.setId("interview-ai-" + UUID.randomUUID());
+        saved.setTechnology(session.getTechnology());
+        saved.setDifficultyLevel(normalizeDifficultyLevel(question.getDifficultyLevel(), question.getDifficulty()));
+        saved.setSeriesId(seriesId);
+        saved.setSequenceNumber(style == EvaluationStyle.BANYAN ? sequenceNumber : null);
+        saved.setBanyanLevel(style == EvaluationStyle.BANYAN ? sequenceNumber : null);
+        saved.setEvaluationStyle(style);
+        saved.setExperienceBand(candidateQuestionHistoryService.experienceBand(session.getYearsOfExperience()));
+        saved.setTargetRole(session.getTargetRole());
+        saved.setProblemFamilyKey(style == EvaluationStyle.BANYAN ? banyanFamilyKey(question) : null);
+        saved.setStarterType(style == EvaluationStyle.BANYAN
+                ? sequenceNumber <= 1 ? QuestionStarterType.BUG_FIX : QuestionStarterType.EXTENSION
+                : null);
+        saved.setSource(QuestionSource.AI_GENERATED);
+        saved.setTitle(firstNonBlank(question.getTitle(), style == EvaluationStyle.BANYAN ? "Banyan Level " + sequenceNumber : "Question " + sequenceNumber));
+        saved.setFilePath(firstNonBlank(question.getFilePath(), style == EvaluationStyle.BANYAN
+                ? banyanActivePath(session.getTechnology())
+                : defaultAiQuestionPath(session.getTechnology(), sequenceNumber)));
+        saved.setDisplayName(firstNonBlank(question.getDisplayName(), style == EvaluationStyle.BANYAN ? "Banyan Level " + sequenceNumber : "Question " + sequenceNumber));
+        saved.setProblemStatement(question.getProblemStatement());
+        saved.setStarterCode(question.getStarterCode());
+        saved.setReferenceSolution(question.getReferenceSolution());
+        saved.setIdealDurationMinutes(question.getIdealDurationMinutes());
+        saved.setExpectedTimeComplexity(question.getExpectedTimeComplexity());
+        saved.setExpectedSpaceComplexity(question.getExpectedSpaceComplexity());
+        saved.setConcepts(joinList(question.getConcepts()));
+        saved.setEvaluationFocus(joinList(question.getEvaluationFocus()));
+        saved.setActive(true);
+        saved = interviewQuestionBankRepository.save(saved);
+
+        question.setQuestionBankId(saved.getId());
+        question.setQuestionSeriesId(saved.getSeriesId());
+        question.setQuestionSequenceNumber(saved.getSequenceNumber());
+        return question;
+    }
+
+    private String ensureQuestionSeries(InterviewSession session, AiQuestionResponse question) {
+        String familyKey = banyanFamilyKey(question);
+        String seriesId = "interview-banyan-%s-%s-%s-%s".formatted(
+                session.getTechnology().name().toLowerCase(Locale.ROOT),
+                candidateQuestionHistoryService.experienceBand(session.getYearsOfExperience()),
+                candidateQuestionHistoryService.targetRoleKey(session.getTargetRole()),
+                familyKey
+        );
+        if (questionSeriesRepository.existsById(seriesId)) {
+            return seriesId;
+        }
+        QuestionSeries series = new QuestionSeries();
+        series.setId(seriesId);
+        series.setTitle("Banyan " + session.getTechnology() + " " + familyKey.replace('-', ' '));
+        series.setTechnology(session.getTechnology());
+        series.setEvaluationStyle(EvaluationStyle.BANYAN);
+        series.setExperienceBand(candidateQuestionHistoryService.experienceBand(session.getYearsOfExperience()));
+        series.setTargetRole(session.getTargetRole());
+        series.setProblemFamilyKey(familyKey);
+        series.setProblemFamilyDescription(familyKey.replace('-', ' '));
+        series.setSource(QuestionSource.AI_GENERATED);
+        series.setActive(true);
+        questionSeriesRepository.save(series);
+        return seriesId;
+    }
+
+    private String banyanFamilyKey(AiQuestionResponse question) {
+        if (question != null && question.getConcepts() != null) {
+            for (String concept : question.getConcepts()) {
+                if (concept != null && concept.toLowerCase(Locale.ROOT).startsWith("banyan-family:")) {
+                    String key = concept.substring("banyan-family:".length()).trim().toLowerCase(Locale.ROOT);
+                    if (!key.isBlank()) {
+                        return key.replaceAll("[^a-z0-9]+", "-").replaceAll("^-+|-+$", "");
+                    }
+                }
+            }
+        }
+        String title = question == null ? "generated-banyan" : firstNonBlank(question.getTitle(), "generated-banyan");
+        return title.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]+", "-").replaceAll("^-+|-+$", "");
     }
 
     private List<String> aiQuestionHistoryForGeneration(List<EditableCodeFileDto> questionFiles) {
@@ -2315,6 +2578,9 @@ public class SessionService {
                 .difficulty(String.valueOf(normalizeDifficultyLevel(file.getDifficultyLevel())))
                 .difficultyLevel(normalizeDifficultyLevel(file.getDifficultyLevel()))
                 .idealDurationMinutes(file.getIdealDurationMinutes())
+                .questionBankId(file.getQuestionBankId())
+                .questionSeriesId(file.getQuestionSeriesId())
+                .questionSequenceNumber(file.getQuestionSequenceNumber())
                 .expectedTimeComplexity(file.getExpectedTimeComplexity())
                 .expectedSpaceComplexity(file.getExpectedSpaceComplexity())
                 .concepts(List.of())
@@ -2332,6 +2598,9 @@ public class SessionService {
                 .difficulty(String.valueOf(normalizeDifficultyLevel(draft.getDifficultyLevel())))
                 .difficultyLevel(normalizeDifficultyLevel(draft.getDifficultyLevel()))
                 .idealDurationMinutes(draft.getIdealDurationMinutes())
+                .questionBankId(draft.getQuestionBankId())
+                .questionSeriesId(draft.getQuestionSeriesId())
+                .questionSequenceNumber(draft.getQuestionSequenceNumber())
                 .referenceSolution(draft.getReferenceSolution())
                 .expectedTimeComplexity(draft.getExpectedTimeComplexity())
                 .expectedSpaceComplexity(draft.getExpectedSpaceComplexity())
@@ -2376,6 +2645,9 @@ public class SessionService {
         int difficultyLevel = normalizeDifficultyLevel(question.getDifficultyLevel(), question.getDifficulty());
         draft.setDifficultyLevel(difficultyLevel);
         draft.setIdealDurationMinutes(normalizeIdealDuration(question.getIdealDurationMinutes(), difficultyLevel));
+        draft.setQuestionBankId(question.getQuestionBankId());
+        draft.setQuestionSeriesId(question.getQuestionSeriesId());
+        draft.setQuestionSequenceNumber(question.getQuestionSequenceNumber());
         draft.setExpectedTimeComplexity(normalizeShortText(question.getExpectedTimeComplexity(), 80));
         draft.setExpectedSpaceComplexity(normalizeShortText(question.getExpectedSpaceComplexity(), 80));
         draft.setConcepts(joinList(question.getConcepts()));
@@ -2511,6 +2783,9 @@ public class SessionService {
                 .submitted(false)
                 .difficultyLevel(normalizeDifficultyLevel(generated.getDifficultyLevel(), generated.getDifficulty()))
                 .idealDurationMinutes(normalizeIdealDuration(generated.getIdealDurationMinutes(), normalizeDifficultyLevel(generated.getDifficultyLevel(), generated.getDifficulty())))
+                .questionBankId(generated.getQuestionBankId())
+                .questionSeriesId(generated.getQuestionSeriesId())
+                .questionSequenceNumber(generated.getQuestionSequenceNumber())
                 .expectedTimeComplexity(normalizeShortText(generated.getExpectedTimeComplexity(), 80))
                 .expectedSpaceComplexity(normalizeShortText(generated.getExpectedSpaceComplexity(), 80))
                 .originalProblemStatement(generated.getProblemStatement())
@@ -2542,6 +2817,9 @@ public class SessionService {
                 .submitted(false)
                 .difficultyLevel(difficultyLevel)
                 .idealDurationMinutes(normalizeIdealDuration(generated.getIdealDurationMinutes(), difficultyLevel))
+                .questionBankId(generated.getQuestionBankId())
+                .questionSeriesId(generated.getQuestionSeriesId())
+                .questionSequenceNumber(generated.getQuestionSequenceNumber())
                 .expectedTimeComplexity(normalizeShortText(generated.getExpectedTimeComplexity(), 80))
                 .expectedSpaceComplexity(normalizeShortText(generated.getExpectedSpaceComplexity(), 80))
                 .originalProblemStatement(generated.getProblemStatement())
@@ -2586,6 +2864,9 @@ public class SessionService {
                         .submitted(file.getSubmitted())
                         .difficultyLevel(file.getDifficultyLevel())
                         .idealDurationMinutes(file.getIdealDurationMinutes())
+                        .questionBankId(file.getQuestionBankId())
+                        .questionSeriesId(file.getQuestionSeriesId())
+                        .questionSequenceNumber(file.getQuestionSequenceNumber())
                         .expectedTimeComplexity(file.getExpectedTimeComplexity())
                         .expectedSpaceComplexity(file.getExpectedSpaceComplexity())
                         .questionIntegrityNotes(file.getQuestionIntegrityNotes())
@@ -2620,6 +2901,9 @@ public class SessionService {
                 .submitted(true)
                 .difficultyLevel(file.getDifficultyLevel())
                 .idealDurationMinutes(file.getIdealDurationMinutes())
+                .questionBankId(file.getQuestionBankId())
+                .questionSeriesId(file.getQuestionSeriesId())
+                .questionSequenceNumber(file.getQuestionSequenceNumber())
                 .expectedTimeComplexity(file.getExpectedTimeComplexity())
                 .expectedSpaceComplexity(file.getExpectedSpaceComplexity())
                 .questionIntegrityNotes(file.getQuestionIntegrityNotes())
@@ -2675,6 +2959,9 @@ public class SessionService {
                     .submitted(isTarget ? false : file.getSubmitted())
                     .difficultyLevel(isTarget ? generatedFile.getDifficultyLevel() : file.getDifficultyLevel())
                     .idealDurationMinutes(isTarget ? generatedFile.getIdealDurationMinutes() : file.getIdealDurationMinutes())
+                    .questionBankId(isTarget ? generatedFile.getQuestionBankId() : file.getQuestionBankId())
+                    .questionSeriesId(isTarget ? generatedFile.getQuestionSeriesId() : file.getQuestionSeriesId())
+                    .questionSequenceNumber(isTarget ? generatedFile.getQuestionSequenceNumber() : file.getQuestionSequenceNumber())
                     .expectedTimeComplexity(isTarget ? generatedFile.getExpectedTimeComplexity() : file.getExpectedTimeComplexity())
                     .expectedSpaceComplexity(isTarget ? generatedFile.getExpectedSpaceComplexity() : file.getExpectedSpaceComplexity())
                     .questionIntegrityNotes(isTarget ? generatedFile.getQuestionIntegrityNotes() : file.getQuestionIntegrityNotes())
@@ -4364,6 +4651,9 @@ public class SessionService {
                     codeFile.setSubmitted(Boolean.TRUE.equals(file.getSubmitted()));
                     codeFile.setDifficultyLevel(resolvePersistedDifficultyLevel(file, existing));
                     codeFile.setIdealDurationMinutes(file.getIdealDurationMinutes() == null && existing != null ? existing.getIdealDurationMinutes() : file.getIdealDurationMinutes());
+                    codeFile.setQuestionBankId(firstNonBlank(file.getQuestionBankId(), existing == null ? null : existing.getQuestionBankId()));
+                    codeFile.setQuestionSeriesId(firstNonBlank(file.getQuestionSeriesId(), existing == null ? null : existing.getQuestionSeriesId()));
+                    codeFile.setQuestionSequenceNumber(file.getQuestionSequenceNumber() == null && existing != null ? existing.getQuestionSequenceNumber() : file.getQuestionSequenceNumber());
                     codeFile.setOriginalProblemStatement(firstNonBlank(file.getOriginalProblemStatement(), existing == null ? null : existing.getOriginalProblemStatement()));
                     codeFile.setOriginalStarterCode(firstNonBlank(file.getOriginalStarterCode(), existing == null ? null : existing.getOriginalStarterCode()));
                     codeFile.setReferenceSolution(firstNonBlank(file.getReferenceSolution(), existing == null ? null : existing.getReferenceSolution()));
@@ -4483,6 +4773,9 @@ public class SessionService {
                 .submitted(Boolean.TRUE.equals(file.getSubmitted()))
                 .difficultyLevel(file.getDifficultyLevel())
                 .idealDurationMinutes(file.getIdealDurationMinutes())
+                .questionBankId(file.getQuestionBankId())
+                .questionSeriesId(file.getQuestionSeriesId())
+                .questionSequenceNumber(file.getQuestionSequenceNumber())
                 .expectedTimeComplexity(file.getExpectedTimeComplexity())
                 .expectedSpaceComplexity(file.getExpectedSpaceComplexity())
                 .questionIntegrityNotes(file.getQuestionIntegrityNotes())

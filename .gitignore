@@ -57,3 +57,4 @@ logs/
 # Misc
 .env
 .env.local
+.env.aws

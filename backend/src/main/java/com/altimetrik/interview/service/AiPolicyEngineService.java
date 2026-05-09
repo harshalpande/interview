@@ -73,6 +73,9 @@ public class AiPolicyEngineService {
                   Level 1 must be a foothold, not the complete domain problem. It should introduce only the smallest useful part of the family.
                   Level 2+ must extend the exact same family, business domain, classes/methods, data model, and accepted candidate implementation. Add one new requirement and new validation assertions without changing the family.
                   Do not generate a separate, unrelated, or generic collection/top-k conversion unless that is a natural next rule inside the locked family.
+                  Candidate-facing problem text and starter code must not include hints, bug labels, line-level guidance, solution direction, or comments naming what is wrong.
+                  The starter code may begin with a neutral scenario comment header that lists Level 1 through the current Level N requirements in order.
+                  After the first executable code/import/class/function line, do not include comments anywhere in the starter code.
                   """.formatted(
                         banyanFamily.title(),
                         banyanFamily.description(),

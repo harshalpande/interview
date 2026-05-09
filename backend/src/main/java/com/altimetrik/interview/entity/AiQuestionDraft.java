@@ -55,6 +55,12 @@ public class AiQuestionDraft {
 
     private Integer idealDurationMinutes;
 
+    private String questionBankId;
+
+    private String questionSeriesId;
+
+    private Integer questionSequenceNumber;
+
     private String expectedTimeComplexity;
 
     private String expectedSpaceComplexity;

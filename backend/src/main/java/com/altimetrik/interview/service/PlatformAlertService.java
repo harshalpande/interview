@@ -8,6 +8,7 @@ import org.springframework.http.HttpStatusCode;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.time.Instant;
@@ -58,6 +59,13 @@ public class PlatformAlertService {
     }
 
     public void alertUnhandled(Throwable exception, HttpServletRequest request) {
+        if (isClientDisconnect(exception)) {
+            log.debug("Suppressing platform alert for client disconnect method={} uri={} message={}",
+                    request == null ? "N/A" : request.getMethod(),
+                    request == null ? "N/A" : request.getRequestURI(),
+                    exception.getMessage());
+            return;
+        }
         sendAlert("CRITICAL", "UNHANDLED_BACKEND_EXCEPTION", exception.getMessage(), exception, request);
     }
 
@@ -190,6 +198,28 @@ public class PlatformAlertService {
             current = current.getCause();
         }
         return current;
+    }
+
+    private boolean isClientDisconnect(Throwable exception) {
+        Throwable current = exception;
+        while (current != null) {
+            String className = current.getClass().getName();
+            String message = current.getMessage() == null ? "" : current.getMessage().toLowerCase();
+            if (current instanceof IOException && isClientDisconnectMessage(message)) {
+                return true;
+            }
+            if (className.contains("AsyncRequestNotUsableException") && isClientDisconnectMessage(message)) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
+
+    private boolean isClientDisconnectMessage(String message) {
+        return message.contains("broken pipe")
+                || message.contains("connection reset")
+                || message.contains("client abort");
     }
 
     private String normalizeMessage(String message) {

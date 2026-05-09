@@ -445,13 +445,17 @@ interface EditorProps {
   onCopyFromEditor?: (text: string) => boolean | void;
   onCutFromEditor?: (text: string) => boolean | void;
   onExternalDropBlocked?: () => void;
+  onRunCode?: (sourceCode: string, context: { codeFiles?: EditableCodeFile[]; activeFilePath?: string }) => Promise<ExecuteResponse>;
+  onClearOutput?: () => void;
   showResetButton?: boolean;
   canRun?: boolean;
   emptyStateMessage?: string;
   showFullscreenToggle?: boolean;
   isFullscreen?: boolean;
   onToggleFullscreen?: () => void;
+  runButtonLabel?: string;
   headerRightSlot?: React.ReactNode;
+  outputPanelSlot?: React.ReactNode;
 }
 
 const Editor: React.FC<EditorProps> = ({
@@ -473,13 +477,17 @@ const Editor: React.FC<EditorProps> = ({
   onCopyFromEditor,
   onCutFromEditor,
   onExternalDropBlocked,
+  onRunCode,
+  onClearOutput,
   showResetButton = true,
   canRun = true,
   emptyStateMessage,
   showFullscreenToggle = false,
   isFullscreen = false,
   onToggleFullscreen,
+  runButtonLabel,
   headerRightSlot,
+  outputPanelSlot,
 }) => {
   const isFrontendWorkspace = executionLanguage === 'ANGULAR' || executionLanguage === 'REACT';
   const isGuidedQuestionWorkspace = executionLanguage === 'JAVA' || executionLanguage === 'PYTHON';
@@ -736,11 +744,12 @@ const Editor: React.FC<EditorProps> = ({
 
   const activeEditorValue = isWorkspaceSession ? activeAngularFile.content : state.code;
   const activeEditorReadOnly = readOnly || (isWorkspaceSession && (activeAngularFile.editable === false || activeAngularFile.submitted === true));
-  const runButtonLabel = isFrontendWorkspace
+  const defaultRunButtonLabel = isFrontendWorkspace
     ? (state.loading ? 'Building...' : 'Build (Ctrl+Enter)')
     : isGuidedQuestionWorkspace
       ? (state.loading ? 'Running...' : 'Run Active Tab (Ctrl+Enter)')
       : (state.loading ? 'Running...' : 'Run (Ctrl+Enter)');
+  const resolvedRunButtonLabel = state.loading ? defaultRunButtonLabel : runButtonLabel ?? defaultRunButtonLabel;
   const runButtonTitle = isFrontendWorkspace
     ? `Build ${executionLanguage === 'REACT' ? 'React' : 'Angular'} workspace (Ctrl+Enter)`
     : isGuidedQuestionWorkspace
@@ -790,6 +799,12 @@ const Editor: React.FC<EditorProps> = ({
     const latestWorkspaceFiles = workspaceFilesRef.current;
     const persistedFiles = toPersistedWorkspaceFiles(executionLanguage, latestWorkspaceFiles);
     const activeFile = persistedFiles.find((file) => file.path === activeFilePathRef.current) ?? persistedFiles[0];
+    if (onRunCode) {
+      return onRunCode(activeFile?.content || '', {
+        codeFiles: persistedFiles,
+        activeFilePath: activeFile?.path,
+      });
+    }
     return compilerApi.execute({
       sourceCode: activeFile?.content || '',
       sessionId,
@@ -799,7 +814,7 @@ const Editor: React.FC<EditorProps> = ({
       timeoutMs: 5000,
       memoryLimitMb: executionLanguage === 'PYTHON' ? 512 : 512,
     });
-  }, [executionLanguage, sessionId]);
+  }, [executionLanguage, onRunCode, sessionId]);
 
   const recordActiveGuidedQuestionExecuteAttempt = useCallback(() => {
     if (participantRole !== 'interviewee') {
@@ -931,6 +946,18 @@ const Editor: React.FC<EditorProps> = ({
     }
 
     try {
+      if (onRunCode) {
+        const response = await onRunCode(state.code, {});
+        setState((prev) => ({
+          ...prev,
+          loading: false,
+          output: response.stdout || '',
+          error: executionErrorText(response),
+          executionTime: response.executionTimeMs || 0,
+          previewUrl: null,
+        }));
+        return;
+      }
       const request: ExecuteRequest = {
         sourceCode: state.code,
         language: executionLanguage,
@@ -956,7 +983,7 @@ const Editor: React.FC<EditorProps> = ({
         error: errorMessage,
       }));
     }
-  }, [canRunCurrentEditor, executeActiveGuidedQuestion, executionLanguage, isFrontendWorkspace, isGuidedQuestionWorkspace, recordActiveGuidedQuestionExecuteAttempt, sessionId, state.code]);
+  }, [canRunCurrentEditor, executeActiveGuidedQuestion, executionLanguage, isFrontendWorkspace, isGuidedQuestionWorkspace, onRunCode, recordActiveGuidedQuestionExecuteAttempt, sessionId, state.code]);
 
   useEffect(() => {
     runLatestRef.current = handleRun;
@@ -966,6 +993,8 @@ const Editor: React.FC<EditorProps> = ({
     if (!canFreezeActiveQuestion) {
       return;
     }
+
+    recordActiveGuidedQuestionExecuteAttempt();
 
     setState((prev) => ({
       ...prev,
@@ -1099,7 +1128,7 @@ const Editor: React.FC<EditorProps> = ({
     };
   }, [onExternalDropBlocked]);
 
-  const handleClear = () => {
+  const handleClear = useCallback(() => {
     setState((prev) => ({
       ...prev,
       output: '',
@@ -1107,14 +1136,15 @@ const Editor: React.FC<EditorProps> = ({
       executionTime: 0,
       previewUrl: null,
     }));
-  };
+    onClearOutput?.();
+  }, [onClearOutput]);
 
   useEffect(() => {
     if (!clearConsoleSignal) {
       return;
     }
     handleClear();
-  }, [clearConsoleSignal]);
+  }, [clearConsoleSignal, handleClear]);
 
   const resetActiveEditor = () => {
     if (isWorkspaceSession) {
@@ -1375,7 +1405,7 @@ const Editor: React.FC<EditorProps> = ({
               disabled={state.loading || !canRunCurrentEditor}
               title={runButtonTitle}
             >
-              {runButtonLabel}
+              {resolvedRunButtonLabel}
             </button>
             {headerRightSlot}
           </div>
@@ -1706,7 +1736,7 @@ const Editor: React.FC<EditorProps> = ({
             Clear (Esc)
           </button>
         </div>
-        <Console stdout={state.output} stderr={state.error} previewUrl={state.previewUrl} />
+        {outputPanelSlot || <Console stdout={state.output} stderr={state.error} previewUrl={state.previewUrl} />}
       </div>
 
       {createFileModal.open && (

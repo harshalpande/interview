@@ -50,6 +50,7 @@ class CompilerApiClient {
         timeoutMs: request.timeoutMs || 5000,
         memoryLimitMb: request.memoryLimitMb || 512,
         livePreviewMode: request.livePreviewMode || false,
+        executionPriority: request.executionPriority || 'REGISTERED_INTERVIEW',
       };
 
       const response = await this.axiosInstance.post<ExecuteResponse>(
