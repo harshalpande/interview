@@ -8,6 +8,8 @@
 - Live collaborative editing (WebSocket updates).
 - Run Java code through a dedicated sandbox service with basic sandboxing (timeout + memory limits).
 - Guided Java/Python question tabs let interviewers reveal one question at a time, candidates freeze completed attempts, and the platform preserves run evidence per question.
+- Preparation Mode lets Java/Python candidates practice Banyan-style questions through a separate MFA-protected flow with a dashboard, refresh-proof timer, repeat-question prevention, and no stored candidate work.
+- Shared question-history tracking prevents repeat question assignment for the same email, skill, experience band, target role, and evaluation style combination across Preparation and AI interview flows, while also spreading assignments across least-used questions or Banyan series for candidates with the same criteria.
 - Sandbox internals now follow a runner-based execution path so additional language runners can be added without changing the external compile/run workflow.
 - Persist sessions and results in H2 (file-based for Docker; file-based local by default).
 
@@ -17,6 +19,8 @@
 - Java/Python Guided Question Tabs with `Show` / `Freeze`, active-tab execution, and question-level run result preservation.
 - AI-generated Java/Python questions are validated before candidate visibility by running the hidden reference solution and its assertions in the sandbox.
 - Banyan Style adds a single evolving Java/Python challenge option where each passed level unlocks a stricter extension of the same problem, while failed frozen levels stop progression and move the interview to evaluation.
+- Preparation Mode reuses Banyan-style question-bank metadata and assertion-based sandbox checks without AI evaluation or a result page. AI is used only to generate and cache missing Banyan question levels.
+- Java/Python AI interview flows now prefer random unused DB questions for the candidate's matching criteria and cache newly validated AI-generated questions back into the question bank.
 - Human-interviewer sessions can use an interviewer-only AI Assistant drawer to draft, review, regenerate, and accept validated questions without exposing the hidden reference solution to the candidate editor. The drawer also presents expected complexity and approximate solve-time guidance for the interviewer.
 - Angular/React editor builds use Warm Watcher Live Preview for fast feedback from persistent framework watchers while preserving strict final result builds.
 - Mandatory pre-interview identity capture for every session, independent of the selected live AV mode.
@@ -40,7 +44,8 @@
   - Spring service logs include trace/span fields and rolling file retention
   - Promtail ships service logs to Loki
   - Grafana provides the `Interview Platform - Logs & Exceptions` dashboard
-  - Backend-owned platform failure alerts email genuine application failures while excluding candidate code errors
+- Backend-owned platform failure alerts email genuine application failures while excluding candidate code errors
+- Sandbox priority separates registered interview executions from lower-priority preparation executions.
 
 ## Shortcomings / Limitations
 
@@ -53,6 +58,8 @@
 - H2 is fine for dev/demo; production would typically use Postgres/MySQL with migrations.
 - Higher-environment Microsoft Exchange SMTP settings are still pending; local/Docker SMTP can be configured with Postmark or another SMTP provider.
 - Platform failure alert dedupe is in-memory in Phase 1. It suppresses repeated same-error emails while the backend is running, but suppression state is reset by backend redeploy/restart.
+- Preparation Mode does not store candidate code, outputs, alerts, or evaluations. This preserves the privacy boundary, but it also means review and replay are intentionally unavailable.
+- Preparation Mode currently seeds a small Java/Python Banyan starter series for the `1-3` experience band; other bands or missing later levels rely on AI generation and are cached into the question bank after generation.
 
 ## Future Enhancements
 

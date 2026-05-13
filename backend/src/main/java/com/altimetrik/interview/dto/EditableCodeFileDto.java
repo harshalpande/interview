@@ -23,6 +23,12 @@ public class EditableCodeFileDto {
     private Boolean submitted;
     private Integer difficultyLevel;
     private Integer idealDurationMinutes;
+    @JsonIgnore
+    private String questionBankId;
+    @JsonIgnore
+    private String questionSeriesId;
+    @JsonIgnore
+    private Integer questionSequenceNumber;
     private String expectedTimeComplexity;
     private String expectedSpaceComplexity;
     private String questionIntegrityNotes;

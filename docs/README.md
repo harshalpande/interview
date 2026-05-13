@@ -17,6 +17,22 @@ This repo contains a small interview platform:
 - AI-interviewer interviews create an internal `AI Interviewer` participant and send secure access only to the candidate.
 - Token expiry and authentication failure states are terminal and hide the Result action until a session has truly ended.
 
+## Preparation Mode
+
+- Preparation Mode is separate from interview sessions and is available from the top-right `More` menu. It supports Java and Python only.
+- The Preparation dashboard registers candidates, sends candidate access plus a one-time passcode immediately, and shows access/timer/question progress without storing candidate code, execution output, alerts, evaluations, solutions, or result pages.
+- Candidates must accept a Preparation-specific disclaimer before passcode verification. The disclaimer presents independent-work expectations, do's and don'ts, monitored integrity controls, and the editor shortcuts available during Preparation Mode.
+- Preparation access and passcodes expire after 72 hours. The dashboard can resend a one-time passcode up to two times for a candidate who has not started. `@altimetrik.com` email IDs can register multiple times; external email IDs are limited to two registrations before a six-month cooldown from the latest existing attempt.
+- Preparation Mode stores only the minimum control data required for access, passcode delivery, dashboard visibility, timer resume, repeat-question prevention, and next-question selection. Current question ID, assigned question IDs, status, and timer timestamps are persisted; candidate work is not.
+- Questions are selected from Banyan-only question series. Level 1 starts with an existing method that must be corrected through validation checks. Level 2+ stays in the same series and extends the same problem with one additional requirement.
+- Candidate-facing Preparation questions must not expose hints, line-level repair guidance, or comments that identify the bug or correction. Generated questions are instructed to match the candidate's experience band and target role.
+- Question reuse is controlled by a shared candidate question history keyed by email, skill, experience band, target role, and evaluation style. For the same candidate combination, the platform strictly avoids questions already assigned before. Across different candidates with the same criteria, it prefers the least-used matching question or Banyan series and randomly selects only within that least-used group.
+- Before any Preparation question is shown, the backend validates that the starter checks are present, the hidden reference solution contains those checks, and the reference solution passes in the sandbox. If a banked question fails this validation it is skipped/deactivated; if AI generation is needed, the backend retries generation and stores only a validated question for reuse. AI is not used for candidate evaluation.
+- The candidate receives a 60-minute overall preparation timer plus a separate 20-minute countdown for each question. Both timers enter a high-visibility animated warning state at 120 seconds remaining. If validation passes, the candidate submits and the next Banyan level appears in the same editor tab. If either timer expires, the preparation attempt ends, the workspace is frozen, and the candidate is redirected to the configured Altimetrik home page.
+- Preparation Mode shows the current question's run-attempt count to the candidate. The count increments only when the candidate runs the program; loading starter code and submitting a passed level do not increment it.
+- Preparation editor alerts such as timer, run errors, copy/paste, drag/drop, and tab switch are shown in the browser only and are intentionally not persisted. The backend rejects run/submit requests if starter validation checks are removed or changed.
+- Preparation executions are sent to the Java/Python sandbox with low priority so registered interview executions are processed first under load.
+
 ## AI Interviewer Foundation
 
 - AI mode is additive. Existing human-to-human interviews remain the default and continue to use the same guided-question and feedback workflow.
@@ -39,6 +55,7 @@ This repo contains a small interview platform:
 - Candidate disclaimers explicitly warn that changing, removing, or weakening problem statements, validation code, or assert statements is recorded as a question-integrity issue and may be treated as suspicious during evaluation. Result integrity is shown as `Healthy: TRUE` or `Healthy: FALSE`; false results include the validation assertions that changed or disappeared.
 - AI question generation, solution evaluation, and final recommendation now receive a backend-owned Question Policy/Rubric Engine v1 package. Phase 1 stores these rules in Java classes, including the curated Banyan problem-family pool; a future migration should move technology policies, concept coverage, forbidden capabilities, family selection rules, and rubric weights into DB/admin-managed tables.
 - If the external AI provider is unavailable or rate-limited, the backend falls back to a persisted Java/Python question bank instead of blocking the candidate. The seeded bank contains 100 entries across Java and Python with difficulty level, starter code, validation assertions, expected complexity, concepts, and reference solution metadata; fallback selection avoids previously used questions and varies by session.
+- Java/Python AI question selection is DB-first for reusable matches. The backend first looks for active questions matching skill, experience band, target role, evaluation style, and unused candidate history; it then prefers the least-used questions/series for that same criteria. If no fresh DB question exists, AI generates a validated question and the backend caches it into the question bank for later reuse.
 - The Result workspace shows question difficulty, expected complexity, question-integrity notes, execution evidence, per-question AI evaluation, and the final AI recommendation. When an AI interview or AI-assisted human interview ends, the backend attempts to persist the final AI recommendation automatically; if the provider is unavailable, a conservative metrics-based recommendation is stored for mandatory human review.
 - Human-interviewer results keep AI recommendation and interviewer recommendation as separate result tabs/status cards. Long Code-tab metric cards can be expanded for full review without relying on tiny embedded scrollbars.
 
@@ -268,3 +285,14 @@ REACT_APP_PUBLIC_ORIGIN=http://alti-karat.com:3000
 - `docker compose build backend` now compiles the backend source inside the Docker build itself, which helps prevent stale local JAR files from being deployed accidentally.
 - Your bind-mounted DB files are only deleted if you delete the Windows folder contents (or change the mount path).
 - Frontend result previews are stored as final immutable artifacts under the bind-mounted storage root before the live frontend workspace is cleaned up.
+
+## Run On AWS Instance
+
+Use the AWS-specific compose file and environment template when deploying all services on a cloud instance:
+
+```bash
+cp .env.aws.example .env.aws
+docker compose --env-file .env.aws -f docker-compose.aws.yml up -d --build
+```
+
+The AWS environment uses Linux bind mounts under `/opt/interview` by default and expects `APP_PUBLIC_ORIGIN` plus the same email/AI settings from `.env` to be filled in `.env.aws`. See `docs/aws-deployment.md` for the full setup checklist.

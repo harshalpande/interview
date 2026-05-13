@@ -51,6 +51,12 @@ public class CodeFile {
 
     private Integer idealDurationMinutes;
 
+    private String questionBankId;
+
+    private String questionSeriesId;
+
+    private Integer questionSequenceNumber;
+
     @Column(columnDefinition = "TEXT")
     private String originalProblemStatement;
 

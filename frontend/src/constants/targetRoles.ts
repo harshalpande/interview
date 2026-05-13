@@ -1,0 +1,50 @@
+import type { TechnologySkill } from '../types/session';
+
+export const TARGET_ROLES_BY_TECHNOLOGY: Record<TechnologySkill, string[]> = {
+  JAVA: [
+    'Junior Java Developer',
+    'Java Developer',
+    'Senior Java Developer',
+    'Backend Java Engineer',
+    'Spring Boot Developer',
+    'Java Microservices Engineer',
+    'Lead Java Engineer',
+    'Java Technical Architect',
+  ],
+  PYTHON: [
+    'Junior Python Developer',
+    'Python Developer',
+    'Senior Python Developer',
+    'Backend Python Engineer',
+    'Django Developer',
+    'FastAPI Developer',
+    'Python Automation Engineer',
+    'Lead Python Engineer',
+  ],
+  ANGULAR: [
+    'Junior Angular Developer',
+    'Angular Developer',
+    'Senior Angular Developer',
+    'Frontend Angular Engineer',
+    'Angular UI Engineer',
+    'Angular Enterprise Developer',
+    'Lead Angular Engineer',
+  ],
+  REACT: [
+    'Junior React Developer',
+    'React Developer',
+    'Senior React Developer',
+    'Frontend React Engineer',
+    'React UI Engineer',
+    'React TypeScript Developer',
+    'Lead React Engineer',
+  ],
+  SQL: [
+    'SQL Developer',
+    'Database Developer',
+    'Data Analyst',
+    'Data Engineer',
+    'Backend SQL Engineer',
+    'Senior SQL Developer',
+  ],
+};

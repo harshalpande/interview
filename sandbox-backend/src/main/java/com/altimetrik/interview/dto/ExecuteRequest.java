@@ -1,6 +1,7 @@
 package com.altimetrik.interview.dto;
 
 import com.altimetrik.interview.enums.ExecutionLanguage;
+import com.altimetrik.interview.enums.ExecutionPriority;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -20,11 +21,14 @@ public class ExecuteRequest {
     private String activeFilePath;
     private long timeoutMs;
     private long memoryLimitMb;
+    @Builder.Default
+    private ExecutionPriority executionPriority = ExecutionPriority.REGISTERED_INTERVIEW;
 
     public ExecuteRequest(String sourceCode) {
         this.sourceCode = sourceCode;
         this.language = ExecutionLanguage.JAVA;
         this.timeoutMs = DEFAULT_TIMEOUT_MS;
         this.memoryLimitMb = DEFAULT_MEMORY_LIMIT_MB;
+        this.executionPriority = ExecutionPriority.REGISTERED_INTERVIEW;
     }
 }

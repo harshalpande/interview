@@ -58,6 +58,18 @@ flowchart LR
 - When `IN_APP` AV is selected, the session also uses WebRTC signaling for the built-in media panel.
 - When `EXTERNAL` AV is selected, the coding session remains focused on the editor and session controls while live audio/video is handled outside the platform.
 
+### Preparation Mode
+- Preparation Mode is a parallel flow under `/api/preparation` and does not create an interview session or result page.
+- The dashboard creates `preparation_attempt` records with name, email, skill, experience band, target role, access/passcode expiry, disclaimer acceptance timestamp, resend count, timer state, current question ID, and status. Candidate code, solutions, execution output, alerts, and evaluation results are not stored.
+- Registration sends a 72-hour link plus OTP. The candidate must accept the Preparation Mode disclaimer before passcode verification. External email IDs can create only two preparation attempts before a six-month cooldown from the latest existing attempt; `@altimetrik.com` registrations are unlimited.
+- `question_series` groups Banyan questions into reusable sequences. `interview_question_bank` rows now carry series ID, sequence number, Banyan level, evaluation style, experience band, problem family, starter type, and source metadata so the selector can enforce Banyan-only progression.
+- Level 1 selection requires `starterType=BUG_FIX`; Level 2+ selection stays in the same series and loads the next sequence. Before a Preparation question is served, the backend validates that the starter checks are present, the hidden reference solution contains those checks, and the reference solution passes in `sandbox-backend`. Invalid banked questions are skipped/deactivated. If the next sequence does not exist, the backend calls `ai-service` to generate only that missing Banyan level, retries failed generations, persists only a validated question in the question bank, and then serves it. Candidate-facing Preparation content is sanitized so hints, bug-location comments, and line-level repair guidance are not shown.
+- `preparation_question_assignment` stores assigned question IDs per candidate so later attempts avoid serving the same question again while still avoiding storage of candidate work.
+- `candidate_question_history` is the cross-flow repeat-prevention and freshness ledger. It stores only assignment metadata keyed by candidate email, skill, experience band, target role, and evaluation style, then records question ID, series ID, source flow, and source ID. It is used by both Preparation Mode and Java/Python AI interview question selection.
+- Question timers are refresh-proof through persisted started/expires timestamps. A timer expiry marks the attempt ended without saving code or execution output.
+- Candidate run/submit calls execute validation checks in `sandbox-backend`; submit advances only when the sandbox run succeeds. Candidate-triggered run calls increment `executeAttemptCount` on the active `preparation_question_assignment`, while system loading and final submit validation do not. The backend rejects run/submit requests if starter validation checks are removed or changed. AI evaluation is intentionally not used in Preparation Mode.
+- Preparation Mode has two countdowns: a 60-minute overall preparation window computed from OTP verification time, and a 20-minute per-question window stored on the attempt. Both timers switch to an animated critical state at 120 seconds remaining. Expiry of either window calls the preparation expiry endpoint, marks the attempt expired, closes the active question assignment, shows the dashboard status as `Ended`, freezes the candidate workspace, and redirects the candidate to the configured Altimetrik home page.
+
 ### AI Service
 - AI orchestration is separated into `ai-service/`, a Spring Boot WebFlux service.
 - The core backend remains the source of truth for sessions, participants, code files, run results, feedback, and human override.
@@ -82,6 +94,7 @@ flowchart LR
 - Human-interviewer accepted AI drafts reuse the same `code_files` tab model and store private reference-solution metadata, so the candidate/editor receives the question only and the result page can still review question evidence.
 - Candidate disclaimers make the same rule explicit before entry: changing, removing, or weakening problem statements, validation code, or assert statements is recorded as a question-integrity issue and may be treated as suspicious. Integrity output is intentionally boolean-style (`Healthy: TRUE` / `Healthy: FALSE`) with changed validation details when unhealthy.
 - Provider-unavailable fallback uses the `interview_question_bank` table. Startup seeding creates 100 Java/Python entries and the backend selects a technology/difficulty-appropriate unused question when Gemini/OpenAI is unavailable, varying selection by session and avoiding already used question content.
+- Java/Python AI question selection now checks the reusable question bank before calling AI. Matching is scoped to technology, evaluation style, experience band, and target role; questions already assigned to the same candidate for that combination are excluded; the selector prefers the least-used questions globally for standard mode and least-used series for Banyan Level 1, then randomizes within the least-used group. Valid AI-generated questions are cached back into `interview_question_bank` with question-bank/series metadata so later interviews can reuse them.
 
 ### Compile & Run
 - Java/Python interviews support Guided Question Tabs. The interviewer can prepare future hidden tabs at any time while the candidate works on the current active tab.
@@ -94,6 +107,7 @@ flowchart LR
 - `sandbox-backend` routes execution through `SandboxExecutionService -> LanguageRunner -> JavaRunner/PythonRunner`.
 - The runner writes source to a temp directory, executes inside the isolated sandbox process, and returns stdout/stderr/compile errors to the backend.
 - Backend stores the latest run evidence per Java/Python question tab so the Result Workspace can review each question independently.
+- Preparation Mode sends Java/Python execution requests with `executionPriority=PREPARATION`. Regular interview executions default to `REGISTERED_INTERVIEW`. The sandbox uses a priority queue so queued interview executions are handled before queued preparation executions.
 
 ### Frontend Workspace Build & Preview
 - Angular and React interviews use `sandbox-frontend`.
@@ -127,6 +141,8 @@ flowchart LR
 ## Persistence
 
 - H2 is used for sessions, participants, tokens, code state, run results, and feedback.
+- Preparation Mode persists minimal control records in `preparation_attempt`, `preparation_question_assignment`, `question_series`, and `interview_question_bank` metadata. It intentionally does not persist candidate code, run output, alerts, AI evaluation, or result pages.
+- `candidate_question_history` persists cross-flow question assignment metadata only. It does not store answers, code, output, alerts, or evaluation.
 - Java/Python Guided Question Tabs reuse `code_files` for tab metadata and `run_results` for per-question execution evidence.
 - Guided Question Tab state is stored as plain boolean/integer/timestamp metadata on `code_files` (`enabledForCandidate`, `activeQuestion`, `submitted`, `idealDurationMinutes`, `candidateStartedAt`, `submittedAt`, `solveDurationSeconds`, and `executeAttemptCount`), not as database enums.
 - Enum-backed entity fields use `EnumType.STRING`; local/Docker H2 startup runs an enum-column repair pass that converts known enum columns to `VARCHAR` to avoid stale H2 enum allowed-value errors after enum changes.

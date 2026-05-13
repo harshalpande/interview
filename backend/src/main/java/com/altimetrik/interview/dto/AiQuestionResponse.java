@@ -20,6 +20,9 @@ public class AiQuestionResponse {
     private String difficulty;
     private Integer difficultyLevel;
     private Integer idealDurationMinutes;
+    private String questionBankId;
+    private String questionSeriesId;
+    private Integer questionSequenceNumber;
     private String referenceSolution;
     private String expectedTimeComplexity;
     private String expectedSpaceComplexity;
